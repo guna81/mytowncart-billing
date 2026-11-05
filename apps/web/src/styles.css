@@ -1,0 +1,31 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+@import "tailwindcss";
+
+/* Receipt/invoice printing: the app renders the printable document into
+   .print-area (see src/print/PrintView.tsx); when a print job is active the
+   body gets .printing, the app shell hides and only the document shows —
+   both on screen (as a preview) and on paper. */
+body.printing .app-shell {
+  display: none;
+}
+.print-area {
+  display: none;
+}
+body.printing .print-area {
+  display: block;
+}
+
+@media print {
+  @page {
+    margin: 6mm;
+  }
+  .print-area.receipt-58 {
+    width: 46mm;
+  }
+  .print-area.receipt-80 {
+    width: 72mm;
+  }
+  .print-area.a4-invoice {
+    width: 100%;
+  }
+}

@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Builds
+dist/
+build/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+
+# Local env / secrets — never commit real values
+.env
+.env.*
+!.env.sample
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+
+# Logs
+*.log

@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: Apache-2.0
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.os }}${{ matrix.required && '' || ' (informational)' }}
+    runs-on: ${{ matrix.os }}
+    # Only Windows is a supported platform in v1 (D11). macOS and Linux run
+    # the full pipeline so breakage is caught early, but a failure there does
+    # not block a release until the owner marks that OS supported (O6).
+    continue-on-error: ${{ !matrix.required }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            required: true
+          - os: macos-latest
+            required: false
+          - os: ubuntu-latest
+            required: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies (Tauri + WebKitGTK)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev \
+            libappindicator3-dev librsvg2-dev patchelf xvfb
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests (TS)
+        run: pnpm test
+
+      - name: Build web UI
+        run: pnpm build
+
+      - name: Rust tests (migrations runner, keychain validation)
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --locked
+
+      - name: Build desktop app
+        run: pnpm desktop:build
+
+      - name: Smoke test — app launches and stays up (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a tooling/scripts/smoke-app.sh apps/desktop/src-tauri/target/release/mytowncart-billing
+
+      - name: Smoke test — app launches and stays up (macOS)
+        if: runner.os == 'macOS'
+        run: tooling/scripts/smoke-app.sh apps/desktop/src-tauri/target/release/mytowncart-billing

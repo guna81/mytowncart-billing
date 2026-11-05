@@ -1,0 +1,24 @@
+{
+  "name": "mytowncart-billing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "build": "pnpm --filter @mytowncart-billing/web build",
+    "desktop:dev": "pnpm --filter @mytowncart-billing/desktop dev",
+    "desktop:build": "pnpm --filter @mytowncart-billing/desktop build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1"
+  }
+}
