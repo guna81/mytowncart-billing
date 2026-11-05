@@ -9,8 +9,9 @@ point of sale (POS) app.
 
 Everyday billing uses a local SQLite database on the shop's computer. Connect a
 MyTownCart account to publish your product catalog and synchronize marketplace
-orders and stock when online.
+orders and stock when online. Visit the [MyTownCart platform](https://mytowncart.com).
 
+[MyTownCart platform](https://mytowncart.com) ·
 [Installation](#installing-a-release-build) ·
 [Features](#billing-and-inventory-features) ·
 [Getting started](#getting-started-with-your-shop) ·
@@ -26,7 +27,7 @@ orders and stock when online.
 - [Linux — Debian / Ubuntu (64-bit)](https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-linux-x64.deb)
 - [Linux — AppImage (64-bit)](https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-linux-x64.AppImage)
 
-**Downloads become available after the first release using this workflow is published.**
+**Version 0.1.0 is available:** [first public release](https://github.com/guna81/mytowncart-billing/releases/tag/v0.1.0).
 macOS and Linux are community builds; a failed platform build may have no download.
 See [all releases](https://github.com/guna81/mytowncart-billing/releases) for available
 installers and `checksums-<platform>.txt` files. Builds are unsigned; read the
@@ -49,7 +50,7 @@ installers and `checksums-<platform>.txt` files. Builds are unsigned; read the
 
 ## Getting started with your shop
 
-1. Install a desktop build when available on the
+1. Install a desktop build from the
    [GitHub Releases page](https://github.com/guna81/mytowncart-billing/releases),
    or follow the [developer setup](#developer-setup) to build from source.
 2. Open the app and enter your shop name, GST settings, and invoice prefix.
@@ -203,6 +204,7 @@ For code contributions, read the [contribution guide](CONTRIBUTING.md).
 - [Encrypted backup and restore](docs/BACKUP.md)
 - [MyTownCart marketplace synchronization](docs/SYNC.md)
 - [Architecture](docs/ARCHITECTURE.md) and [data model](docs/DATA-MODEL.md)
+- [Releases, direct downloads, and publishing](docs/RELEASING.md)
 - [Developer guide](docs/DEVELOPING.md)
 - [Logo and brand assets](docs/BRANDING.md)
 

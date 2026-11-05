@@ -124,14 +124,9 @@ with its golden in the same commit.
 
 ## Releasing
 
-1. Bump `version` in `apps/desktop/src-tauri/tauri.conf.json` (and
-   `APP_VERSION` in `packages/core/src/index.ts` if it is displayed).
-2. Run `pnpm lint && pnpm typecheck && pnpm test && pnpm build` and
-   `cargo test`.
-3. Tag `v<version>` and push the tag (owner only — CI won't tag for you).
-   `.github/workflows/release.yml` builds installers on all three OSes,
-   attaches them plus SHA-256 checksums to a **draft** release.
-4. Verify the Windows installer and the checksums, then publish the draft.
+Follow the [release and download runbook](RELEASING.md) for version updates,
+tagging, installer verification, and publishing a draft GitHub Release. It also
+lists the stable download filenames and the first public release.
 
 Builds are unsigned until certs exist (`DECISIONS.md` B0-6). Updater
 artifacts are off (`B4-2`); turning them on needs an updater signing key

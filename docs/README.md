@@ -8,6 +8,7 @@
 | [`BACKUP.md`](BACKUP.md) | `.mtcb` format, recovery key and key wrapping, backup and restore steps, limits |
 | [`SCREENS.md`](SCREENS.md) | every screen, keyboard shortcuts, workflows, reports, print preview |
 | [`DEVELOPING.md`](DEVELOPING.md) | setup, commands, browser-only mode, where to change things, tests, releasing |
+| [`RELEASING.md`](RELEASING.md) | published versions, installer downloads, checksums, and the release runbook |
 | [`PILOT.md`](PILOT.md) | operator runbook: day-one checklist, daily routine, troubleshooting, diagnostics |
 
 Related, at the repo root:
