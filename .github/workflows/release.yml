@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build-installers:
-    name: ${{ matrix.platform }}${{ matrix.required && '' || ' (community build)' }}
+    name: ${{ matrix.platform }}${{ matrix.required == true && ' (supported)' || ' (community build)' }}
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ !matrix.required }}
     strategy:
@@ -71,6 +71,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: apps/desktop
+          tauriScript: pnpm exec tauri
           args: --target ${{ matrix.target }}
           tagName: ${{ github.ref_name }}
           releaseName: "MyTownCart Billing ${{ github.ref_name }}"

@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   build:
-    name: ${{ matrix.os }}${{ matrix.required && '' || ' (informational)' }}
+    name: ${{ matrix.os }}${{ matrix.required == true && ' (supported)' || ' (informational)' }}
     runs-on: ${{ matrix.os }}
     # Only Windows is a supported platform in v1 (D11). macOS and Linux run
     # the full pipeline so breakage is caught early, but a failure there does
