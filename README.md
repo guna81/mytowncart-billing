@@ -1,24 +1,65 @@
-# MyTownCart Billing
+# MyTownCart Billing — Free, Open-Source Billing Software for Local Shops
 
-![MyTownCart Billing](apps/web/public/brand/logo-full.svg)
+![MyTownCart Billing — desktop POS, invoicing, and inventory software](apps/web/public/brand/logo-full.svg)
 
-Free, open-source desktop billing for local shops — Windows-first — with a
-one-click **Publish to MyTownCart** for the shop's catalog.
+**MyTownCart Billing** is free, open-source desktop billing software for local
+shops and small retail businesses. Create bills and GST invoices, scan barcodes,
+print receipts, track inventory, and review sales reports from a Windows-first
+point of sale (POS) app.
 
-- **Status:** B1–B5 complete in code — POS/billing, items with photos, stock,
-  bills, customers, reports; MyTownCart publishing (catalog, photos, order
-  pull, stock push/pull and reconcile); encrypted local-folder backups;
-  opt-in diagnostics. The browser-only dev mode runs against an in-memory
-  repository (data resets on reload). See `DECISIONS.md` and the roadmap
-  (`my-town-cart` repo, `roadmap/billing-integration.md`).
-- **Stack:** Tauri 2 (Rust) + React + TypeScript (strict) + SQLite, pnpm
-  monorepo.
-- **Docs:** start at [`docs/`](docs/README.md) — architecture, data model,
-  marketplace sync, backup format, screens, developer guide, pilot runbook.
-- **Licence:** Apache-2.0 (see `LICENSE`, `NOTICE`). The name is a trademark
-  — forks must rename (see `TRADEMARK.md`).
+Everyday billing uses a local SQLite database on the shop's computer. Connect a
+MyTownCart account to publish your product catalog and synchronize marketplace
+orders and stock when online.
 
-## Layout
+[Installation](#installing-a-release-build) ·
+[Features](#billing-and-inventory-features) ·
+[Getting started](#getting-started-with-your-shop) ·
+[Developer setup](#developer-setup) ·
+[Documentation](docs/README.md) ·
+[Releases](https://github.com/guna81/mytowncart-billing/releases)
+
+## Billing and inventory features
+
+| Feature | What you can do |
+| --- | --- |
+| Retail POS billing | Add products by barcode or name, change quantities, and hold and resume bills. |
+| GST invoices | Configure GST registration, tax-inclusive or tax-exclusive prices, and CGST/SGST calculations. |
+| Receipt and invoice printing | Preview and print 58 mm or 80 mm receipts and A4 invoices through the system print dialog. |
+| Payment recording | Record cash, UPI, card, and customer credit sales, with cash-change calculations. |
+| Product catalog | Manage prices, MRP, barcodes, categories, units, product photos, and CSV imports and exports. |
+| Inventory management | Track stock levels, low-stock indicators, adjustments, and stock movement history. |
+| Customer records | Store customer names and phone numbers and associate customers with bills and credit sales. |
+| Sales reports | Review daily sales, item sales, and payment-mode totals, with CSV downloads. |
+| MyTownCart integration | Publish products and photos, pull online orders, and reconcile marketplace stock. |
+| Encrypted backups | Back up and restore local data using encrypted files in a folder you choose. |
+
+## Getting started with your shop
+
+1. Install a desktop build when available on the
+   [GitHub Releases page](https://github.com/guna81/mytowncart-billing/releases),
+   or follow the [developer setup](#developer-setup) to build from source.
+2. Open the app and enter your shop name, GST settings, and invoice prefix.
+3. Add products with prices, barcodes, and opening stock, or import a product CSV.
+4. Scan or search for products, record the payment, and save and print your first bill.
+5. Set up encrypted backups in Settings and keep your recovery key somewhere safe.
+
+See the [shop operator guide](docs/PILOT.md) for setup and daily routines, or the
+[screen and workflow guide](docs/SCREENS.md) for detailed instructions.
+
+## Project status and supported platforms
+
+The code includes POS billing, products, inventory, customers, reports,
+MyTownCart publishing and sync, encrypted local backups, and opt-in diagnostics.
+Implementation decisions and limitations are recorded in [DECISIONS.md](DECISIONS.md).
+
+**Windows is the supported platform for v1.** macOS and Linux builds are
+unsupported community builds. The browser-only development mode uses an
+in-memory repository and resets its data on reload; use the desktop app for
+persistent shop data, backups, and marketplace sync.
+
+The app uses **Tauri 2, Rust, React, TypeScript, and SQLite** in a pnpm monorepo.
+
+## Repository structure
 
 ```
 packages/
@@ -35,7 +76,7 @@ tooling/                 CI/release helpers (e.g. the launch smoke test)
 .github/workflows/       ci.yml (OS matrix), release.yml (tag → installers)
 ```
 
-## Develop
+## Developer setup
 
 Prereqs: Node ≥ 20, pnpm (via corepack), Rust stable. On Linux also the
 Tauri system deps (see `ci.yml`).
@@ -82,7 +123,7 @@ an owner task), so upgrading means downloading the new installer from the
 releases page and running it; the SQLite database is kept in the app-data dir
 and survives the reinstall.
 
-## CI
+## Continuous integration and releases
 
 `.github/workflows/ci.yml` runs lint, typecheck, unit tests, `cargo test`,
 `tauri build`, and a launch smoke test on a Windows/macOS/Linux matrix.
@@ -91,7 +132,7 @@ Linux jobs run the same pipeline but are informational (`continue-on-error`)
 until O6. Pushing a `v*` tag runs `release.yml`, which attaches all
 installers + SHA-256 checksums to one GitHub Release via `tauri-action`.
 
-## Using it
+## Billing shortcuts and operator guides
 
 - **Shop operator:** follow [`docs/PILOT.md`](docs/PILOT.md) (day-one setup,
   daily routine, troubleshooting, turning on diagnostics).
@@ -105,3 +146,51 @@ installers + SHA-256 checksums to one GitHub Release via `tauri-action`.
 
 See `CONTRIBUTING.md` for ground rules and [`docs/DEVELOPING.md`](docs/DEVELOPING.md)
 for the developer guide.
+
+## Frequently asked questions
+
+### Is MyTownCart Billing free and open source?
+
+Yes. The software is available under the [Apache License 2.0](LICENSE).
+The MyTownCart name and logo are subject to the [trademark policy](TRADEMARK.md);
+forks must use a different name.
+
+### Can I use the billing software offline?
+
+The desktop app stores bills, products, customers, and stock locally in SQLite
+for everyday billing. Publishing to MyTownCart and synchronizing marketplace
+orders and stock require an internet connection and a linked account.
+
+### Does it support GST billing and receipt printers?
+
+The app supports shop GST settings, item tax rates, CGST/SGST calculations,
+and A4 invoices. It prints 58 mm and 80 mm receipts through the operating
+system's print dialog. See the [printing guide](docs/SCREENS.md#printer-tips).
+
+### Does recording a UPI or card payment process the payment?
+
+The POS records the payment mode on a bill. Complete the payment using your
+usual UPI or card payment service.
+
+### Where can I report a bug or request a feature?
+
+Open an issue in the
+[GitHub issue tracker](https://github.com/guna81/mytowncart-billing/issues).
+For code contributions, read the [contribution guide](CONTRIBUTING.md).
+
+## Documentation
+
+- [Documentation overview](docs/README.md)
+- [Shop setup and pilot guide](docs/PILOT.md)
+- [POS screens, invoicing, inventory, and printing](docs/SCREENS.md)
+- [Encrypted backup and restore](docs/BACKUP.md)
+- [MyTownCart marketplace synchronization](docs/SYNC.md)
+- [Architecture](docs/ARCHITECTURE.md) and [data model](docs/DATA-MODEL.md)
+- [Developer guide](docs/DEVELOPING.md)
+- [Logo and brand assets](docs/BRANDING.md)
+
+## License and trademarks
+
+Copyright and license details are in [LICENSE](LICENSE) and [NOTICE](NOTICE).
+MyTownCart and MyTownCart Billing are project trademarks. See
+[TRADEMARK.md](TRADEMARK.md) before distributing a renamed fork or using the brand.
