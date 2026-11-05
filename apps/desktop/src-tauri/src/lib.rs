@@ -413,9 +413,21 @@ fn restore_snapshot(state: tauri::State<'_, AppState>, gz: Vec<u8>) -> Result<St
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
+pub fn run(driver_script: Option<String>) {
+    let script = driver_script.map(std::sync::Arc::new);
     tauri::Builder::default()
-        .setup(|app| {
+        .on_page_load(move |win, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                if let Some(script) = script.as_deref() {
+                    let js = format!("{script};setTimeout(() => window.__MTC_DRIVER__.run(), 1500);");
+                    match win.eval(&js) {
+                        Ok(()) => eprintln!("[driver] evaluated {} chars", js.len()),
+                        Err(e) => eprintln!("[driver] eval failed: {e}"),
+                    }
+                }
+            }
+        })
+        .setup(move |app| {
             let data_dir = app
                 .path()
                 .app_data_dir()
