@@ -18,6 +18,20 @@ orders and stock when online.
 [Documentation](docs/README.md) ·
 [Releases](https://github.com/guna81/mytowncart-billing/releases)
 
+## Download MyTownCart Billing
+
+- [Windows (64-bit)](https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-windows-x64.exe)
+- [macOS — Apple Silicon (M1 and newer)](https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-macos-arm64.dmg)
+- [macOS — Intel](https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-macos-x64.dmg)
+- [Linux — Debian / Ubuntu (64-bit)](https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-linux-x64.deb)
+- [Linux — AppImage (64-bit)](https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-linux-x64.AppImage)
+
+**Downloads become available after the first release using this workflow is published.**
+macOS and Linux are community builds; a failed platform build may have no download.
+See [all releases](https://github.com/guna81/mytowncart-billing/releases) for available
+installers and `checksums-<platform>.txt` files. Builds are unsigned; read the
+[installation notes](#installing-a-release-build) before installing.
+
 ## Billing and inventory features
 
 | Feature | What you can do |
@@ -113,7 +127,7 @@ default; when enabled they stay on the machine and redact keys and tokens.
 Builds are **unsigned** (zero-spend, see `DECISIONS.md` B0-6):
 
 - **Windows (supported):** SmartScreen will warn — click **More info → Run
-  anyway**. Verify the installer against `checksums-windows-latest.txt`
+  anyway**. Verify the installer against `checksums-windows-x64.txt`
   attached to the release (`certutil -hashfile <file> SHA256`).
 - **macOS / Linux (unsupported community builds):** macOS needs
   right-click → Open; no support promise until roadmap decision O6.
@@ -130,7 +144,10 @@ and survives the reinstall.
 **Windows is required** (the only supported platform in v1, D11); macOS and
 Linux jobs run the same pipeline but are informational (`continue-on-error`)
 until O6. Pushing a `v*` tag runs `release.yml`, which attaches all
-installers + SHA-256 checksums to one GitHub Release via `tauri-action`.
+installers + SHA-256 checksums to one draft GitHub Release via `tauri-action`.
+The workflow also uploads fixed filenames for the download links above, with
+separate Apple Silicon and Intel macOS builds. Review the completed builds and
+publish the draft from GitHub Releases to make downloads public.
 
 ## Billing shortcuts and operator guides
 
