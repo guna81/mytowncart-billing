@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyTownCart Billing — Free, Open-Source Billing Software for Local Shops</title>
+<meta name="description" content="Free, open-source desktop billing software for local shops: POS billing, GST invoices, barcode scanning, receipt printing, inventory, and sales reports.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://guna81.github.io/mytowncart-billing/">
+<meta property="og:title" content="MyTownCart Billing — Free billing software for local shops">
+<meta property="og:description" content="Free, open-source POS, GST invoicing and inventory for small retail shops. Works offline.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://guna81.github.io/mytowncart-billing/">
+<style>
+:root{--bg:#fff;--fg:#0f172a;--muted:#475569;--card:#f8fafc;--line:#e2e8f0;--brand:#1d4ed8;--brand-fg:#fff;--accent:#10b981}
+@media (prefers-color-scheme:dark){:root{--bg:#0b1220;--fg:#e5e7eb;--muted:#94a3b8;--card:#111a2e;--line:#1e293b;--brand:#3b82f6;--accent:#34d399}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--brand)}
+.wrap{max-width:1040px;margin:0 auto;padding:0 20px}
+header{border-bottom:1px solid var(--line)}
+header .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-top:14px;padding-bottom:14px;flex-wrap:wrap}
+header img{height:44px;display:block}
+.light-logo{display:none}
+@media (prefers-color-scheme:dark){.dark-logo{display:none}.light-logo{display:block}}
+nav a{margin-left:18px;text-decoration:none;color:var(--muted);font-size:15px}
+nav a:hover{color:var(--fg)}
+.hero{padding:72px 0 56px;text-align:center}
+.hero h1{font-size:clamp(2rem,5vw,3.25rem);line-height:1.15;margin:0 0 16px;letter-spacing:-.02em}
+.hero p{max-width:640px;margin:0 auto 28px;color:var(--muted);font-size:1.125rem}
+.btn{display:inline-block;padding:12px 22px;border-radius:10px;background:var(--brand);color:var(--brand-fg);text-decoration:none;font-weight:600;margin:4px}
+.btn.alt{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.note{font-size:14px;color:var(--muted);margin-top:14px}
+section{padding:48px 0}
+h2{font-size:1.75rem;margin:0 0 8px;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:0 0 28px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px}
+.card h3{margin:0 0 6px;font-size:1.05rem}
+.card p{margin:0;color:var(--muted);font-size:15px}
+.dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.dl a{display:block;padding:14px 16px;border:1px solid var(--line);border-radius:12px;text-decoration:none;color:var(--fg);background:var(--card)}
+.dl a small{display:block;color:var(--muted)}
+.dl a:hover{border-color:var(--brand)}
+ol{padding-left:20px}
+ol li{margin-bottom:8px}
+details{border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:10px;background:var(--card)}
+summary{cursor:pointer;font-weight:600}
+details p{color:var(--muted);margin:8px 0 0}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px}
+pre{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto}
+footer{border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:14px}
+footer a{color:var(--muted)}
+</style>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"MyTownCart Billing","applicationCategory":"BusinessApplication","operatingSystem":"Windows, macOS, Linux","offers":{"@type":"Offer","price":"0","priceCurrency":"INR"},"license":"https://www.apache.org/licenses/LICENSE-2.0","url":"https://guna81.github.io/mytowncart-billing/","codeRepository":"https://github.com/guna81/mytowncart-billing"}
+</script>
+</head>
+<body>
+<header><div class="wrap">
+  <a href="./" aria-label="MyTownCart Billing home">
+    <img class="dark-logo" src="brand/logo-full.svg" alt="MyTownCart Billing">
+    <img class="light-logo" src="brand/logo-full-light.svg" alt="MyTownCart Billing">
+  </a>
+  <nav>
+    <a href="#features">Features</a>
+    <a href="#download">Download</a>
+    <a href="#start">Get started</a>
+    <a href="#faq">FAQ</a>
+    <a href="https://github.com/guna81/mytowncart-billing">GitHub</a>
+  </nav>
+</div></header>
+
+<main>
+<div class="wrap">
+  <div class="hero">
+    <h1>Free billing software for your local shop</h1>
+    <p>Open-source desktop POS with GST invoices, barcode scanning, receipt printing, inventory and sales reports. Works offline on your own computer.</p>
+    <a class="btn" href="#download">Download free</a>
+    <a class="btn alt" href="https://github.com/guna81/mytowncart-billing">View on GitHub</a>
+    <p class="note">Version 0.1.0 · Apache 2.0 licensed · Windows is the supported platform</p>
+  </div>
+
+  <section id="features">
+    <h2>Everything a small shop needs</h2>
+    <p class="sub">Bill fast at the counter and keep stock under control.</p>
+    <div class="grid">
+      <div class="card"><h3>Retail POS billing</h3><p>Add products by barcode or name, change quantities, and hold and resume bills.</p></div>
+      <div class="card"><h3>GST invoices</h3><p>GST registration, tax-inclusive or exclusive prices, and CGST/SGST calculations.</p></div>
+      <div class="card"><h3>Receipts &amp; invoices</h3><p>Preview and print 58 mm or 80 mm receipts and A4 invoices.</p></div>
+      <div class="card"><h3>Payment recording</h3><p>Record cash, UPI, card and customer credit sales, with change calculation.</p></div>
+      <div class="card"><h3>Product catalog</h3><p>Prices, MRP, barcodes, categories, units, photos, and CSV import/export.</p></div>
+      <div class="card"><h3>Inventory</h3><p>Stock levels, low-stock indicators, adjustments, and movement history.</p></div>
+      <div class="card"><h3>Customer records</h3><p>Names and phone numbers linked to bills and credit sales.</p></div>
+      <div class="card"><h3>Sales reports</h3><p>Daily sales, item sales, and payment-mode totals with CSV downloads.</p></div>
+      <div class="card"><h3>Encrypted backups</h3><p>Back up and restore to a folder you choose, protected by a recovery key.</p></div>
+      <div class="card"><h3>MyTownCart integration</h3><p>Optionally publish products and sync marketplace orders and stock when online.</p></div>
+    </div>
+  </section>
+
+  <section id="download">
+    <h2>Download</h2>
+    <p class="sub">Latest release, straight from GitHub.</p>
+    <div class="dl">
+      <a href="https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-windows-x64.exe"><strong>Windows</strong><small>64-bit installer · supported</small></a>
+      <a href="https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-macos-arm64.dmg"><strong>macOS</strong><small>Apple Silicon (M1 and newer) · community build</small></a>
+      <a href="https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-macos-x64.dmg"><strong>macOS</strong><small>Intel · community build</small></a>
+      <a href="https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-linux-x64.deb"><strong>Linux .deb</strong><small>Debian / Ubuntu · community build</small></a>
+      <a href="https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-linux-x64.AppImage"><strong>Linux AppImage</strong><small>64-bit · community build</small></a>
+      <a href="https://github.com/guna81/mytowncart-billing/releases"><strong>All releases</strong><small>Installers and SHA-256 checksums</small></a>
+    </div>
+    <p class="note">Builds are unsigned, so your OS will warn you on first launch.</p>
+    <details><summary>Windows install notes</summary><p>SmartScreen will warn: click <strong>More info → Run anyway</strong>. Verify the installer against <code>checksums-windows-x64.txt</code> from the release with <code>certutil -hashfile &lt;file&gt; SHA256</code>.</p></details>
+    <details><summary>macOS install notes</summary><p>Drag the app to Applications, then if Gatekeeper says it is damaged, remove the quarantine attribute:</p>
+<pre>xattr -cr "/Applications/MyTownCart Billing.app"</pre></details>
+    <details><summary>Linux install notes</summary><p>AppImage: <code>chmod +x MyTownCart-Billing-linux-x64.AppImage</code> and run it. Debian/Ubuntu: <code>sudo dpkg -i MyTownCart-Billing-linux-x64.deb</code>.</p></details>
+  </section>
+
+  <section id="start">
+    <h2>Get started in five steps</h2>
+    <ol>
+      <li>Install the app from the download section above.</li>
+      <li>Enter your shop name, GST settings, and invoice prefix.</li>
+      <li>Add products with prices, barcodes and opening stock, or import a CSV.</li>
+      <li>Scan or search products, record the payment, then save and print your first bill.</li>
+      <li>Set up encrypted backups in Settings and keep your recovery key somewhere safe.</li>
+    </ol>
+    <p>Guides: <a href="https://github.com/guna81/mytowncart-billing/blob/main/docs/PILOT.md">shop operator guide</a> · <a href="https://github.com/guna81/mytowncart-billing/blob/main/docs/SCREENS.md">screens &amp; workflows</a> · <a href="https://github.com/guna81/mytowncart-billing/blob/main/docs/BACKUP.md">backups</a> · <a href="https://github.com/guna81/mytowncart-billing/blob/main/docs/SYNC.md">marketplace sync</a></p>
+    <p>Handy shortcuts: <code>F2</code> scan field · <code>F4</code> hold bill · <code>F9</code> save &amp; print.</p>
+  </section>
+
+  <section id="privacy">
+    <h2>Your data stays on your computer</h2>
+    <p>Bills and customer data live in a local SQLite database on the shop's PC. Only catalog fields, stock changes and order pulls leave the machine, and only if you link a MyTownCart account. Backups are encrypted before they are written, and diagnostics are off by default.</p>
+  </section>
+
+  <section id="faq">
+    <h2>FAQ</h2>
+    <details><summary>Is it really free and open source?</summary><p>Yes, under the Apache License 2.0. The MyTownCart name and logo are covered by a trademark policy, so forks must use a different name.</p></details>
+    <details><summary>Does it work offline?</summary><p>Yes. Everyday billing uses local storage. Publishing and syncing with MyTownCart need internet and a linked account.</p></details>
+    <details><summary>Does it support GST and receipt printers?</summary><p>Yes: shop GST settings, item tax rates, CGST/SGST, A4 invoices, and 58 mm / 80 mm receipts via the system print dialog.</p></details>
+    <details><summary>Does recording UPI or card process the payment?</summary><p>No. The POS records the payment mode on the bill; complete the payment with your usual UPI or card service.</p></details>
+    <details><summary>Found a bug or want a feature?</summary><p>Open an issue on the <a href="https://github.com/guna81/mytowncart-billing/issues">GitHub issue tracker</a>.</p></details>
+  </section>
+</div>
+</main>
+
+<footer><div class="wrap">
+  © MyTownCart · Licensed under <a href="https://github.com/guna81/mytowncart-billing/blob/main/LICENSE">Apache 2.0</a> ·
+  <a href="https://github.com/guna81/mytowncart-billing/blob/main/TRADEMARK.md">Trademark policy</a> ·
+  <a href="https://mytowncart.com">MyTownCart platform</a> ·
+  <a href="https://github.com/guna81/mytowncart-billing">Source</a>
+</div></footer>
+</body>
+</html>

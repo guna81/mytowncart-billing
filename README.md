@@ -11,6 +11,7 @@ Everyday billing uses a local SQLite database on the shop's computer. Connect a
 MyTownCart account to publish your product catalog and synchronize marketplace
 orders and stock when online. Visit the [MyTownCart platform](https://mytowncart.com).
 
+[Website](https://guna81.github.io/mytowncart-billing/) ·
 [MyTownCart platform](https://mytowncart.com) ·
 [Installation](#installing-a-release-build) ·
 [Features](#billing-and-inventory-features) ·
@@ -130,8 +131,17 @@ Builds are **unsigned** (zero-spend, see `DECISIONS.md` B0-6):
 - **Windows (supported):** SmartScreen will warn — click **More info → Run
   anyway**. Verify the installer against `checksums-windows-x64.txt`
   attached to the release (`certutil -hashfile <file> SHA256`).
-- **macOS / Linux (unsupported community builds):** macOS needs
-  right-click → Open; no support promise until roadmap decision O6.
+- **macOS (unsupported community build):** Apple Gatekeeper blocks unsigned apps
+  with *"MyTownCart Billing is damaged and can't be opened"*. To open it:
+  1. Open the `.dmg` and drag **MyTownCart Billing.app** to your **Applications** folder.
+  2. Open **Terminal** and remove the quarantine attribute:
+     ```sh
+     xattr -cr "/Applications/MyTownCart Billing.app"
+     ```
+  3. Launch **MyTownCart Billing** normally from Applications or Spotlight.
+- **Linux (unsupported community build):** For AppImage, grant execution permission:
+  `chmod +x MyTownCart-Billing-linux-x64.AppImage` and run. For Debian/Ubuntu, install
+  with `sudo dpkg -i MyTownCart-Billing-linux-x64.deb`.
 
 Auto-update is not enabled yet (`DECISIONS.md` B4-2 — updater signing keys are
 an owner task), so upgrading means downloading the new installer from the
