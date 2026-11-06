@@ -210,6 +210,24 @@ describe("listCategories", () => {
     ]);
     expect(calls[0].url.startsWith(`${WEB}/api/v1/products/categories/`)).toBe(true);
   });
+
+  it("falls back to apiBaseUrl origin when webBaseUrl points to the mytowncart.com frontend", async () => {
+    const { fetch, calls } = fakeFetch([
+      [
+        /categories\/\?page=1/,
+        () => jsonResponse({ has_next: false, results: [{ id: "c1", name: "Snacks", parent: null, is_active: true }] }),
+      ],
+    ]);
+    const custom = new MyTownCartConnector({
+      apiBaseUrl: "https://api.mytowncart.com/api/v1/integrations",
+      webBaseUrl: "https://mytowncart.com",
+      appVersion: "0.1.0",
+      fetch,
+    });
+    const cats = await custom.listCategories();
+    expect(cats).toEqual([{ id: "c1", name: "Snacks", parentId: null }]);
+    expect(calls[0].url.startsWith("https://api.mytowncart.com/api/v1/products/categories/")).toBe(true);
+  });
 });
 
 function publishItem(overrides: Partial<PublishItem> = {}): PublishItem {

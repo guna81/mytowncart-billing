@@ -27,7 +27,7 @@ import type {
 
 /** Production defaults; the seller never types these (D12: no custom domain). */
 export const DEFAULT_API_BASE_URL = "https://api.mytowncart.com/api/v1/integrations";
-export const DEFAULT_WEB_BASE_URL = "https://mytowncart.com";
+export const DEFAULT_WEB_BASE_URL = "https://api.mytowncart.com";
 export const CONNECT_SCOPES: readonly Scope[] = ["catalog", "stock", "orders"];
 const BULK_CHUNK = 100;
 
@@ -252,9 +252,10 @@ export class MyTownCartConnector implements MarketplaceConnector {
 
   async listCategories(): Promise<MarketplaceCategory[]> {
     const out: MarketplaceCategory[] = [];
+    const base = this.categoriesBaseUrl();
     for (let page = 1; page <= 50; page++) {
       const categoriesUrl =
-        `${this.opts.webBaseUrl.replace(/\/+$/, "")}/api/v1/products/categories/` +
+        `${base.replace(/\/+$/, "")}/api/v1/products/categories/` +
         `?page=${page}&page_size=100`;
       const body = await this.categoriesPage(categoriesUrl);
       for (const c of body.results) {
@@ -265,6 +266,17 @@ export class MyTownCartConnector implements MarketplaceConnector {
       if (!body.has_next) break;
     }
     return out;
+  }
+
+  private categoriesBaseUrl(): string {
+    // If webBaseUrl is explicitly set to a custom test or dev origin (not the consumer site), use it.
+    if (this.opts.webBaseUrl && !this.opts.webBaseUrl.includes("mytowncart.com")) {
+      return this.opts.webBaseUrl;
+    }
+    // Categories endpoint lives on the API backend (/api/v1/products/categories/).
+    return this.opts.apiBaseUrl
+      .replace(/\/integrations\/?$/, "")
+      .replace(/\/api\/v1\/?$/, "");
   }
 
   private async categoriesPage(url: string): Promise<CategoryPage> {
