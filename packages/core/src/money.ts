@@ -121,3 +121,112 @@ export function parsePaise(text: string): number | null {
   const paise = whole * 100 + frac;
   return m[1] === "-" ? -paise : paise;
 }
+
+const ONES = [
+  "",
+  "One",
+  "Two",
+  "Three",
+  "Four",
+  "Five",
+  "Six",
+  "Seven",
+  "Eight",
+  "Nine",
+  "Ten",
+  "Eleven",
+  "Twelve",
+  "Thirteen",
+  "Fourteen",
+  "Fifteen",
+  "Sixteen",
+  "Seventeen",
+  "Eighteen",
+  "Nineteen",
+];
+
+const TENS = [
+  "",
+  "",
+  "Twenty",
+  "Thirty",
+  "Forty",
+  "Fifty",
+  "Sixty",
+  "Seventy",
+  "Eighty",
+  "Ninety",
+];
+
+function twoDigitsToWords(n: number): string {
+  if (n < 20) return ONES[n]!;
+  const ten = Math.floor(n / 10);
+  const rem = n % 10;
+  return rem === 0 ? TENS[ten]! : `${TENS[ten]!}-${ONES[rem]!}`;
+}
+
+function threeDigitsToWords(n: number): string {
+  const hundred = Math.floor(n / 100);
+  const rem = n % 100;
+  if (hundred === 0) return twoDigitsToWords(rem);
+  if (rem === 0) return `${ONES[hundred]!} Hundred`;
+  return `${ONES[hundred]!} Hundred and ${twoDigitsToWords(rem)}`;
+}
+
+function integerToWordsIndian(num: number): string {
+  if (num === 0) return "Zero";
+  const parts: string[] = [];
+  const crores = Math.floor(num / 10_000_000);
+  const remCrores = num % 10_000_000;
+  const lakhs = Math.floor(remCrores / 100_000);
+  const remLakhs = remCrores % 100_000;
+  const thousands = Math.floor(remLakhs / 1000);
+  const remainder = remLakhs % 1000;
+
+  if (crores > 0) {
+    parts.push(`${integerToWordsIndian(crores)} Crore`);
+  }
+  if (lakhs > 0) {
+    parts.push(`${twoDigitsToWords(lakhs)} Lakh`);
+  }
+  if (thousands > 0) {
+    parts.push(`${twoDigitsToWords(thousands)} Thousand`);
+  }
+  if (remainder > 0) {
+    parts.push(threeDigitsToWords(remainder));
+  }
+  return parts.join(" ");
+}
+
+/**
+ * Convert integer paise to Indian currency words format.
+ * Examples:
+ *   125050 -> "One Thousand Two Hundred and Fifty Rupees and Fifty Paise Only"
+ *   10000000 -> "One Lakh Rupees Only"
+ *   75 -> "Seventy-Five Paise Only"
+ *   0 -> "Zero Rupees Only"
+ */
+export function amountInWords(paise: number): string {
+  assertSafeInteger(paise, "paise");
+  if (paise === 0) return "Zero Rupees Only";
+  const negative = paise < 0;
+  const abs = Math.abs(paise);
+  const rupees = Math.floor(abs / 100);
+  const p = abs % 100;
+
+  const parts: string[] = [];
+  if (negative) parts.push("Minus");
+
+  if (rupees > 0) {
+    parts.push(`${integerToWordsIndian(rupees)} Rupees`);
+  }
+
+  if (p > 0) {
+    if (rupees > 0) parts.push("and");
+    parts.push(`${twoDigitsToWords(p)} Paise`);
+  }
+
+  parts.push("Only");
+  return parts.join(" ");
+}
+

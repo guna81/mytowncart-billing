@@ -14,9 +14,17 @@ export type MovementReason =
   | "purchase"
   | "import"
   | "online_order"
-  | "order_cancel";
+  | "order_cancel"
+  | "return";
 
-export type MovementRefType = "bill" | "adjustment" | "import" | "sync";
+export type MovementRefType =
+  | "bill"
+  | "adjustment"
+  | "import"
+  | "sync"
+  | "credit_note"
+  | "purchase"
+  | "stock_audit";
 
 export interface MovementDescriptor {
   itemId: number;

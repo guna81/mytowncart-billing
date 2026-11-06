@@ -64,6 +64,8 @@ export interface Item {
   imageUploadedAt: string | null;
   /** Fingerprint of price/stock as last observed on the marketplace. */
   remoteHash: string | null;
+  hsnCode: string;
+  costPricePaise: number;
   updatedAt: string;
 }
 
@@ -161,14 +163,63 @@ export interface ItemInput {
   /** Applied only when creating a new item. */
   openingStockMilli: number;
   isActive: boolean;
+  hsnCode?: string;
+  costPricePaise?: number;
 }
 
 export interface Customer {
   id: number;
   name: string;
   phone: string;
+  gstin: string;
+  address: string;
+  loyaltyPoints: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CustomerInput {
+  id?: number;
+  name: string;
+  phone: string;
+  gstin?: string;
+  address?: string;
+}
+
+export interface CustomerPayment {
+  id: number;
+  customerId: number;
+  amountPaise: number;
+  mode: PaymentMode | "bank";
+  notes: string;
+  createdAt: string;
+}
+
+export interface CustomerPaymentInput {
+  customerId: number;
+  amountPaise: number;
+  mode: PaymentMode | "bank";
+  notes?: string;
+  createdAt?: string;
+}
+
+export interface CustomerLedgerEntry {
+  id: string;
+  type: "credit_bill" | "payment";
+  date: string;
+  refNumber: string;
+  description: string;
+  debitPaise: number;
+  creditPaise: number;
+  balancePaise: number;
+}
+
+export interface CustomerLedgerSummary {
+  customer: Customer;
+  totalCreditBilledPaise: number;
+  totalPaidPaise: number;
+  outstandingBalancePaise: number;
+  entries: CustomerLedgerEntry[];
 }
 
 export interface BillSummary {
@@ -181,6 +232,9 @@ export interface BillSummary {
   subtotalPaise: number;
   taxPaise: number;
   totalPaise: number;
+  discountPaise: number;
+  roundOffPaise: number;
+  notes: string;
   createdAt: string;
   voidedAt: string | null;
   voidReason: string | null;
@@ -197,6 +251,8 @@ export interface BillLineRow {
   taxRateBp: number;
   taxPaise: number;
   totalPaise: number;
+  discountPaise: number;
+  hsnCode: string;
 }
 
 export interface PaymentRow {
@@ -227,4 +283,241 @@ export interface ImportRowOutcome {
   ok: boolean;
   id?: number;
   error?: string;
+}
+
+// --- Phase 2: Daily-Driver types -------------------------------------------
+
+export interface CreditNoteLine {
+  id: number;
+  creditNoteId: number;
+  itemId: number | null;
+  nameSnapshot: string;
+  qtyMilli: number;
+  unitPricePaise: number;
+  taxRateBp: number;
+  taxPaise: number;
+  totalPaise: number;
+  hsnCode: string;
+}
+
+export interface CreditNote {
+  id: number;
+  billId: number;
+  number: string;
+  fy: string;
+  reason: string;
+  subtotalPaise: number;
+  taxPaise: number;
+  totalPaise: number;
+  createdAt: string;
+  lines: CreditNoteLine[];
+}
+
+export interface NewCreditNotePayload {
+  billId: number;
+  reason: string;
+  createdAt: string;
+  lines: {
+    itemId: number | null;
+    nameSnapshot: string;
+    qtyMilli: number;
+    unitPricePaise: number;
+    taxRateBp: number;
+    taxPaise: number;
+    totalPaise: number;
+    hsnCode?: string;
+  }[];
+}
+
+export interface Supplier {
+  id: number;
+  name: string;
+  phone: string;
+  gstin: string;
+  address: string;
+  createdAt: string;
+}
+
+export interface SupplierInput {
+  id?: number;
+  name: string;
+  phone?: string;
+  gstin?: string;
+  address?: string;
+}
+
+export interface PurchaseLine {
+  id: number;
+  purchaseId: number;
+  itemId: number | null;
+  nameSnapshot: string;
+  qtyMilli: number;
+  unitCostPaise: number;
+  taxRateBp: number;
+  taxPaise: number;
+  totalPaise: number;
+}
+
+export interface Purchase {
+  id: number;
+  supplierId: number;
+  supplierName?: string;
+  invoiceNo: string;
+  invoiceDate: string;
+  subtotalPaise: number;
+  taxPaise: number;
+  totalPaise: number;
+  status: string;
+  createdAt: string;
+  lines: PurchaseLine[];
+}
+
+export interface NewPurchasePayload {
+  supplierId: number;
+  invoiceNo: string;
+  invoiceDate: string;
+  status?: string;
+  createdAt: string;
+  lines: {
+    itemId: number | null;
+    nameSnapshot: string;
+    qtyMilli: number;
+    unitCostPaise: number;
+    taxRateBp: number;
+  }[];
+}
+
+export type UserRole = "owner" | "cashier";
+
+export interface User {
+  id: number;
+  name: string;
+  role: UserRole;
+  pin: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface UserInput {
+  id?: number;
+  name: string;
+  role: UserRole;
+  pin: string;
+  isActive?: boolean;
+}
+
+export interface AuditLog {
+  id: number;
+  userId: number | null;
+  userName?: string;
+  action: string;
+  details: string;
+  createdAt: string;
+}
+
+export interface AuditLogInput {
+  userId?: number | null;
+  action: string;
+  details?: string;
+  createdAt?: string;
+}
+
+export interface StockDiscrepancyInput {
+  itemId: number;
+  physicalCountMilli: number;
+  reason?: string;
+  createdAt?: string;
+}
+
+// --- Phase 3: Smart-Merchant Types -----------------------------------------
+
+export interface ItemBatch {
+  id: number;
+  itemId: number;
+  batchNo: string;
+  mfgDate: string | null;
+  expiryDate: string;
+  costPricePaise: number;
+  mrpPaise: number;
+  stockMilli: number;
+  createdAt: string;
+}
+
+export interface BatchInput {
+  id?: number;
+  itemId: number;
+  batchNo: string;
+  mfgDate?: string | null;
+  expiryDate: string;
+  costPricePaise: number;
+  mrpPaise: number;
+  stockMilli: number;
+  createdAt?: string;
+}
+
+export interface LoyaltyTransaction {
+  id: number;
+  customerId: number;
+  billId: number | null;
+  pointsDelta: number;
+  reason: string;
+  createdAt: string;
+}
+
+export interface ItemBarcode {
+  id: number;
+  itemId: number;
+  barcode: string;
+  packQtyMilli: number;
+  label: string;
+}
+
+export interface BarcodeLookupResult {
+  itemId: number;
+  itemName: string;
+  barcode: string;
+  packQtyMilli: number;
+  pricePaise: number;
+}
+
+export interface DayEndClosure {
+  id: number;
+  closureDate: string;
+  userId: number | null;
+  userName?: string;
+  openingCashPaise: number;
+  cashSalesPaise: number;
+  creditReceivedPaise: number;
+  cashRefundsPaise: number;
+  expectedCashPaise: number;
+  actualCashPaise: number;
+  variancePaise: number;
+  totalBillsCount: number;
+  totalSalesPaise: number;
+  notes: string;
+  createdAt: string;
+}
+
+export interface DayEndClosureInput {
+  closureDate: string;
+  userId?: number | null;
+  openingCashPaise: number;
+  cashSalesPaise: number;
+  creditReceivedPaise: number;
+  cashRefundsPaise: number;
+  expectedCashPaise: number;
+  actualCashPaise: number;
+  variancePaise: number;
+  totalBillsCount: number;
+  totalSalesPaise: number;
+  notes?: string;
+  createdAt?: string;
+}
+
+export interface DayEndExpectedCash {
+  cashSalesPaise: number;
+  creditReceivedPaise: number;
+  cashRefundsPaise: number;
+  totalBillsCount: number;
+  totalSalesPaise: number;
 }

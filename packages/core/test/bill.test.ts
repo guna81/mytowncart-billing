@@ -64,6 +64,48 @@ describe("computeBill", () => {
     expect(bill.totalPaise).toBe(0);
     expect(bill.lines).toHaveLength(0);
   });
+
+  it("applies line discounts and bill discounts proportionally", () => {
+    // 2 lines: line 1 has price 1000 (taxRate 0), line 2 has price 2000 (taxRate 0).
+    // line 1 line-discount: 100 -> net 900.
+    // line 2 line-discount: 0 -> net 2000.
+    // total provisional = 2900.
+    // Bill discount: 290 paise.
+    // Line 1 share: 90 paise. Total discount for line 1 = 190, net = 810.
+    // Line 2 share: 200 paise. Total discount for line 2 = 200, net = 1800.
+    // Total = 2610.
+    const bill = computeBill(
+      [
+        line({ itemId: 1, unitPricePaise: 1000, taxRateBp: 0, discountPaise: 100 }),
+        line({ itemId: 2, unitPricePaise: 2000, taxRateBp: 0, discountPaise: 0 }),
+      ],
+      { pricesIncludeTax: false, billDiscountPaise: 290 },
+    );
+    expect(bill.discountPaise).toBe(390);
+    expect(bill.lines[0]!.discountPaise).toBe(190);
+    expect(bill.lines[1]!.discountPaise).toBe(200);
+    expect(bill.totalPaise).toBe(2610);
+  });
+
+  it("applies round-off to nearest rupee when enabled", () => {
+    // total 1050 paise (₹10.50) -> rounds up to 1100 (+50 paise)
+    const billUp = computeBill([line({ unitPricePaise: 1000, taxRateBp: 500 })], {
+      pricesIncludeTax: false,
+      roundOff: true,
+    });
+    expect(billUp.unroundedTotalPaise).toBe(1050);
+    expect(billUp.roundOffPaise).toBe(50);
+    expect(billUp.totalPaise).toBe(1100);
+
+    // total 1040 paise (₹10.40) -> rounds down to 1000 (-40 paise)
+    const billDown = computeBill([line({ unitPricePaise: 1000, taxRateBp: 400 })], {
+      pricesIncludeTax: false,
+      roundOff: true,
+    });
+    expect(billDown.unroundedTotalPaise).toBe(1040);
+    expect(billDown.roundOffPaise).toBe(-40);
+    expect(billDown.totalPaise).toBe(1000);
+  });
 });
 
 describe("validateBill", () => {
@@ -118,6 +160,19 @@ describe("validateBill", () => {
         { mode: "cash", amountPaise: 1000 },
         { mode: "upi", amountPaise: 50 },
       ]),
+    ).toEqual([]);
+  });
+
+  it("enforces customer requirement for credit sales", () => {
+    const bill = computeBill([line()], { pricesIncludeTax: false }); // 1050
+    // Credit without customer -> error
+    expect(
+      validateBill(bill, [{ mode: "credit", amountPaise: 1050 }]),
+    ).toContain("payment.credit_requires_customer");
+
+    // Credit with customer -> accepted
+    expect(
+      validateBill(bill, [{ mode: "credit", amountPaise: 1050 }], { customerId: 42 }),
     ).toEqual([]);
   });
 

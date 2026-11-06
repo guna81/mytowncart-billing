@@ -49,6 +49,21 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "catalog_sync",
         sql: include_str!("../migrations/0005_catalog_sync.sql"),
     },
+    Migration {
+        version: 6,
+        name: "phase1_pilot",
+        sql: include_str!("../migrations/0006_phase1_pilot.sql"),
+    },
+    Migration {
+        version: 7,
+        name: "phase2_daily_driver",
+        sql: include_str!("../migrations/0007_phase2_daily_driver.sql"),
+    },
+    Migration {
+        version: 8,
+        name: "phase3_growth",
+        sql: include_str!("../migrations/0008_phase3_growth.sql"),
+    },
 ];
 
 #[derive(Debug, Error)]

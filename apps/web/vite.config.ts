@@ -6,6 +6,6 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   // Tauri expects a fixed dev port.
-  server: { port: 5173, strictPort: true },
+  server: { port: 5173 },
   clearScreen: false,
 });

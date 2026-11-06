@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   addPaise,
   allocatePaise,
+  amountInWords,
   formatPaise,
   mulBps,
   mulQtyMilli,
@@ -134,5 +135,25 @@ describe("parsePaise", () => {
     for (const v of [0, 1, 99, 100, 1234, -1234, 9_999_999]) {
       expect(parsePaise(formatPaise(v))).toBe(v);
     }
+  });
+});
+
+describe("amountInWords", () => {
+  it("converts zero and simple amounts", () => {
+    expect(amountInWords(0)).toBe("Zero Rupees Only");
+    expect(amountInWords(100)).toBe("One Rupees Only");
+    expect(amountInWords(50)).toBe("Fifty Paise Only");
+    expect(amountInWords(150)).toBe("One Rupees and Fifty Paise Only");
+  });
+
+  it("handles complex amounts with lakhs and crores", () => {
+    expect(amountInWords(125050)).toBe("One Thousand Two Hundred and Fifty Rupees and Fifty Paise Only");
+    expect(amountInWords(10_000_000)).toBe("One Lakh Rupees Only");
+    expect(amountInWords(25_000_000)).toBe("Two Lakh Fifty Thousand Rupees Only");
+    expect(amountInWords(100_000_000)).toBe("Ten Lakh Rupees Only");
+    expect(amountInWords(1_000_000_000)).toBe("One Crore Rupees Only");
+    expect(amountInWords(5_23_45_678_00)).toBe(
+      "Five Crore Twenty-Three Lakh Forty-Five Thousand Six Hundred and Seventy-Eight Rupees Only",
+    );
   });
 });

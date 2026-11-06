@@ -169,6 +169,13 @@ export function ItemsScreen() {
             {t("items.export_csv")}
           </button>
           <Link
+            to="/items/labels"
+            data-testid="items-print-labels"
+            className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50 text-gray-700"
+          >
+            🏷️ Barcode Labels
+          </Link>
+          <Link
             to="/items/new"
             data-testid="items-new"
             className="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
@@ -182,6 +189,7 @@ export function ItemsScreen() {
         <input
           className="w-full max-w-sm rounded border border-gray-300 px-3 py-2 text-sm"
           placeholder={t("items.search_ph")}
+          data-testid="items-search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />

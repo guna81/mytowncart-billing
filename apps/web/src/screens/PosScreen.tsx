@@ -12,9 +12,14 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "re
 import {
   computeBill,
   computeChangePaise,
+  computeLoyaltyPointsEarned,
+  computeLoyaltyRedemption,
+  DEFAULT_LOYALTY_CONFIG,
   financialYearFor,
   formatPaise,
   formatQty,
+  isBatchExpired,
+  isBatchNearExpiry,
   isoDateOf,
   localIsoTimestamp,
   parsePaise,
@@ -25,13 +30,17 @@ import {
   type PaymentMode,
 } from "@mytowncart-billing/core";
 import type { HeldBill, Item } from "@mytowncart-billing/storage";
+import { UpiQrCode } from "../components/UpiQrCode";
 import { t, type I18nKey } from "../i18n";
 import { getRepository } from "../lib/repository";
 import { useAppStore } from "../store/appStore";
 
-type Line = BillLineInput & { key: string };
+type Line = BillLineInput & { key: string; batchNo?: string; expiryDate?: string };
 
 let lineSeq = 1;
+
+const errMsg = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
 
 export function PosScreen() {
   const profile = useAppStore((s) => s.profile);
@@ -43,14 +52,30 @@ export function PosScreen() {
 
   const [lines, setLines] = useState<Line[]>([]);
   const [query, setQuery] = useState("");
-  const [mode, setMode] = useState<PaymentMode>("cash");
+  const [suggestions, setSuggestions] = useState<Item[]>([]);
+  const [highlightIndex, setHighlightIndex] = useState(-1);
+
+  const [mode, setMode] = useState<PaymentMode | "split">("cash");
   const [tendered, setTendered] = useState("");
+  const [splitAmounts, setSplitAmounts] = useState<{
+    cash: string;
+    upi: string;
+    card: string;
+    credit: string;
+  }>({ cash: "", upi: "", card: "", credit: "" });
+
+  const [billDiscountStr, setBillDiscountStr] = useState("");
+  const [roundOffEnabled, setRoundOffEnabled] = useState(true);
+
   const [customerId, setCustomerId] = useState<number | null>(null);
+  const [customerLoyaltyBalance, setCustomerLoyaltyBalance] = useState(0);
+  const [redeemedPoints, setRedeemedPoints] = useState(0);
   const [customers, setCustomers] = useState<{ id: number; name: string }[]>([]);
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const scanRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const focusScan = useCallback(() => {
     scanRef.current?.focus();
@@ -58,7 +83,11 @@ export function PosScreen() {
   }, []);
 
   const refreshHeld = useCallback(async () => {
-    setHeld(await getRepository().listHeldBills());
+    try {
+      setHeld(await getRepository().listHeldBills());
+    } catch (err: unknown) {
+      setNotice({ kind: "error", text: errMsg(err) });
+    }
   }, []);
 
   useEffect(() => {
@@ -69,29 +98,127 @@ export function PosScreen() {
     void refreshHeld();
   }, [focusScan, refreshHeld]);
 
+  // Load loyalty balance when customer selected
+  useEffect(() => {
+    if (customerId) {
+      void getRepository()
+        .getCustomerLoyaltyBalance(customerId)
+        .then(setCustomerLoyaltyBalance);
+    } else {
+      setCustomerLoyaltyBalance(0);
+      setRedeemedPoints(0);
+    }
+  }, [customerId]);
+
+  // Search-as-you-type suggestions
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setSuggestions([]);
+      setHighlightIndex(-1);
+      return;
+    }
+    let active = true;
+    const timer = setTimeout(() => {
+      void getRepository()
+        .listItems({ search: trimmed, activeOnly: true })
+        .then((items) => {
+          if (active) {
+            setSuggestions(items.slice(0, 8));
+            setHighlightIndex(-1);
+          }
+        });
+    }, 120);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [query]);
+
+  const manualDiscountPaise = Math.max(0, parsePaise(billDiscountStr) ?? 0);
+  const subtotalPaise = lines.reduce(
+    (s, l) => s + Math.floor((l.qtyMilli * l.unitPricePaise) / 1000),
+    0,
+  );
+  const loyaltyRedemption = computeLoyaltyRedemption(
+    customerLoyaltyBalance,
+    redeemedPoints,
+    subtotalPaise,
+    DEFAULT_LOYALTY_CONFIG.pointValuePaise,
+    DEFAULT_LOYALTY_CONFIG.minPointsToRedeem,
+  );
+  const loyaltyDiscountPaise = loyaltyRedemption.discountPaise;
+  const billDiscountPaise = manualDiscountPaise + loyaltyDiscountPaise;
+
   const bill = computeBill(lines, {
     pricesIncludeTax: profile?.pricesIncludeTax ?? true,
+    billDiscountPaise,
+    roundOff: roundOffEnabled,
   });
 
-  const paidPaise = (() => {
-    if (mode === "cash") return parsePaise(tendered) ?? (tendered === "" ? 0 : -1);
-    return bill.totalPaise;
-  })();
-  const payments =
-    mode === "cash"
-      ? tendered === ""
-        ? [{ mode, amountPaise: bill.totalPaise }]
-        : [{ mode, amountPaise: Math.max(0, paidPaise) }]
-      : [{ mode, amountPaise: bill.totalPaise }];
-  const change = computeChangePaise(bill, payments);
+  const getComputedPayments = (): { mode: PaymentMode; amountPaise: number }[] => {
+    if (mode === "split") {
+      const pCash = parsePaise(splitAmounts.cash) ?? 0;
+      const pUpi = parsePaise(splitAmounts.upi) ?? 0;
+      const pCard = parsePaise(splitAmounts.card) ?? 0;
+      const pCredit = parsePaise(splitAmounts.credit) ?? 0;
+      const res: { mode: PaymentMode; amountPaise: number }[] = [];
+      if (pCash > 0) res.push({ mode: "cash", amountPaise: pCash });
+      if (pUpi > 0) res.push({ mode: "upi", amountPaise: pUpi });
+      if (pCard > 0) res.push({ mode: "card", amountPaise: pCard });
+      if (pCredit > 0) res.push({ mode: "credit", amountPaise: pCredit });
+      return res;
+    }
+    if (mode === "cash") {
+      const paidPaise = parsePaise(tendered) ?? (tendered === "" ? bill.totalPaise : -1);
+      return [{ mode: "cash", amountPaise: Math.max(0, paidPaise) }];
+    }
+    return [{ mode, amountPaise: bill.totalPaise }];
+  };
 
-  const addItem = (item: Item, qtyMilli = 1000) => {
+  const payments = getComputedPayments();
+  const change = mode === "cash" ? computeChangePaise(bill, payments) : 0;
+
+  const addItem = async (item: Item, qtyMilli = 1000): Promise<boolean> => {
+    let batchNo: string | undefined = undefined;
+    let expiryDate: string | undefined = undefined;
+
+    try {
+      const batches = await getRepository().listBatchesForItem(item.id);
+      const available = batches.filter((b) => b.stockMilli > 0);
+      if (available.length > 0) {
+        const earliest = available[0]!;
+        if (isBatchExpired(earliest.expiryDate)) {
+          setNotice({
+            kind: "error",
+            text: `Cannot sell ${item.name}: Batch ${earliest.batchNo} is EXPIRED (${earliest.expiryDate})!`,
+          });
+          return false;
+        }
+        if (isBatchNearExpiry(earliest.expiryDate)) {
+          setNotice({
+            kind: "error",
+            text: `Notice: ${item.name} Batch ${earliest.batchNo} expires soon on ${earliest.expiryDate}.`,
+          });
+        }
+        batchNo = earliest.batchNo;
+        expiryDate = earliest.expiryDate;
+      }
+    } catch {
+      // Continue if no batches
+    }
+
     setLines((current) => {
       const existing = current.findIndex((l) => l.itemId === item.id);
       if (existing >= 0) {
         const next = [...current];
         const line = next[existing]!;
-        next[existing] = { ...line, qtyMilli: line.qtyMilli + qtyMilli };
+        next[existing] = {
+          ...line,
+          qtyMilli: line.qtyMilli + qtyMilli,
+          batchNo: batchNo || line.batchNo,
+          expiryDate: expiryDate || line.expiryDate,
+        };
         return next;
       }
       return [
@@ -104,23 +231,47 @@ export function PosScreen() {
           unitPricePaise: item.pricePaise,
           taxRateBp: item.taxRateBp,
           unitKind: item.unitKind,
+          hsnCode: item.hsnCode || undefined,
+          discountPaise: 0,
+          batchNo,
+          expiryDate,
         },
       ];
     });
+    return true;
+  };
+
+  const pickSuggestion = async (item: Item) => {
+    const ok = await addItem(item);
+    if (ok) {
+      setQuery("");
+      setSuggestions([]);
+      setHighlightIndex(-1);
+      setNotice(null);
+      focusScan();
+    }
   };
 
   const onScan = async (value: string) => {
     const trimmed = value.trim();
     if (!trimmed) return;
     const repo = getRepository();
+    let scanQtyMilli = 1000;
     let item = await repo.findItemByBarcode(trimmed);
+    if (!item) {
+      const multi = await repo.lookupItemByAnyBarcode(trimmed);
+      if (multi) {
+        item = await repo.getItem(multi.itemId);
+        scanQtyMilli = multi.packQtyMilli;
+      }
+    }
     if (!item) {
       const matches = await repo.listItems({ search: trimmed, activeOnly: true });
       if (matches.length === 1) item = matches[0]!;
       else if (matches.length > 1) {
         setNotice({
           kind: "error",
-          text: `${matches.length} items match — type a barcode.`,
+          text: `${matches.length} items match — type a barcode or select from dropdown.`,
         });
         return;
       }
@@ -129,10 +280,14 @@ export function PosScreen() {
       setNotice({ kind: "error", text: t("pos.not_found", { query: trimmed }) });
       return;
     }
-    addItem(item);
-    setNotice(null);
-    setQuery("");
-    focusScan();
+    const ok = await addItem(item, scanQtyMilli);
+    if (ok) {
+      setNotice(null);
+      setQuery("");
+      setSuggestions([]);
+      setHighlightIndex(-1);
+      focusScan();
+    }
   };
 
   const setQty = (key: string, text: string) => {
@@ -143,15 +298,40 @@ export function PosScreen() {
     );
   };
 
+  const stepQty = (key: string, deltaMilli: number) => {
+    setLines((current) =>
+      current.map((l) => {
+        if (l.key !== key) return l;
+        const next = l.qtyMilli + deltaMilli;
+        return next > 0 ? { ...l, qtyMilli: next } : l;
+      }),
+    );
+  };
+
+  const setLineDiscount = (key: string, text: string) => {
+    const parsed = parsePaise(text);
+    setLines((current) =>
+      current.map((l) =>
+        l.key === key ? { ...l, discountPaise: parsed !== null && parsed > 0 ? parsed : 0 } : l,
+      ),
+    );
+  };
+
   const removeLine = (key: string) =>
     setLines((current) => current.filter((l) => l.key !== key));
 
-  const resetBill = () => {
+  const resetBill = (keepNotice = false) => {
     setLines([]);
     setQuery("");
+    setSuggestions([]);
+    setHighlightIndex(-1);
     setTendered("");
+    setSplitAmounts({ cash: "", upi: "", card: "", credit: "" });
+    setBillDiscountStr("");
     setCustomerId(null);
-    setNotice(null);
+    setRedeemedPoints(0);
+    setCustomerLoyaltyBalance(0);
+    if (!keepNotice) setNotice(null);
     setHeldItem(null);
     setHeldError(null);
     focusScan();
@@ -160,7 +340,15 @@ export function PosScreen() {
   const save = async (print: boolean) => {
     if (busy) return;
     setNotice(null);
-    const errors = validateBill(bill, payments);
+
+    // If split mode and credit is used, customer is required
+    const hasCredit = payments.some((p) => p.mode === "credit");
+    if (hasCredit && customerId === null) {
+      setNotice({ kind: "error", text: t("pos.error.credit_requires_customer") });
+      return;
+    }
+
+    const errors = validateBill(bill, payments, { customerId });
     if (errors.length > 0) {
       const first = errors[0]!;
       const message =
@@ -170,7 +358,9 @@ export function PosScreen() {
             ? t("pos.error.overpay_requires_cash")
             : first === "bill.no_lines"
               ? t("pos.error.no_lines")
-              : first;
+              : first === "payment.credit_requires_customer"
+                ? t("pos.error.credit_requires_customer")
+                : first;
       setNotice({ kind: "error", text: message });
       return;
     }
@@ -184,6 +374,8 @@ export function PosScreen() {
         subtotalPaise: bill.subtotalPaise,
         taxPaise: bill.taxPaise,
         totalPaise: bill.totalPaise,
+        discountPaise: bill.discountPaise,
+        roundOffPaise: bill.roundOffPaise,
         createdAt: localIsoTimestamp(now),
         lines: bill.lines.map((l) => ({
           itemId: l.itemId,
@@ -193,80 +385,117 @@ export function PosScreen() {
           taxRateBp: l.taxRateBp,
           taxPaise: l.taxPaise,
           totalPaise: l.totalPaise,
+          discountPaise: l.discountPaise,
+          hsnCode: l.hsnCode,
         })),
         payments,
       });
+
+      // Update loyalty points
+      if (customerId) {
+        const earned = computeLoyaltyPointsEarned(bill.totalPaise, DEFAULT_LOYALTY_CONFIG.earnRatePaise);
+        if (earned > 0) {
+          await getRepository().updateCustomerLoyalty(
+            customerId,
+            earned,
+            created.billId,
+            `Earned on ${created.number}`,
+          );
+        }
+        if (redeemedPoints > 0) {
+          await getRepository().updateCustomerLoyalty(
+            customerId,
+            -redeemedPoints,
+            created.billId,
+            `Redeemed on ${created.number}`,
+          );
+        }
+      }
+
       setNotice({ kind: "ok", text: t("pos.saved", { number: created.number }) });
       // The bill that was resumed (if any) is now a real bill; drop the hold.
       if (heldItem) {
         await getRepository().takeHeldBill(heldItem.id);
         await refreshHeld();
       }
-      resetBill();
+      resetBill(true);
       bumpDataVersion();
       if (print) requestPrint({ billId: created.billId, variant: "receipt-80" });
+    } catch (err: unknown) {
+      setNotice({
+        kind: "error",
+        text: t("pos.error.save_failed", { error: errMsg(err) }),
+      });
     } finally {
       setBusy(false);
     }
   };
 
-  /**
-   * Held bills keep only item ids + quantities: prices, names and the
-   * customer are applied fresh on resume, so a bill parked before a price
-   * change is not silently sold at yesterday's price.
-   */
   const hold = async () => {
     if (lines.length === 0) return;
     setHeldError(null);
-    await getRepository().saveHeldBill({
-      label: `${formatQty(lines.reduce((s, l) => s + l.qtyMilli, 0))} item(s)`,
-      customerId,
-      lines: lines.map((l) => ({ itemId: l.itemId, qtyMilli: l.qtyMilli })),
-    });
-    resetBill();
-    await refreshHeld();
+    try {
+      await getRepository().saveHeldBill({
+        label: `${formatQty(lines.reduce((s, l) => s + l.qtyMilli, 0))} item(s)`,
+        customerId,
+        lines: lines.map((l) => ({ itemId: l.itemId, qtyMilli: l.qtyMilli })),
+      });
+      resetBill();
+      await refreshHeld();
+    } catch (err: unknown) {
+      setNotice({ kind: "error", text: errMsg(err) });
+    }
   };
 
   const resume = async (id: number) => {
     setHeldError(null);
-    const repo = getRepository();
-    const parked = held.find((h) => h.id === id);
-    if (!parked) return;
-    const restored: Line[] = [];
-    const missing: string[] = [];
-    for (const line of parked.lines) {
-      const item = await repo.getItem(line.itemId);
-      if (!item) {
-        missing.push(`#${line.itemId}`);
-        continue;
+    try {
+      const repo = getRepository();
+      const parked = held.find((h) => h.id === id);
+      if (!parked) return;
+      const restored: Line[] = [];
+      const missing: string[] = [];
+      for (const line of parked.lines) {
+        const item = await repo.getItem(line.itemId);
+        if (!item) {
+          missing.push(`#${line.itemId}`);
+          continue;
+        }
+        restored.push({
+          key: `l${lineSeq++}`,
+          itemId: item.id,
+          name: item.name,
+          qtyMilli: line.qtyMilli,
+          unitPricePaise: item.pricePaise,
+          taxRateBp: item.taxRateBp,
+          unitKind: item.unitKind,
+          hsnCode: item.hsnCode || undefined,
+          discountPaise: 0,
+        });
       }
-      restored.push({
-        key: `l${lineSeq++}`,
-        itemId: item.id,
-        name: item.name,
-        qtyMilli: line.qtyMilli,
-        unitPricePaise: item.pricePaise,
-        taxRateBp: item.taxRateBp,
-        unitKind: item.unitKind,
-      });
+      if (restored.length === 0) {
+        setHeldError(t("pos.resume_all_missing"));
+        return;
+      }
+      setLines(restored);
+      setCustomerId(parked.customerId);
+      setHeldItem(parked);
+      if (missing.length > 0) setHeldError(t("pos.resume_partial", { items: missing.join(", ") }));
+      focusScan();
+    } catch (err: unknown) {
+      setNotice({ kind: "error", text: errMsg(err) });
     }
-    if (restored.length === 0) {
-      setHeldError(t("pos.resume_all_missing"));
-      return;
-    }
-    setLines(restored);
-    setCustomerId(parked.customerId);
-    setHeldItem(parked);
-    if (missing.length > 0) setHeldError(t("pos.resume_partial", { items: missing.join(", ") }));
-    focusScan();
   };
 
-  /** Forget a held bill (e.g. the customer left) without loading it. */
   const discardHeld = async (id: number) => {
     if (!window.confirm(t("pos.discard_confirm"))) return;
-    await getRepository().takeHeldBill(id);
-    if (heldItem?.id === id) setHeldItem(null);
-    await refreshHeld();
+    try {
+      await getRepository().takeHeldBill(id);
+      if (heldItem?.id === id) setHeldItem(null);
+      await refreshHeld();
+    } catch (err: unknown) {
+      setNotice({ kind: "error", text: errMsg(err) });
+    }
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
@@ -283,26 +512,81 @@ export function PosScreen() {
   };
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_20rem]" onKeyDown={onKeyDown}>
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_21rem]" onKeyDown={onKeyDown}>
       <div>
-        <div className="mb-3 flex gap-2">
-          <input
-            ref={scanRef}
-            className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm"
-            placeholder={t("pos.scan_ph")}
-            data-testid="pos-scan"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void onScan(query);
-              }
-            }}
-          />
+        <div className="relative mb-3 flex gap-2">
+          <div className="relative flex-1">
+            <input
+              ref={scanRef}
+              className="w-full rounded border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              placeholder={t("pos.scan_ph")}
+              data-testid="pos-scan"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown") {
+                  if (suggestions.length > 0) {
+                    e.preventDefault();
+                    setHighlightIndex((prev) => (prev < suggestions.length - 1 ? prev + 1 : 0));
+                  }
+                } else if (e.key === "ArrowUp") {
+                  if (suggestions.length > 0) {
+                    e.preventDefault();
+                    setHighlightIndex((prev) => (prev > 0 ? prev - 1 : suggestions.length - 1));
+                  }
+                } else if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (highlightIndex >= 0 && suggestions[highlightIndex]) {
+                    pickSuggestion(suggestions[highlightIndex]!);
+                  } else {
+                    void onScan(query);
+                  }
+                } else if (e.key === "Escape") {
+                  setSuggestions([]);
+                  setHighlightIndex(-1);
+                }
+              }}
+            />
+
+            {suggestions.length > 0 ? (
+              <div
+                ref={dropdownRef}
+                data-testid="pos-suggestions"
+                className="absolute left-0 right-0 top-full z-20 mt-1 max-h-60 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg"
+              >
+                {suggestions.map((item, idx) => (
+                  <div
+                    key={item.id}
+                    data-testid={`pos-suggestion-${item.id}`}
+                    className={`flex cursor-pointer items-center justify-between px-3 py-2 text-sm ${
+                      idx === highlightIndex ? "bg-blue-50 text-blue-900" : "hover:bg-gray-50 text-gray-800"
+                    }`}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      pickSuggestion(item);
+                    }}
+                  >
+                    <div>
+                      <p className="font-medium">{item.name}</p>
+                      {item.barcode ? (
+                        <p className="text-xs text-gray-400 font-mono">{item.barcode}</p>
+                      ) : null}
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold text-gray-900">₹{formatPaise(item.pricePaise)}</p>
+                      <p className="text-xs text-gray-500">
+                        {t("items.stock")}: {formatQty(item.stockMilli)}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
           <button
             type="button"
-            className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
+            className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50 shadow-sm"
             data-testid="pos-hold"
             onClick={() => void hold()}
           >
@@ -334,6 +618,7 @@ export function PosScreen() {
                 <th className="px-3 py-2">{t("print.item")}</th>
                 <th className="px-3 py-2 text-right">{t("common.qty")}</th>
                 <th className="px-3 py-2 text-right">{t("common.price")}</th>
+                <th className="px-3 py-2 text-right">{t("pos.line_discount")}</th>
                 <th className="px-3 py-2 text-right">{t("common.total")}</th>
                 <th className="px-3 py-2" />
               </tr>
@@ -342,23 +627,73 @@ export function PosScreen() {
               {bill.lines.map((l, index) => {
                 const line = lines[index]!;
                 return (
-                  <tr key={line.key} className="border-b border-gray-100 last:border-0">
-                    <td className="px-3 py-2 font-medium">{l.name}</td>
+                  <tr key={line.key} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+                    <td className="px-3 py-2">
+                      <div className="font-medium text-gray-900 flex items-center gap-1.5">
+                        <span>{l.name}</span>
+                        <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-500 uppercase">
+                          {line.unitKind === "weight" ? "kg" : line.unitKind === "volume" ? "L" : "pcs"}
+                        </span>
+                      </div>
+                      {l.hsnCode ? (
+                        <div className="text-xs text-gray-400 font-mono">HSN: {l.hsnCode}</div>
+                      ) : null}
+                      {line.batchNo && (
+                        <div className="text-[11px] text-gray-500 font-mono">
+                          Batch: {line.batchNo} {line.expiryDate ? `· Exp: ${line.expiryDate}` : ""}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          type="button"
+                          aria-label="Decrease quantity"
+                          className="flex h-6 w-6 items-center justify-center rounded border border-gray-300 bg-gray-50 text-xs font-bold text-gray-700 hover:bg-gray-100"
+                          onClick={() => stepQty(line.key, -1000)}
+                        >
+                          −
+                        </button>
+                        <input
+                          key={`${line.key}-${l.qtyMilli}`}
+                          className="w-16 rounded border border-gray-300 px-1.5 py-1 text-center text-sm font-medium"
+                          data-testid={`pos-qty-${line.itemId}`}
+                          defaultValue={formatQty(l.qtyMilli)}
+                          onBlur={(e) => setQty(line.key, e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              setQty(line.key, (e.target as HTMLInputElement).value);
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          aria-label="Increase quantity"
+                          className="flex h-6 w-6 items-center justify-center rounded border border-gray-300 bg-gray-50 text-xs font-bold text-gray-700 hover:bg-gray-100"
+                          onClick={() => stepQty(line.key, 1000)}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-right text-gray-700">
+                      {formatPaise(l.unitPricePaise)}
+                    </td>
                     <td className="px-3 py-2 text-right">
                       <input
-                        className="w-20 rounded border border-gray-300 px-2 py-1 text-right text-sm"
-                        data-testid={`pos-qty-${line.itemId}`}
-                        defaultValue={formatQty(l.qtyMilli)}
-                        onBlur={(e) => setQty(line.key, e.target.value)}
+                        className="w-16 rounded border border-gray-300 px-2 py-1 text-right text-sm text-amber-700"
+                        placeholder="0"
+                        data-testid={`pos-disc-${line.itemId}`}
+                        defaultValue={line.discountPaise ? formatPaise(line.discountPaise) : ""}
+                        onBlur={(e) => setLineDiscount(line.key, e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
-                            setQty(line.key, (e.target as HTMLInputElement).value);
+                            setLineDiscount(line.key, (e.target as HTMLInputElement).value);
                           }
                         }}
                       />
                     </td>
-                    <td className="px-3 py-2 text-right">{formatPaise(l.unitPricePaise)}</td>
-                    <td className="px-3 py-2 text-right font-medium">
+                    <td className="px-3 py-2 text-right font-medium text-gray-900">
                       ₹{formatPaise(l.totalPaise)}
                     </td>
                     <td className="px-3 py-2 text-right">
@@ -414,68 +749,233 @@ export function PosScreen() {
         </div>
       </div>
 
-      <aside className="h-fit rounded border border-gray-200 bg-white p-4">
-        <dl className="space-y-1 text-sm">
+      <aside className="h-fit rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        {/* Hero Total Display */}
+        <div className="mb-4 rounded-xl bg-blue-50/80 p-3.5 border border-blue-100 text-center shadow-xs">
+          <span className="text-[11px] uppercase font-bold tracking-wider text-blue-600">Total Payable</span>
+          <div data-testid="pos-total" className="text-3xl font-black text-blue-900 tracking-tight mt-0.5">
+            ₹{formatPaise(bill.totalPaise)}
+          </div>
+          <p className="text-xs text-blue-500 mt-1 font-medium">
+            {lines.length} items ({formatQty(lines.reduce((s, l) => s + l.qtyMilli, 0))} units)
+          </p>
+        </div>
+
+        <dl className="space-y-1.5 text-sm">
           <div className="flex justify-between">
             <dt className="text-gray-600">{t("pos.subtotal")}</dt>
-            <dd>{formatPaise(bill.subtotalPaise)}</dd>
+            <dd className="font-mono">{formatPaise(bill.subtotalPaise)}</dd>
           </div>
+
+          <div className="flex items-center justify-between">
+            <dt className="text-gray-600">{t("pos.bill_discount")}</dt>
+            <dd>
+              <input
+                className="w-20 rounded border border-gray-300 px-2 py-0.5 text-right text-xs"
+                placeholder="0"
+                data-testid="pos-bill-discount"
+                value={billDiscountStr}
+                onChange={(e) => setBillDiscountStr(e.target.value)}
+              />
+            </dd>
+          </div>
+
           <div className="flex justify-between">
             <dt className="text-gray-600">{t("pos.tax")}</dt>
-            <dd>{formatPaise(bill.taxPaise)}</dd>
+            <dd className="font-mono">{formatPaise(bill.taxPaise)}</dd>
           </div>
-          <div className="flex justify-between border-t border-gray-200 pt-1 text-base font-bold">
-            <dt>{t("pos.total")}</dt>
-            <dd data-testid="pos-total">₹{formatPaise(bill.totalPaise)}</dd>
+
+          <div className="flex items-center justify-between text-xs text-gray-500">
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                data-testid="pos-round-off-toggle"
+                checked={roundOffEnabled}
+                onChange={(e) => setRoundOffEnabled(e.target.checked)}
+              />
+              <span>{t("pos.round_off")}</span>
+            </label>
+            <span className="font-mono">
+              {bill.roundOffPaise !== 0
+                ? `${bill.roundOffPaise > 0 ? "+" : ""}₹${formatPaise(bill.roundOffPaise)}`
+                : "—"}
+            </span>
           </div>
         </dl>
 
-        <label className="mt-4 block text-sm font-medium">
-          {t("pos.payment_mode")}
-          <div className="mt-1 grid grid-cols-2 gap-1">
-            {PAYMENT_MODES.map((m) => (
+        <div className="mt-4">
+          <label className="block text-sm font-medium text-gray-700">
+            {t("pos.payment_mode")}
+            <div className="mt-1 grid grid-cols-2 gap-1">
+              {PAYMENT_MODES.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  data-testid={`pos-mode-${m}`}
+                  className={`rounded border px-2 py-1.5 text-xs font-semibold ${
+                    mode === m
+                      ? "border-blue-600 bg-blue-50 text-blue-700"
+                      : "border-gray-300 text-gray-700 hover:bg-gray-50"
+                  }`}
+                  onClick={() => {
+                    setMode(m);
+                    setTendered("");
+                  }}
+                >
+                  {t(`pos.mode.${m}` as I18nKey)}
+                </button>
+              ))}
               <button
-                key={m}
                 type="button"
-                data-testid={`pos-mode-${m}`}
-                className={`rounded border px-2 py-1.5 text-sm ${
-                  mode === m
-                    ? "border-blue-600 bg-blue-50 text-blue-700 font-semibold"
-                    : "border-gray-300 hover:bg-gray-50"
+                data-testid="pos-mode-split"
+                className={`col-span-2 rounded border px-2 py-1.5 text-xs font-semibold ${
+                  mode === "split"
+                    ? "border-blue-600 bg-blue-50 text-blue-700"
+                    : "border-gray-300 text-gray-700 hover:bg-gray-50"
                 }`}
-                onClick={() => {
-                  setMode(m);
-                  setTendered("");
-                }}
+                onClick={() => setMode("split")}
               >
-                {t(`pos.mode.${m}` as I18nKey)}
+                {t("pos.split_payment")}
               </button>
-            ))}
-          </div>
-        </label>
+            </div>
+          </label>
+        </div>
 
         {mode === "cash" ? (
-          <label className="mt-3 block text-sm font-medium">
-            {t("pos.tendered")}
-            <input
-              className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-              data-testid="pos-tendered"
-              value={tendered}
-              onChange={(e) => setTendered(e.target.value)}
+          <div className="mt-3">
+            <label className="block text-sm font-medium text-gray-700">
+              {t("pos.tendered")}
+              <input
+                className="mt-1 w-full rounded border border-gray-300 px-3 py-1.5 text-sm"
+                data-testid="pos-tendered"
+                placeholder={formatPaise(bill.totalPaise)}
+                value={tendered}
+                onChange={(e) => setTendered(e.target.value)}
+              />
+            </label>
+
+            {/* Quick cash tender buttons */}
+            <div className="mt-2 flex flex-wrap gap-1">
+              <button
+                type="button"
+                data-testid="pos-quick-exact"
+                className="rounded border border-gray-300 bg-gray-50 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-100"
+                onClick={() => setTendered(formatPaise(bill.totalPaise))}
+              >
+                {t("pos.exact")}
+              </button>
+              {[100, 200, 500, 2000].map((val) => (
+                <button
+                  key={val}
+                  type="button"
+                  data-testid={`pos-quick-${val}`}
+                  className="rounded border border-gray-300 bg-gray-50 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-100"
+                  onClick={() => setTendered(String(val))}
+                >
+                  ₹{val}
+                </button>
+              ))}
+            </div>
+
+            {change > 0 ? (
+              <div
+                data-testid="pos-change-banner"
+                className="mt-3 rounded-lg bg-green-50 p-2.5 text-center border border-green-200"
+              >
+                <p className="text-xs font-medium uppercase tracking-wider text-green-700">
+                  Change to return
+                </p>
+                <p className="text-xl font-bold text-green-800">₹{formatPaise(change)}</p>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {mode === "upi" ? (
+          <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50/50 p-3 flex flex-col items-center">
+            <UpiQrCode
+              vpa={profile?.phone ? `${profile.phone.replace(/[^0-9]/g, "")}@upi` : "store@upi"}
+              payeeName={profile?.name || "Store"}
+              amountPaise={bill.totalPaise}
+              size={140}
             />
-          </label>
+          </div>
         ) : null}
 
-        {change > 0 ? (
-          <p className="mt-2 text-sm text-green-700">
-            {t("pos.change", { amount: formatPaise(change) })}
-          </p>
+        {mode === "split" ? (
+          <div className="mt-3 rounded border border-gray-200 bg-gray-50 p-2.5" data-testid="pos-split-form">
+            <p className="mb-2 text-xs font-medium text-gray-600">{t("pos.split_hint")}</p>
+            <div className="space-y-1.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span>{t("pos.mode.cash")}</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="w-24 rounded border border-gray-300 px-2 py-1 text-right text-xs"
+                  placeholder="0"
+                  data-testid="pos-split-cash"
+                  value={splitAmounts.cash}
+                  onChange={(e) => setSplitAmounts((s) => ({ ...s, cash: e.target.value }))}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span>{t("pos.mode.upi")}</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="w-24 rounded border border-gray-300 px-2 py-1 text-right text-xs"
+                  placeholder="0"
+                  data-testid="pos-split-upi"
+                  value={splitAmounts.upi}
+                  onChange={(e) => setSplitAmounts((s) => ({ ...s, upi: e.target.value }))}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span>{t("pos.mode.card")}</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="w-24 rounded border border-gray-300 px-2 py-1 text-right text-xs"
+                  placeholder="0"
+                  data-testid="pos-split-card"
+                  value={splitAmounts.card}
+                  onChange={(e) => setSplitAmounts((s) => ({ ...s, card: e.target.value }))}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span>{t("pos.mode.credit")}</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="w-24 rounded border border-gray-300 px-2 py-1 text-right text-xs"
+                  placeholder="0"
+                  data-testid="pos-split-credit"
+                  value={splitAmounts.credit}
+                  onChange={(e) => setSplitAmounts((s) => ({ ...s, credit: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="mt-2 border-t pt-1.5 flex justify-between text-xs font-medium">
+              <span>Paid:</span>
+              <span
+                className={
+                  payments.reduce((s, p) => s + p.amountPaise, 0) === bill.totalPaise
+                    ? "text-green-700"
+                    : "text-red-600"
+                }
+              >
+                ₹{formatPaise(payments.reduce((s, p) => s + p.amountPaise, 0))} / ₹
+                {formatPaise(bill.totalPaise)}
+              </span>
+            </div>
+          </div>
         ) : null}
 
-        <label className="mt-3 block text-sm font-medium">
+        <label className="mt-3 block text-sm font-medium text-gray-700">
           {t("pos.customer")}
           <select
-            className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded border border-gray-300 px-3 py-1.5 text-sm"
+            data-testid="pos-customer"
             value={customerId ?? ""}
             onChange={(e) => setCustomerId(e.target.value === "" ? null : Number(e.target.value))}
           >
@@ -488,12 +988,54 @@ export function PosScreen() {
           </select>
         </label>
 
+        {customerId && customerLoyaltyBalance > 0 && (
+          <div className="mt-2.5 rounded-lg border border-purple-200 bg-purple-50 p-2.5 text-xs" data-testid="pos-loyalty-panel">
+            <div className="flex items-center justify-between text-purple-900 font-medium">
+              <span>Loyalty Points:</span>
+              <span className="font-bold text-sm font-mono" data-testid="pos-loyalty-balance">{customerLoyaltyBalance} pts</span>
+            </div>
+            <div className="mt-1 flex items-center justify-between text-[11px] text-purple-700">
+              <span>Value: ₹{formatPaise(customerLoyaltyBalance * DEFAULT_LOYALTY_CONFIG.pointValuePaise)}</span>
+              {redeemedPoints > 0 ? (
+                <button
+                  type="button"
+                  data-testid="pos-loyalty-cancel"
+                  className="text-red-600 hover:underline font-semibold"
+                  onClick={() => setRedeemedPoints(0)}
+                >
+                  Cancel
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  data-testid="pos-loyalty-redeem"
+                  className="rounded bg-purple-600 px-2 py-0.5 font-bold text-white hover:bg-purple-700 shadow-xs"
+                  onClick={() => {
+                    const maxRedeem = Math.min(
+                      customerLoyaltyBalance,
+                      Math.floor(bill.subtotalPaise / DEFAULT_LOYALTY_CONFIG.pointValuePaise),
+                    );
+                    setRedeemedPoints(maxRedeem);
+                  }}
+                >
+                  Redeem
+                </button>
+              )}
+            </div>
+            {redeemedPoints > 0 && (
+              <div className="mt-1 font-semibold text-green-700" data-testid="pos-loyalty-applied">
+                Redeeming {redeemedPoints} pts (-₹{formatPaise(loyaltyDiscountPaise)})
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="mt-4 space-y-2">
           <button
             type="button"
             data-testid="pos-save-print"
             disabled={busy}
-            className="w-full rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+            className="w-full rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-50"
             onClick={() => void save(true)}
           >
             {t("pos.save_print")}
@@ -502,15 +1044,17 @@ export function PosScreen() {
             <button
               type="button"
               disabled={busy}
-              className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-50"
+              data-testid="pos-save"
+              className="flex-1 rounded border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
               onClick={() => void save(false)}
             >
               {t("pos.save")}
             </button>
             <button
               type="button"
-              className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
-              onClick={resetBill}
+              data-testid="pos-clear"
+              className="flex-1 rounded border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              onClick={() => resetBill()}
             >
               {t("pos.clear")}
             </button>

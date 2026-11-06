@@ -78,7 +78,8 @@ jobs:
           releaseBody: |
             Unsigned builds (no code-signing certificates yet — see DECISIONS.md / roadmap D12).
             - Windows (supported): allow the SmartScreen prompt via "More info → Run anyway".
-            - macOS / Linux: unsupported community builds; macOS needs right-click → Open.
+            - macOS (community build): Gatekeeper blocks unsigned builds with "is damaged and can't be opened". Move the app to Applications and run `xattr -cr "/Applications/MyTownCart Billing.app"` in Terminal.
+            - Linux (community build): `chmod +x` the AppImage or install the `.deb`.
             Verify downloads against the attached SHA-256 checksums.
           releaseDraft: true
           prerelease: false

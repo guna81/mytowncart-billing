@@ -14,7 +14,7 @@ import {
   UNIT_KINDS,
   type UnitKind,
 } from "@mytowncart-billing/core";
-import type { Category } from "@mytowncart-billing/storage";
+import type { Category, ItemBarcode } from "@mytowncart-billing/storage";
 import { t, type I18nKey } from "../i18n";
 import { getRepository } from "../lib/repository";
 import { useAppStore } from "../store/appStore";
@@ -36,6 +36,8 @@ export function ItemFormScreen() {
   const [unitKind, setUnitKind] = useState<UnitKind>("count");
   const [price, setPrice] = useState("");
   const [mrp, setMrp] = useState("");
+  const [costPrice, setCostPrice] = useState("");
+  const [hsnCode, setHsnCode] = useState("");
   const [taxPercent, setTaxPercent] = useState("0");
   const [openingStock, setOpeningStock] = useState("0");
   const [isActive, setIsActive] = useState(true);
@@ -43,6 +45,53 @@ export function ItemFormScreen() {
   const [busy, setBusy] = useState(false);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [photoUploadedAt, setPhotoUploadedAt] = useState<string | null>(null);
+
+  // Secondary Barcodes
+  const [secondaryBarcodes, setSecondaryBarcodes] = useState<ItemBarcode[]>([]);
+  const [newSecBarcode, setNewSecBarcode] = useState("");
+  const [newSecQty, setNewSecQty] = useState("1");
+  const [newSecLabel, setNewSecLabel] = useState("");
+  const [secError, setSecError] = useState<string | null>(null);
+
+  const loadBarcodes = async (itemId: number) => {
+    const list = await getRepository().listItemBarcodes(itemId);
+    setSecondaryBarcodes(list);
+  };
+
+  const addSecondaryBarcode = async () => {
+    if (!editId) return;
+    const trimmed = newSecBarcode.trim();
+    if (!trimmed) {
+      setSecError("Barcode cannot be empty");
+      return;
+    }
+    const packQty = parseFloat(newSecQty);
+    if (isNaN(packQty) || packQty <= 0) {
+      setSecError("Pack quantity must be > 0");
+      return;
+    }
+    setSecError(null);
+    try {
+      await getRepository().upsertItemBarcode(
+        editId,
+        trimmed,
+        Math.round(packQty * 1000),
+        newSecLabel.trim(),
+      );
+      setNewSecBarcode("");
+      setNewSecQty("1");
+      setNewSecLabel("");
+      await loadBarcodes(editId);
+    } catch (err) {
+      setSecError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const removeSecondaryBarcode = async (barcodeId: number) => {
+    if (!editId) return;
+    await getRepository().deleteItemBarcode(barcodeId);
+    await loadBarcodes(editId);
+  };
 
   const loadPhoto = async (itemId: number) => {
     const photo = await getRepository().readItemPhoto(itemId);
@@ -64,6 +113,7 @@ export function ItemFormScreen() {
       const repo = getRepository();
       setCategories(await repo.listCategories());
       if (editId !== null) {
+        await loadBarcodes(editId);
         const item = await repo.getItem(editId);
         if (item?.photoFile) await loadPhoto(editId);
         if (item) {
@@ -73,6 +123,8 @@ export function ItemFormScreen() {
           setUnitKind(item.unitKind);
           setPrice(formatPaise(item.pricePaise));
           setMrp(formatPaise(item.mrpPaise));
+          setCostPrice(item.costPricePaise ? formatPaise(item.costPricePaise) : "");
+          setHsnCode(item.hsnCode ?? "");
           setTaxPercent((item.taxRateBp / 100).toString());
           setOpeningStock("0");
           setIsActive(item.isActive);
@@ -101,6 +153,7 @@ export function ItemFormScreen() {
       if (finalCategoryId === null && newCategory.trim() !== "") {
         finalCategoryId = await repo.upsertCategory({ name: newCategory.trim() });
       }
+      const costPricePaise = costPrice ? (parsePaise(costPrice) ?? 0) : 0;
       await repo.upsertItem({
         id: editId ?? undefined,
         name: name.trim(),
@@ -112,6 +165,8 @@ export function ItemFormScreen() {
         taxRateBp: taxBp,
         openingStockMilli: editId === null ? openingMilli : 0,
         isActive,
+        hsnCode: hsnCode.trim(),
+        costPricePaise,
       });
       bumpDataVersion();
       navigate("/items");
@@ -225,6 +280,29 @@ export function ItemFormScreen() {
         </label>
       </div>
 
+      <div className="grid grid-cols-2 gap-4">
+        <label className={labelCls}>
+          {t("item_form.hsn_code")}
+          <input
+            data-testid="item-hsn"
+            className={inputCls}
+            placeholder={t("item_form.hsn_hint")}
+            value={hsnCode}
+            onChange={(e) => setHsnCode(e.target.value)}
+          />
+        </label>
+        <label className={labelCls}>
+          {t("item_form.cost_price")}
+          <input
+            data-testid="item-cost-price"
+            className={inputCls}
+            inputMode="decimal"
+            value={costPrice}
+            onChange={(e) => setCostPrice(e.target.value)}
+          />
+        </label>
+      </div>
+
       {editId === null ? (
         <label className={labelCls}>
           {t("item_form.opening_stock")}
@@ -238,6 +316,80 @@ export function ItemFormScreen() {
         <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
         {t("item_form.is_active")}
       </label>
+
+      {/* Secondary Barcodes & Pack Multipliers */}
+      {editId !== null && (
+        <div className="rounded border border-gray-200 bg-white p-4" data-testid="item-secondary-barcodes">
+          <h2 className="mb-2 font-semibold text-gray-800">Secondary Barcodes & Pack Multipliers</h2>
+          <p className="mb-3 text-xs text-gray-500">
+            Link multiple barcodes (e.g. inner cartons, outer cases, or alternate supplier barcodes) to this item.
+          </p>
+
+          <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-4">
+            <input
+              type="text"
+              placeholder="Barcode"
+              className="rounded border border-gray-300 px-3 py-1.5 text-xs font-mono"
+              data-testid="secondary-barcode-input"
+              value={newSecBarcode}
+              onChange={(e) => setNewSecBarcode(e.target.value)}
+            />
+            <input
+              type="number"
+              step="0.001"
+              min="0.001"
+              placeholder="Pack Qty (e.g. 6)"
+              className="rounded border border-gray-300 px-3 py-1.5 text-xs"
+              data-testid="secondary-pack-qty-input"
+              value={newSecQty}
+              onChange={(e) => setNewSecQty(e.target.value)}
+            />
+            <input
+              type="text"
+              placeholder="Label (e.g. 6-Pack Case)"
+              className="rounded border border-gray-300 px-3 py-1.5 text-xs"
+              data-testid="secondary-label-input"
+              value={newSecLabel}
+              onChange={(e) => setNewSecLabel(e.target.value)}
+            />
+            <button
+              type="button"
+              className="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+              data-testid="secondary-barcode-add"
+              onClick={() => void addSecondaryBarcode()}
+            >
+              + Add Barcode
+            </button>
+          </div>
+
+          {secError && <p className="mb-3 text-xs text-red-600">{secError}</p>}
+
+          {secondaryBarcodes.length === 0 ? (
+            <p className="text-xs text-gray-400">No secondary barcodes registered.</p>
+          ) : (
+            <div className="divide-y divide-gray-100 rounded border border-gray-100">
+              {secondaryBarcodes.map((b) => (
+                <div key={b.id} className="flex items-center justify-between p-2 text-xs">
+                  <div>
+                    <span className="font-mono font-medium text-gray-800">{b.barcode}</span>
+                    <span className="ml-2 text-gray-500">
+                      ({formatQty(b.packQtyMilli)} units{b.label ? ` · ${b.label}` : ""})
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="text-red-600 hover:underline"
+                    data-testid={`secondary-barcode-delete-${b.id}`}
+                    onClick={() => void removeSecondaryBarcode(b.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div data-testid="item-photo">
         <span className={labelCls}>{t("item_form.photo")}</span>

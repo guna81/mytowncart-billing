@@ -297,3 +297,381 @@ describe("photos and held bills", () => {
     expect(await repo.listHeldBills()).toEqual([]);
   });
 });
+
+describe("customer credit ledger and report batching", () => {
+  beforeEach(() => {
+    repo = new MemoryRepository();
+  });
+
+  it("records customer payments, builds ledger summary, and restricts deletion", async () => {
+    const custId = await repo.upsertCustomer({
+      name: "Suresh",
+      phone: "9876543210",
+      gstin: "33AAAAA0000A1Z5",
+      address: "123 Market St",
+    });
+
+    const itemId = await makeItem({ pricePaise: 5000 });
+
+    // Create a credit sale bill
+    await repo.createBill({
+      fy: "2026-27",
+      prefix: "INV-",
+      customerId: custId,
+      subtotalPaise: 5000,
+      taxPaise: 0,
+      totalPaise: 5000,
+      createdAt: "2026-11-06T10:00:00Z",
+      lines: [
+        {
+          itemId,
+          nameSnapshot: "Item 1",
+          qtyMilli: 1000,
+          unitPricePaise: 5000,
+          taxRateBp: 0,
+          taxPaise: 0,
+          totalPaise: 5000,
+          discountPaise: 0,
+          hsnCode: "1905",
+        },
+      ],
+      payments: [{ mode: "credit", amountPaise: 5000 }],
+    });
+
+    // Cannot delete customer who has bills
+    await expect(repo.deleteCustomer(custId)).rejects.toThrow(/cannot delete/);
+
+    // Initial ledger check
+    let ledger = await repo.getCustomerLedger(custId);
+    expect(ledger.totalCreditBilledPaise).toBe(5000);
+    expect(ledger.totalPaidPaise).toBe(0);
+    expect(ledger.outstandingBalancePaise).toBe(5000);
+    expect(ledger.entries).toHaveLength(1);
+    expect(ledger.entries[0]!.balancePaise).toBe(5000);
+
+    // Record partial payment
+    await repo.recordCustomerPayment({
+      customerId: custId,
+      amountPaise: 2000,
+      mode: "upi",
+      notes: "Google Pay payment",
+      createdAt: "2026-11-06T11:00:00Z",
+    });
+
+    ledger = await repo.getCustomerLedger(custId);
+    expect(ledger.totalCreditBilledPaise).toBe(5000);
+    expect(ledger.totalPaidPaise).toBe(2000);
+    expect(ledger.outstandingBalancePaise).toBe(3000);
+    expect(ledger.entries).toHaveLength(2);
+    expect(ledger.entries[1]!.balancePaise).toBe(3000);
+  });
+
+  it("fetches batch report data without N+1 IPC calls", async () => {
+    const itemId = await makeItem({ pricePaise: 1000 });
+    await repo.createBill({
+      fy: "2026-27",
+      prefix: "INV-",
+      customerId: null,
+      subtotalPaise: 1000,
+      taxPaise: 0,
+      totalPaise: 1000,
+      createdAt: "2026-11-06T10:00:00Z",
+      lines: [
+        {
+          itemId,
+          nameSnapshot: "Item",
+          qtyMilli: 1000,
+          unitPricePaise: 1000,
+          taxRateBp: 0,
+          taxPaise: 0,
+          totalPaise: 1000,
+        },
+      ],
+      payments: [{ mode: "cash", amountPaise: 1000 }],
+    });
+
+    const reportData = await repo.getBillsReportData({
+      from: "2026-11-01T00:00:00Z",
+      to: "2026-11-10T23:59:59Z",
+    });
+    expect(reportData).toHaveLength(1);
+    expect(reportData[0]!.lines).toHaveLength(1);
+    expect(reportData[0]!.payments).toHaveLength(1);
+    expect(reportData[0]!.payments[0]!.amountPaise).toBe(1000);
+  });
+});
+
+describe("credit notes", () => {
+  it("creates credit note, generates sequential number and restores stock", async () => {
+    const itemId = await makeItem({ openingStockMilli: 10_000, pricePaise: 1000 });
+    const bill = await makeBill(itemId, 3000);
+    expect((await repo.getItem(itemId))!.stockMilli).toBe(7000);
+
+    const cn = await repo.createCreditNote({
+      billId: bill.billId,
+      reason: "Damaged packaging",
+      createdAt: "2026-11-06T12:00:00Z",
+      lines: [
+        {
+          itemId,
+          nameSnapshot: "Parle-G",
+          qtyMilli: 1000,
+          unitPricePaise: 1000,
+          taxRateBp: 500,
+          taxPaise: 50,
+          totalPaise: 1050,
+          hsnCode: "1905",
+        },
+      ],
+    });
+
+    expect(cn.number).toBe("CN-2026-27-0001");
+    // Stock restored from 7000 to 8000
+    expect((await repo.getItem(itemId))!.stockMilli).toBe(8000);
+
+    const notes = await repo.listCreditNotes(bill.billId);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]!.number).toBe("CN-2026-27-0001");
+    expect(notes[0]!.lines).toHaveLength(1);
+    expect(notes[0]!.lines[0]!.hsnCode).toBe("1905");
+
+    const single = await repo.getCreditNote(cn.creditNoteId);
+    expect(single).not.toBeNull();
+    expect(single!.reason).toBe("Damaged packaging");
+  });
+});
+
+describe("suppliers and purchases", () => {
+  it("creates supplier, records purchase, increments stock and updates cost price", async () => {
+    const sId = await repo.upsertSupplier({
+      name: "Metro Wholesalers",
+      phone: "9876500000",
+      gstin: "33AAACM1234F1Z5",
+      address: "Chennai",
+    });
+    expect(sId).toBeGreaterThan(0);
+
+    const itemId = await makeItem({ openingStockMilli: 2000, costPricePaise: 500 });
+
+    const p = await repo.createPurchase({
+      supplierId: sId,
+      invoiceNo: "PO-100",
+      invoiceDate: "2026-11-06",
+      createdAt: "2026-11-06T12:00:00Z",
+      lines: [
+        {
+          itemId,
+          nameSnapshot: "Parle-G",
+          qtyMilli: 5000,
+          unitCostPaise: 750,
+          taxRateBp: 500,
+        },
+      ],
+    });
+    expect(p.purchaseId).toBeGreaterThan(0);
+
+    // Stock incremented from 2000 to 7000
+    const item = (await repo.getItem(itemId))!;
+    expect(item.stockMilli).toBe(7000);
+    expect(item.costPricePaise).toBe(750);
+
+    const purchases = await repo.listPurchases(sId);
+    expect(purchases).toHaveLength(1);
+    expect(purchases[0]!.supplierName).toBe("Metro Wholesalers");
+    expect(purchases[0]!.lines).toHaveLength(1);
+
+    // Deleting supplier with purchases fails
+    await expect(repo.deleteSupplier(sId)).rejects.toThrow("cannot delete supplier with recorded purchases");
+  });
+});
+
+describe("users, pin and audit logs", () => {
+  it("manages users, verifies pin and logs audit actions", async () => {
+    const u1 = await repo.upsertUser({
+      name: "Owner",
+      role: "owner",
+      pin: "1234",
+    });
+    const u2 = await repo.upsertUser({
+      name: "Cashier",
+      role: "cashier",
+      pin: "9999",
+    });
+
+    const users = await repo.listUsers();
+    expect(users).toHaveLength(2);
+
+    expect(await repo.verifyPin("1234", "owner")).toMatchObject({ id: u1, role: "owner" });
+    expect(await repo.verifyPin("9999", "owner")).toBeNull();
+    expect(await repo.verifyPin("9999", "cashier")).toMatchObject({ id: u2, role: "cashier" });
+    expect(await repo.verifyPin("wrong")).toBeNull();
+
+    const logId = await repo.recordAuditLog({
+      userId: u1,
+      action: "bill_void",
+      details: "Voided INV-2026-0001",
+    });
+    expect(logId).toBeGreaterThan(0);
+
+    const logs = await repo.listAuditLogs();
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.userName).toBe("Owner");
+    expect(logs[0]!.action).toBe("bill_void");
+  });
+});
+
+describe("stock audit", () => {
+  it("adjusts stock discrepancy correctly", async () => {
+    const a = await makeItem({ openingStockMilli: 10_000 });
+    const b = await makeItem({ openingStockMilli: 5_000 });
+
+    const adjusted = await repo.applyStockAudit([
+      { itemId: a, physicalCountMilli: 9_000 },
+      { itemId: b, physicalCountMilli: 5_000 },
+    ]);
+
+    expect(adjusted).toBe(1);
+    expect((await repo.getItem(a))!.stockMilli).toBe(9_000);
+    expect((await repo.getItem(b))!.stockMilli).toBe(5_000);
+  });
+});
+
+describe("batches and expiry tracking", () => {
+  it("tracks batches with FIFO sorting and expiry alerts", async () => {
+    const itemId = await makeItem();
+
+    const b1 = await repo.upsertBatch({
+      itemId,
+      batchNo: "BATCH-MAY",
+      mfgDate: "2026-01-01",
+      expiryDate: "2026-05-15",
+      costPricePaise: 1000,
+      mrpPaise: 1500,
+      stockMilli: 2000,
+    });
+    const b2 = await repo.upsertBatch({
+      itemId,
+      batchNo: "BATCH-FEB",
+      mfgDate: "2025-11-01",
+      expiryDate: "2026-02-10",
+      costPricePaise: 900,
+      mrpPaise: 1500,
+      stockMilli: 5000,
+    });
+
+    const batches = await repo.listBatchesForItem(itemId);
+    expect(batches).toHaveLength(2);
+    // FIFO sorting: BATCH-FEB (2026-02-10) comes first
+    expect(batches[0]!.batchNo).toBe("BATCH-FEB");
+    expect(batches[1]!.batchNo).toBe("BATCH-MAY");
+
+    const expiring = await repo.listExpiringBatches(180);
+    expect(expiring.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("customer loyalty points", () => {
+  it("accrues and redeems points with ledger logging", async () => {
+    const custId = await repo.upsertCustomer({
+      name: "Loyal Shopper",
+      phone: "9876543210",
+    });
+
+    const bal1 = await repo.updateCustomerLoyalty(custId, 50, 101, "Bill points earned");
+    expect(bal1).toBe(50);
+    expect(await repo.getCustomerLoyaltyBalance(custId)).toBe(50);
+
+    const bal2 = await repo.updateCustomerLoyalty(custId, -20, 102, "Redeemed points");
+    expect(bal2).toBe(30);
+    expect(await repo.getCustomerLoyaltyBalance(custId)).toBe(30);
+
+    const txs = await repo.listLoyaltyTransactions(custId);
+    expect(txs).toHaveLength(2);
+    expect(txs[0]!.pointsDelta).toBe(-20);
+    expect(txs[1]!.pointsDelta).toBe(50);
+  });
+});
+
+describe("multi-barcodes per item", () => {
+  it("supports multiple secondary barcodes and barcode lookup", async () => {
+    const itemId = await makeItem({ barcode: "8901234567890" });
+
+    const bId = await repo.upsertItemBarcode(itemId, "8901234567891", 6000, "6-Pack Case");
+    expect(bId).toBeGreaterThan(0);
+
+    const barcodes = await repo.listItemBarcodes(itemId);
+    expect(barcodes).toHaveLength(1);
+    expect(barcodes[0]!.label).toBe("6-Pack Case");
+
+    // Lookup primary
+    const res1 = await repo.lookupItemByAnyBarcode("8901234567890");
+    expect(res1).not.toBeNull();
+    expect(res1!.itemId).toBe(itemId);
+    expect(res1!.packQtyMilli).toBe(1000);
+
+    // Lookup secondary
+    const res2 = await repo.lookupItemByAnyBarcode("8901234567891");
+    expect(res2).not.toBeNull();
+    expect(res2!.itemId).toBe(itemId);
+    expect(res2!.packQtyMilli).toBe(6000);
+
+    // Delete barcode
+    await repo.deleteItemBarcode(bId);
+    expect(await repo.listItemBarcodes(itemId)).toHaveLength(0);
+    expect(await repo.lookupItemByAnyBarcode("8901234567891")).toBeNull();
+  });
+});
+
+describe("day-end closure and expected cash", () => {
+  it("computes expected cash from day's transactions and saves closure", async () => {
+    const itemId = await makeItem({ pricePaise: 5000 });
+    const today = "2026-11-06";
+
+    // Create cash bill
+    await repo.createBill({
+      fy: "26-27",
+      prefix: "INV",
+      customerId: null,
+      subtotalPaise: 5000,
+      taxPaise: 250,
+      totalPaise: 5250,
+      createdAt: `${today}T10:00:00Z`,
+      lines: [
+        {
+          itemId,
+          nameSnapshot: "Test Item",
+          qtyMilli: 1000,
+          unitPricePaise: 5000,
+          taxRateBp: 500,
+          taxPaise: 250,
+          totalPaise: 5250,
+        },
+      ],
+      payments: [{ mode: "cash", amountPaise: 5250 }],
+    });
+
+    const expected = await repo.getDayEndExpectedCash(today);
+    expect(expected.cashSalesPaise).toBe(5250);
+    expect(expected.totalBillsCount).toBe(1);
+    expect(expected.totalSalesPaise).toBe(5250);
+
+    const closureId = await repo.createDayEndClosure({
+      closureDate: today,
+      openingCashPaise: 200000,
+      cashSalesPaise: expected.cashSalesPaise,
+      creditReceivedPaise: 0,
+      cashRefundsPaise: 0,
+      expectedCashPaise: 205250,
+      actualCashPaise: 205250,
+      variancePaise: 0,
+      totalBillsCount: expected.totalBillsCount,
+      totalSalesPaise: expected.totalSalesPaise,
+      notes: "Balanced drawer",
+    });
+    expect(closureId).toBeGreaterThan(0);
+
+    const closures = await repo.listDayEndClosures();
+    expect(closures).toHaveLength(1);
+    expect(closures[0]!.variancePaise).toBe(0);
+  });
+});

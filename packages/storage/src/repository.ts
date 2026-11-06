@@ -10,25 +10,52 @@
 
 import type {
   PaymentMode,
+  ReportBill,
   UnitKind,
 } from "@mytowncart-billing/core";
 import type {
+  AuditLog,
+  AuditLogInput,
+  BarcodeLookupResult,
+  BatchInput,
   BillDetail,
   BillSummary,
   Category,
+  CreditNote,
+  CreditNoteLine,
   Customer,
+  CustomerInput,
+  CustomerLedgerSummary,
+  CustomerPayment,
+  CustomerPaymentInput,
+  DayEndClosure,
+  DayEndClosureInput,
+  DayEndExpectedCash,
   HeldBill,
   HeldBillInput,
   ImportRowOutcome,
   Item,
+  ItemBarcode,
+  ItemBatch,
   ItemInput,
+  LoyaltyTransaction,
+  NewCreditNotePayload,
+  NewPurchasePayload,
   OutboxRow,
   PublishOutcome,
+  Purchase,
+  PurchaseLine,
   ReconcileFix,
   RemoteItemLink,
   RemoteOrderRecord,
   ShopProfile,
+  StockDiscrepancyInput,
   StockMovementRecord,
+  Supplier,
+  SupplierInput,
+  User,
+  UserInput,
+  UserRole,
 } from "./types";
 
 /** Fully-computed new bill, as produced by core's `computeBill` + the UI. */
@@ -39,6 +66,9 @@ export interface NewBillPayload {
   subtotalPaise: number;
   taxPaise: number;
   totalPaise: number;
+  discountPaise?: number;
+  roundOffPaise?: number;
+  notes?: string;
   createdAt: string;
   lines: {
     itemId: number;
@@ -48,6 +78,8 @@ export interface NewBillPayload {
     taxRateBp: number;
     taxPaise: number;
     totalPaise: number;
+    discountPaise?: number;
+    hsnCode?: string;
   }[];
   payments: { mode: PaymentMode; amountPaise: number }[];
 }
@@ -108,13 +140,19 @@ export interface BillingRepository {
   ): Promise<void>;
 
   listCustomers(search?: string): Promise<Customer[]>;
-  upsertCustomer(input: { id?: number; name: string; phone: string }): Promise<number>;
+  upsertCustomer(input: CustomerInput): Promise<number>;
+  deleteCustomer(id: number): Promise<boolean>;
+  recordCustomerPayment(input: CustomerPaymentInput): Promise<number>;
+  listCustomerPayments(customerId: number): Promise<CustomerPayment[]>;
+  getCustomerLedger(customerId: number): Promise<CustomerLedgerSummary>;
 
   /** Allocates the invoice number and persists bill+lines+payments+stock atomically. */
   createBill(bill: NewBillPayload): Promise<CreatedBill>;
   voidBill(billId: number, reason: string): Promise<void>;
   listBills(filter?: BillFilter): Promise<BillSummary[]>;
   getBill(id: number): Promise<BillDetail | null>;
+  /** Batch query fetching bills with their lines and payments (N+1 query fix for reports). */
+  getBillsReportData(filter?: BillFilter): Promise<ReportBill[]>;
 
   adjustStock(itemId: number, deltaMilli: number, reason: "adjustment" | "purchase" | "import"): Promise<number>;
   listMovements(itemId?: number): Promise<StockMovementRecord[]>;
@@ -159,6 +197,74 @@ export interface BillingRepository {
 
   getAppSetting(key: string): Promise<string | null>;
   setAppSetting(key: string, value: string | null): Promise<void>;
+
+  // --- Phase 2: Credit Notes ------------------------------------------------
+  createCreditNote(payload: NewCreditNotePayload): Promise<{ creditNoteId: number; number: string }>;
+  listCreditNotes(billId?: number): Promise<CreditNote[]>;
+  getCreditNote(id: number): Promise<CreditNote | null>;
+
+  // --- Phase 2: Suppliers & Purchases ---------------------------------------
+  listSuppliers(search?: string): Promise<Supplier[]>;
+  upsertSupplier(input: SupplierInput): Promise<number>;
+  deleteSupplier(id: number): Promise<boolean>;
+  createPurchase(payload: NewPurchasePayload): Promise<{ purchaseId: number }>;
+  listPurchases(supplierId?: number): Promise<Purchase[]>;
+  getPurchase(id: number): Promise<Purchase | null>;
+
+  // --- Phase 2: Users & Roles & Audit ---------------------------------------
+  listUsers(): Promise<User[]>;
+  upsertUser(input: UserInput): Promise<number>;
+  verifyPin(pin: string, requiredRole?: UserRole): Promise<User | null>;
+  recordAuditLog(input: AuditLogInput): Promise<number>;
+  listAuditLogs(limit?: number): Promise<AuditLog[]>;
+
+  // --- Phase 2: Stock Audit -------------------------------------------------
+  applyStockAudit(discrepancies: StockDiscrepancyInput[]): Promise<number>;
+
+  // --- Phase 3: Batches & Expiry --------------------------------------------
+  upsertBatch(input: BatchInput): Promise<number>;
+  listBatchesForItem(itemId: number): Promise<ItemBatch[]>;
+  listExpiringBatches(daysThreshold: number): Promise<ItemBatch[]>;
+
+  // --- Phase 3: Customer Loyalty Points -------------------------------------
+  updateCustomerLoyalty(customerId: number, pointsDelta: number, billId?: number | null, reason?: string): Promise<number>;
+  getCustomerLoyaltyBalance(customerId: number): Promise<number>;
+  listLoyaltyTransactions(customerId: number): Promise<LoyaltyTransaction[]>;
+
+  // --- Phase 3: Multi-Barcodes ----------------------------------------------
+  upsertItemBarcode(itemId: number, barcode: string, packQtyMilli?: number, label?: string): Promise<number>;
+  listItemBarcodes(itemId: number): Promise<ItemBarcode[]>;
+  deleteItemBarcode(barcodeId: number): Promise<void>;
+  lookupItemByAnyBarcode(barcode: string): Promise<BarcodeLookupResult | null>;
+
+  // --- Phase 3: Day-End Closing & Z-Report -----------------------------------
+  createDayEndClosure(input: DayEndClosureInput): Promise<number>;
+  listDayEndClosures(fromDate?: string, toDate?: string): Promise<DayEndClosure[]>;
+  getDayEndExpectedCash(datePrefix: string): Promise<DayEndExpectedCash>;
 }
 
-export type { UnitKind };
+export type {
+  AuditLog,
+  AuditLogInput,
+  BarcodeLookupResult,
+  BatchInput,
+  CreditNote,
+  CreditNoteLine,
+  DayEndClosure,
+  DayEndClosureInput,
+  DayEndExpectedCash,
+  ItemBarcode,
+  ItemBatch,
+  LoyaltyTransaction,
+  NewCreditNotePayload,
+  NewPurchasePayload,
+  Purchase,
+  PurchaseLine,
+  StockDiscrepancyInput,
+  Supplier,
+  SupplierInput,
+  UnitKind,
+  User,
+  UserInput,
+  UserRole,
+};

@@ -22,10 +22,12 @@ export interface LineTaxInput {
   /** GST rate in basis points (5% = 500, 18% = 1800). 0 = untaxed. */
   taxRateBp: number;
   pricesIncludeTax: boolean;
+  /** Line-level discount in paise. */
+  discountPaise?: number;
 }
 
 export interface LineAmounts {
-  /** Line amount net of tax. */
+  /** Line amount net of tax (taxable value). */
   netPaise: number;
   /** Total GST on the line. */
   taxPaise: number;
@@ -33,6 +35,8 @@ export interface LineAmounts {
   totalPaise: number;
   cgstPaise: number;
   sgstPaise: number;
+  /** Discount applied on the line in paise. */
+  discountPaise: number;
 }
 
 export function splitGst(taxPaise: number): { cgstPaise: number; sgstPaise: number } {
@@ -41,21 +45,68 @@ export function splitGst(taxPaise: number): { cgstPaise: number; sgstPaise: numb
 }
 
 export function computeLineAmounts(input: LineTaxInput): LineAmounts {
-  const { qtyMilli, unitPricePaise, taxRateBp, pricesIncludeTax } = input;
+  const { qtyMilli, unitPricePaise, taxRateBp, pricesIncludeTax, discountPaise: rawDiscount = 0 } = input;
   if (taxRateBp < 0) throw new Error("taxRateBp must be >= 0");
+  if (rawDiscount < 0) throw new Error("discountPaise must be >= 0");
+
   let netPaise: number;
   let taxPaise: number;
   let totalPaise: number;
+  let discountPaise = rawDiscount;
+
   if (pricesIncludeTax) {
-    // Unit price already contains tax: back the tax out of the gross.
-    totalPaise = mulQtyMilli(unitPricePaise, qtyMilli);
+    // Unit price already contains tax: back the tax out of the discounted gross.
+    const grossBeforeDiscount = mulQtyMilli(unitPricePaise, qtyMilli);
+    if (discountPaise > grossBeforeDiscount) {
+      discountPaise = grossBeforeDiscount;
+    }
+    totalPaise = grossBeforeDiscount - discountPaise;
     taxPaise = taxRateBp === 0 ? 0 : roundDiv(totalPaise * taxRateBp, 10_000 + taxRateBp);
     netPaise = totalPaise - taxPaise;
   } else {
-    netPaise = mulQtyMilli(unitPricePaise, qtyMilli);
+    const netBeforeDiscount = mulQtyMilli(unitPricePaise, qtyMilli);
+    if (discountPaise > netBeforeDiscount) {
+      discountPaise = netBeforeDiscount;
+    }
+    netPaise = netBeforeDiscount - discountPaise;
     taxPaise = mulBps(netPaise, taxRateBp);
     totalPaise = netPaise + taxPaise;
   }
   const { cgstPaise, sgstPaise } = splitGst(taxPaise);
-  return { netPaise, taxPaise, totalPaise, cgstPaise, sgstPaise };
+  return { netPaise, taxPaise, totalPaise, cgstPaise, sgstPaise, discountPaise };
+}
+
+export interface TaxRateSummary {
+  taxRateBp: number;
+  taxablePaise: number;
+  cgstPaise: number;
+  sgstPaise: number;
+  totalTaxPaise: number;
+}
+
+/**
+ * Group line taxes by GST rate (e.g. 0%, 5%, 12%, 18%) for the tax summary on GST invoices.
+ */
+export function aggregateTaxByRate(
+  lines: readonly { netPaise: number; taxRateBp: number; cgstPaise: number; sgstPaise: number; taxPaise: number }[],
+): TaxRateSummary[] {
+  const map = new Map<number, TaxRateSummary>();
+  for (const l of lines) {
+    const existing = map.get(l.taxRateBp);
+    if (existing) {
+      existing.taxablePaise += l.netPaise;
+      existing.cgstPaise += l.cgstPaise;
+      existing.sgstPaise += l.sgstPaise;
+      existing.totalTaxPaise += l.taxPaise;
+    } else {
+      map.set(l.taxRateBp, {
+        taxRateBp: l.taxRateBp,
+        taxablePaise: l.netPaise,
+        cgstPaise: l.cgstPaise,
+        sgstPaise: l.sgstPaise,
+        totalTaxPaise: l.taxPaise,
+      });
+    }
+  }
+  return [...map.values()].sort((a, b) => a.taxRateBp - b.taxRateBp);
 }

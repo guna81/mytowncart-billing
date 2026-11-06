@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
 
-import { computeLineAmounts, splitGst } from "../src/tax";
+import { aggregateTaxByRate, computeLineAmounts, splitGst } from "../src/tax";
 
 describe("computeLineAmounts — tax-exclusive pricing", () => {
   it("adds tax on top of the net", () => {
@@ -12,7 +12,14 @@ describe("computeLineAmounts — tax-exclusive pricing", () => {
       taxRateBp: 1800,
       pricesIncludeTax: false,
     });
-    expect(r).toEqual({ netPaise: 10_000, taxPaise: 1800, totalPaise: 11_800, cgstPaise: 900, sgstPaise: 900 });
+    expect(r).toEqual({
+      netPaise: 10_000,
+      taxPaise: 1800,
+      totalPaise: 11_800,
+      cgstPaise: 900,
+      sgstPaise: 900,
+      discountPaise: 0,
+    });
   });
 
   it("multiplies by fractional quantity (0.5 kg at ₹80/kg, 5%)", () => {
@@ -26,6 +33,7 @@ describe("computeLineAmounts — tax-exclusive pricing", () => {
     expect(r.netPaise).toBe(4000);
     expect(r.taxPaise).toBe(200);
     expect(r.totalPaise).toBe(4200);
+    expect(r.discountPaise).toBe(0);
   });
 
   it("handles zero tax", () => {
@@ -35,7 +43,29 @@ describe("computeLineAmounts — tax-exclusive pricing", () => {
       taxRateBp: 0,
       pricesIncludeTax: false,
     });
-    expect(r).toEqual({ netPaise: 3100, taxPaise: 0, totalPaise: 3100, cgstPaise: 0, sgstPaise: 0 });
+    expect(r).toEqual({
+      netPaise: 3100,
+      taxPaise: 0,
+      totalPaise: 3100,
+      cgstPaise: 0,
+      sgstPaise: 0,
+      discountPaise: 0,
+    });
+  });
+
+  it("applies line discount before tax (tax-exclusive)", () => {
+    // ₹100 net, ₹20 discount -> ₹80 taxable at 18% -> tax ₹14.40 (1440 paise), total ₹94.40 (9440 paise)
+    const r = computeLineAmounts({
+      qtyMilli: 1000,
+      unitPricePaise: 10_000,
+      taxRateBp: 1800,
+      pricesIncludeTax: false,
+      discountPaise: 2000,
+    });
+    expect(r.discountPaise).toBe(2000);
+    expect(r.netPaise).toBe(8000);
+    expect(r.taxPaise).toBe(1440);
+    expect(r.totalPaise).toBe(9440);
   });
 
   it("rounds line tax half away from zero", () => {
@@ -73,7 +103,29 @@ describe("computeLineAmounts — tax-inclusive pricing", () => {
       taxRateBp: 1800,
       pricesIncludeTax: true,
     });
-    expect(r).toEqual({ netPaise: 10_000, taxPaise: 1800, totalPaise: 11_800, cgstPaise: 900, sgstPaise: 900 });
+    expect(r).toEqual({
+      netPaise: 10_000,
+      taxPaise: 1800,
+      totalPaise: 11_800,
+      cgstPaise: 900,
+      sgstPaise: 900,
+      discountPaise: 0,
+    });
+  });
+
+  it("applies line discount before tax (tax-inclusive)", () => {
+    // ₹118 gross, ₹18 discount -> ₹100 effective gross at 18% -> tax = 100*1800/11800 = 15.25 -> 1525 paise, net = 8475
+    const r = computeLineAmounts({
+      qtyMilli: 1000,
+      unitPricePaise: 11_800,
+      taxRateBp: 1800,
+      pricesIncludeTax: true,
+      discountPaise: 1800,
+    });
+    expect(r.discountPaise).toBe(1800);
+    expect(r.totalPaise).toBe(10_000);
+    expect(r.taxPaise).toBe(1525);
+    expect(r.netPaise).toBe(8475);
   });
 
   it("keeps total = qty × unit price exactly (customer-facing price)", () => {
@@ -97,7 +149,14 @@ describe("computeLineAmounts — tax-inclusive pricing", () => {
       taxRateBp: 0,
       pricesIncludeTax: true,
     });
-    expect(r).toEqual({ netPaise: 999, taxPaise: 0, totalPaise: 999, cgstPaise: 0, sgstPaise: 0 });
+    expect(r).toEqual({
+      netPaise: 999,
+      taxPaise: 0,
+      totalPaise: 999,
+      cgstPaise: 0,
+      sgstPaise: 0,
+      discountPaise: 0,
+    });
   });
 
   it("rounds half away from zero when backing tax out", () => {
@@ -111,6 +170,23 @@ describe("computeLineAmounts — tax-inclusive pricing", () => {
     expect(r.taxPaise).toBe(1);
     expect(r.netPaise).toBe(0);
     expect(r.totalPaise).toBe(1);
+  });
+});
+
+describe("aggregateTaxByRate", () => {
+  it("groups lines by tax rate and accumulates taxable, cgst, sgst, and total tax", () => {
+    const lines = [
+      { netPaise: 1000, taxRateBp: 500, cgstPaise: 25, sgstPaise: 25, taxPaise: 50 },
+      { netPaise: 2000, taxRateBp: 500, cgstPaise: 50, sgstPaise: 50, taxPaise: 100 },
+      { netPaise: 5000, taxRateBp: 1800, cgstPaise: 450, sgstPaise: 450, taxPaise: 900 },
+      { netPaise: 3000, taxRateBp: 0, cgstPaise: 0, sgstPaise: 0, taxPaise: 0 },
+    ];
+    const summary = aggregateTaxByRate(lines);
+    expect(summary).toEqual([
+      { taxRateBp: 0, taxablePaise: 3000, cgstPaise: 0, sgstPaise: 0, totalTaxPaise: 0 },
+      { taxRateBp: 500, taxablePaise: 3000, cgstPaise: 75, sgstPaise: 75, totalTaxPaise: 150 },
+      { taxRateBp: 1800, taxablePaise: 5000, cgstPaise: 450, sgstPaise: 450, totalTaxPaise: 900 },
+    ]);
   });
 });
 

@@ -75,9 +75,9 @@ the Rust shell and takes several minutes; later builds are incremental.
   information…"; allow it. Clear the entries in Keychain Access under the
   service name the shell uses if you need a clean slate.
 - `desktop:build` output is **unsigned and not notarized** (`B0-6`), so
-  Gatekeeper blocks it on other Macs. For local testing flip it once per
-  app with `xattr -dr com.apple.quarantine "/Applications/MyTownCart Billing.app"`,
-  or `open -a` it from Finder with right-click → Open.
+  Gatekeeper blocks it on other Macs (showing "is damaged and can't be opened").
+  Clear the quarantine flag once with:
+  `xattr -cr "/Applications/MyTownCart Billing.app"`.
 - Apple Silicon and Intel runners both work; `pnpm desktop:build` produces a
   binary for the host architecture only. Universal builds need
   `cargo tauri build --target universal-apple-darwin` (Rust targets for both

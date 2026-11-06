@@ -145,6 +145,43 @@ fn upsert_customer(
 }
 
 #[tauri::command]
+fn delete_customer(
+    state: tauri::State<'_, AppState>,
+    customer_id: i64,
+) -> Result<bool, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::delete_customer(&conn, customer_id)
+}
+
+#[tauri::command]
+fn record_customer_payment(
+    state: tauri::State<'_, AppState>,
+    payment: repo::CustomerPaymentPayload,
+) -> Result<i64, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::record_customer_payment(&conn, &payment)
+}
+
+#[tauri::command]
+fn list_customer_payments(
+    state: tauri::State<'_, AppState>,
+    customer_id: i64,
+) -> Result<Vec<repo::CustomerPaymentRow>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::list_customer_payments(&conn, customer_id)
+}
+
+#[tauri::command]
+fn get_bills_report_data(
+    state: tauri::State<'_, AppState>,
+    from: Option<String>,
+    to: Option<String>,
+) -> Result<Vec<repo::ReportBillData>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::get_bills_report_data(&conn, from.as_deref(), to.as_deref())
+}
+
+#[tauri::command]
 fn upsert_item(state: tauri::State<'_, AppState>, item: repo::ItemPayload) -> Result<i64, String> {
     let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
     repo::upsert_item(&mut conn, &item)
@@ -189,6 +226,141 @@ fn void_bill(
 ) -> Result<(), String> {
     let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
     repo::void_bill(&mut conn, bill_id, &reason, &voided_at)
+}
+
+#[tauri::command]
+fn create_credit_note(
+    state: tauri::State<'_, AppState>,
+    credit_note: repo::NewCreditNotePayload,
+) -> Result<repo::CreatedCreditNote, String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::create_credit_note(&mut conn, &credit_note)
+}
+
+#[tauri::command]
+fn list_credit_notes(
+    state: tauri::State<'_, AppState>,
+    bill_id: Option<i64>,
+) -> Result<Vec<repo::CreditNoteRow>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::list_credit_notes(&conn, bill_id)
+}
+
+#[tauri::command]
+fn get_credit_note(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+) -> Result<Option<repo::CreditNoteRow>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::get_credit_note(&conn, id)
+}
+
+#[tauri::command]
+fn upsert_supplier(
+    state: tauri::State<'_, AppState>,
+    supplier: repo::SupplierPayload,
+) -> Result<i64, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::upsert_supplier(&conn, &supplier)
+}
+
+#[tauri::command]
+fn list_suppliers(
+    state: tauri::State<'_, AppState>,
+    search: Option<String>,
+) -> Result<Vec<repo::SupplierRow>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::list_suppliers(&conn, search)
+}
+
+#[tauri::command]
+fn delete_supplier(
+    state: tauri::State<'_, AppState>,
+    supplier_id: i64,
+) -> Result<bool, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::delete_supplier(&conn, supplier_id)
+}
+
+#[tauri::command]
+fn create_purchase(
+    state: tauri::State<'_, AppState>,
+    purchase: repo::NewPurchasePayload,
+) -> Result<i64, String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::create_purchase(&mut conn, &purchase)
+}
+
+#[tauri::command]
+fn list_purchases(
+    state: tauri::State<'_, AppState>,
+    supplier_id: Option<i64>,
+) -> Result<Vec<repo::PurchaseRow>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::list_purchases(&conn, supplier_id)
+}
+
+#[tauri::command]
+fn get_purchase(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+) -> Result<Option<repo::PurchaseRow>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::get_purchase(&conn, id)
+}
+
+#[tauri::command]
+fn upsert_user(
+    state: tauri::State<'_, AppState>,
+    user: repo::UserPayload,
+) -> Result<i64, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::upsert_user(&conn, &user)
+}
+
+#[tauri::command]
+fn list_users(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<repo::UserRow>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::list_users(&conn)
+}
+
+#[tauri::command]
+fn verify_pin(
+    state: tauri::State<'_, AppState>,
+    pin: String,
+    required_role: Option<String>,
+) -> Result<Option<repo::UserRow>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::verify_pin(&conn, &pin, required_role.as_deref())
+}
+
+#[tauri::command]
+fn record_audit_log(
+    state: tauri::State<'_, AppState>,
+    audit_log: repo::AuditLogPayload,
+) -> Result<i64, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::record_audit_log(&conn, &audit_log)
+}
+
+#[tauri::command]
+fn list_audit_logs(
+    state: tauri::State<'_, AppState>,
+    limit: Option<i64>,
+) -> Result<Vec<repo::AuditLogRow>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::list_audit_logs(&conn, limit)
+}
+
+#[tauri::command]
+fn apply_stock_audit(
+    state: tauri::State<'_, AppState>,
+    discrepancies: Vec<repo::StockDiscrepancyPayload>,
+) -> Result<i64, String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::apply_stock_audit(&mut conn, &discrepancies)
 }
 
 #[tauri::command]
@@ -412,6 +584,136 @@ fn restore_snapshot(state: tauri::State<'_, AppState>, gz: Vec<u8>) -> Result<St
     result
 }
 
+// ---------------------------------------------------------------------------
+// Phase 3 Smart-Merchant Commands
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn upsert_batch(
+    state: tauri::State<'_, AppState>,
+    batch: repo::BatchPayload,
+) -> Result<i64, String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::upsert_batch(&mut conn, &batch)
+}
+
+#[tauri::command]
+fn list_batches_for_item(
+    state: tauri::State<'_, AppState>,
+    item_id: i64,
+) -> Result<Vec<repo::BatchRow>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::list_batches_for_item(&conn, item_id)
+}
+
+#[tauri::command]
+fn list_expiring_batches(
+    state: tauri::State<'_, AppState>,
+    days_threshold: i64,
+    now_iso: String,
+) -> Result<Vec<repo::BatchRow>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::list_expiring_batches(&conn, days_threshold, &now_iso)
+}
+
+#[tauri::command]
+fn update_customer_loyalty(
+    state: tauri::State<'_, AppState>,
+    customer_id: i64,
+    points_delta: i64,
+    bill_id: Option<i64>,
+    reason: String,
+    created_at: String,
+) -> Result<i64, String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::update_customer_loyalty(&mut conn, customer_id, points_delta, bill_id, &reason, &created_at)
+}
+
+#[tauri::command]
+fn get_customer_loyalty_balance(
+    state: tauri::State<'_, AppState>,
+    customer_id: i64,
+) -> Result<i64, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::get_customer_loyalty_balance(&conn, customer_id)
+}
+
+#[tauri::command]
+fn list_loyalty_transactions(
+    state: tauri::State<'_, AppState>,
+    customer_id: i64,
+) -> Result<Vec<repo::LoyaltyTransactionRow>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::list_loyalty_transactions(&conn, customer_id)
+}
+
+#[tauri::command]
+fn upsert_item_barcode(
+    state: tauri::State<'_, AppState>,
+    item_id: i64,
+    barcode: String,
+    pack_qty_milli: i64,
+    label: String,
+) -> Result<i64, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::upsert_item_barcode(&conn, item_id, &barcode, pack_qty_milli, &label)
+}
+
+#[tauri::command]
+fn list_item_barcodes(
+    state: tauri::State<'_, AppState>,
+    item_id: i64,
+) -> Result<Vec<repo::ItemBarcodeRow>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::list_item_barcodes(&conn, item_id)
+}
+
+#[tauri::command]
+fn delete_item_barcode(
+    state: tauri::State<'_, AppState>,
+    barcode_id: i64,
+) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::delete_item_barcode(&conn, barcode_id)
+}
+
+#[tauri::command]
+fn lookup_item_by_any_barcode(
+    state: tauri::State<'_, AppState>,
+    barcode: String,
+) -> Result<Option<repo::BarcodeLookupRow>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::lookup_item_by_any_barcode(&conn, &barcode)
+}
+
+#[tauri::command]
+fn create_day_end_closure(
+    state: tauri::State<'_, AppState>,
+    closure: repo::DayEndClosurePayload,
+) -> Result<i64, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::create_day_end_closure(&conn, &closure)
+}
+
+#[tauri::command]
+fn list_day_end_closures(
+    state: tauri::State<'_, AppState>,
+    from_date: Option<String>,
+    to_date: Option<String>,
+) -> Result<Vec<repo::DayEndClosureRow>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::list_day_end_closures(&conn, from_date.as_deref(), to_date.as_deref())
+}
+
+#[tauri::command]
+fn get_day_end_expected_cash(
+    state: tauri::State<'_, AppState>,
+    date_prefix: String,
+) -> Result<repo::DayEndExpectedCashRow, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::get_day_end_expected_cash(&conn, &date_prefix)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(driver_script: Option<String>) {
     let script = driver_script.map(std::sync::Arc::new);
@@ -459,11 +761,30 @@ pub fn run(driver_script: Option<String>) {
             save_shop_profile,
             upsert_category,
             upsert_customer,
+            delete_customer,
+            record_customer_payment,
+            list_customer_payments,
+            get_bills_report_data,
             upsert_item,
             import_items,
             adjust_stock,
             create_bill,
             void_bill,
+            create_credit_note,
+            list_credit_notes,
+            get_credit_note,
+            upsert_supplier,
+            list_suppliers,
+            delete_supplier,
+            create_purchase,
+            list_purchases,
+            get_purchase,
+            upsert_user,
+            list_users,
+            verify_pin,
+            record_audit_log,
+            list_audit_logs,
+            apply_stock_audit,
             record_publish,
             set_item_photo,
             clear_item_photo,
@@ -488,6 +809,19 @@ pub fn run(driver_script: Option<String>) {
             backup_file_info,
             same_volume,
             restore_snapshot,
+            upsert_batch,
+            list_batches_for_item,
+            list_expiring_batches,
+            update_customer_loyalty,
+            get_customer_loyalty_balance,
+            list_loyalty_transactions,
+            upsert_item_barcode,
+            list_item_barcodes,
+            delete_item_barcode,
+            lookup_item_by_any_barcode,
+            create_day_end_closure,
+            list_day_end_closures,
+            get_day_end_expected_cash,
         ])
         .run(tauri::generate_context!())
         .expect("error while running MyTownCart Billing");

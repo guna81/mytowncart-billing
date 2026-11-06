@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
-import { formatQty, isLowStock, parseQty } from "@mytowncart-billing/core";
-import type { Item, StockMovementRecord } from "@mytowncart-billing/storage";
+import { formatQty, isBatchExpired, isBatchNearExpiry, isLowStock, parseQty } from "@mytowncart-billing/core";
+import type { Item, ItemBatch, StockMovementRecord } from "@mytowncart-billing/storage";
 import { t, type I18nKey } from "../i18n";
 import { getRepository } from "../lib/repository";
 import { useAppStore } from "../store/appStore";
@@ -93,13 +93,38 @@ function AdjustDialog({
 
 function MovementHistory({ item }: { item: Item }) {
   const [rows, setRows] = useState<StockMovementRecord[]>([]);
+  const [batches, setBatches] = useState<ItemBatch[]>([]);
 
   useEffect(() => {
     void getRepository().listMovements(item.id).then(setRows);
+    void getRepository().listBatchesForItem(item.id).then(setBatches);
   }, [item.id]);
 
   return (
     <div className="mt-3 rounded border border-gray-200 bg-gray-50 p-3">
+      {batches.length > 0 && (
+        <div className="mb-3 border-b border-gray-200 pb-3">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-gray-600">
+            Batches & Expiry (FIFO):
+          </p>
+          <div className="space-y-1 text-xs font-mono">
+            {batches.map((b) => {
+              const expired = isBatchExpired(b.expiryDate);
+              const near = isBatchNearExpiry(b.expiryDate);
+              return (
+                <div key={b.id} className="flex items-center justify-between">
+                  <span>Batch: {b.batchNo} · Exp: {b.expiryDate}</span>
+                  <span>
+                    {formatQty(b.stockMilli)} units
+                    {expired && <span className="ml-2 text-red-600 font-bold">EXPIRED</span>}
+                    {near && !expired && <span className="ml-2 text-amber-600 font-bold">NEAR EXPIRY</span>}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <p className="mb-2 text-sm font-semibold">{t("stock.history_for", { name: item.name })}</p>
       {rows.length === 0 ? (
         <p className="text-sm text-gray-500">{t("stock.empty")}</p>
@@ -135,13 +160,18 @@ export function StockScreen() {
   const dataVersion = useAppStore((s) => s.dataVersion);
   const bumpDataVersion = useAppStore((s) => s.bumpDataVersion);
 
+  const [activeTab, setActiveTab] = useState<"stock" | "expiring">("stock");
   const [items, setItems] = useState<Item[]>([]);
+  const [expiringBatches, setExpiringBatches] = useState<ItemBatch[]>([]);
   const [lowOnly, setLowOnly] = useState(false);
   const [adjusting, setAdjusting] = useState<Item | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
-    setItems(await getRepository().listItems({ activeOnly: true }));
+    const allItems = await getRepository().listItems({ activeOnly: true });
+    setItems(allItems);
+    const expiring = await getRepository().listExpiringBatches(60);
+    setExpiringBatches(expiring);
   }, []);
 
   useEffect(() => {
@@ -153,22 +183,109 @@ export function StockScreen() {
     ? items.filter((i) => isLowStock(i.stockMilli, threshold))
     : items;
 
+  const itemMap = new Map<number, Item>(items.map((i) => [i.id, i]));
+
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-lg font-bold">{t("stock.title")}</h1>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            data-testid="stock-low-only"
-            checked={lowOnly}
-            onChange={(e) => setLowOnly(e.target.checked)}
-          />
-          {t("stock.low_only")}
-        </label>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-bold">{t("stock.title")}</h1>
+          <div className="flex rounded-md bg-gray-200 p-0.5 text-xs font-medium">
+            <button
+              type="button"
+              data-testid="stock-tab-all"
+              onClick={() => setActiveTab("stock")}
+              className={`rounded px-3 py-1.5 transition-colors ${
+                activeTab === "stock"
+                  ? "bg-white text-gray-900 shadow-xs font-semibold"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              Current Stock
+            </button>
+            <button
+              type="button"
+              data-testid="stock-tab-expiring"
+              onClick={() => setActiveTab("expiring")}
+              className={`rounded px-3 py-1.5 transition-colors flex items-center gap-1.5 ${
+                activeTab === "expiring"
+                  ? "bg-white text-gray-900 shadow-xs font-semibold"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              <span>Expiring Batches</span>
+              {expiringBatches.length > 0 && (
+                <span className="rounded-full bg-amber-500 px-1.5 py-0.2 text-[10px] text-white font-bold">
+                  {expiringBatches.length}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {activeTab === "stock" && (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              data-testid="stock-low-only"
+              checked={lowOnly}
+              onChange={(e) => setLowOnly(e.target.checked)}
+            />
+            {t("stock.low_only")}
+          </label>
+        )}
       </div>
 
-      {visible.length === 0 ? (
+      {activeTab === "expiring" ? (
+        <div data-testid="expiring-batches-table">
+          {expiringBatches.length === 0 ? (
+            <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-gray-500 text-sm">
+              No batches expiring within the next 60 days. All inventory is fresh.
+            </div>
+          ) : (
+            <table className="w-full rounded border border-gray-200 bg-white text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-left text-gray-500">
+                  <th className="px-3 py-2">{t("print.item")}</th>
+                  <th className="px-3 py-2">Batch No</th>
+                  <th className="px-3 py-2">Expiry Date</th>
+                  <th className="px-3 py-2 text-right">Available Units</th>
+                  <th className="px-3 py-2 text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {expiringBatches.map((b) => {
+                  const item = itemMap.get(b.itemId);
+                  const expired = isBatchExpired(b.expiryDate);
+                  return (
+                    <tr key={b.id} className="border-b border-gray-100 last:border-0">
+                      <td className="px-3 py-2 font-medium text-gray-900">
+                        {item?.name || `Item #${b.itemId}`}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-xs">{b.batchNo}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{b.expiryDate}</td>
+                      <td className="px-3 py-2 text-right font-mono font-medium">
+                        {formatQty(b.stockMilli)}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {expired ? (
+                          <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700">
+                            EXPIRED
+                          </span>
+                        ) : (
+                          <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800">
+                            Expiring Soon
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      ) : visible.length === 0 ? (
         <p className="text-sm text-gray-500">{t("items.empty")}</p>
       ) : (
         <table className="w-full rounded border border-gray-200 bg-white text-sm">

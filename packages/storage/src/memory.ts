@@ -7,7 +7,7 @@
  * and Playwright).
  */
 
-import { formatInvoiceNumber, localIsoTimestamp } from "@mytowncart-billing/core";
+import { formatInvoiceNumber, localIsoTimestamp, sortBatchesFifo, type ReportBill } from "@mytowncart-billing/core";
 import type {
   BillingRepository,
   BillFilter,
@@ -16,24 +16,51 @@ import type {
   NewBillPayload,
 } from "./repository";
 import type {
+  AuditLog,
+  AuditLogInput,
+  BarcodeLookupResult,
+  BatchInput,
   BillDetail,
   BillLineRow,
   BillSummary,
   Category,
+  CreditNote,
+  CreditNoteLine,
   Customer,
+  CustomerInput,
+  CustomerLedgerEntry,
+  CustomerLedgerSummary,
+  CustomerPayment,
+  CustomerPaymentInput,
+  DayEndClosure,
+  DayEndClosureInput,
+  DayEndExpectedCash,
   HeldBill,
   HeldBillInput,
   ImportRowOutcome,
   Item,
+  ItemBarcode,
+  ItemBatch,
   ItemInput,
+  LoyaltyTransaction,
+  NewCreditNotePayload,
+  NewPurchasePayload,
   OutboxRow,
   PaymentRow,
   PublishOutcome,
+  Purchase,
+  PurchaseLine,
   ReconcileFix,
   RemoteItemLink,
   RemoteOrderRecord,
   ShopProfile,
+  StockDiscrepancyInput,
   StockMovementRecord,
+  Supplier,
+  SupplierInput,
+  User,
+  UserInput,
+  UserRole,
 } from "./types";
 
 interface MemoryPhoto {
@@ -48,12 +75,23 @@ export class MemoryRepository implements BillingRepository {
   private categories = new Map<number, Category>();
   private items = new Map<number, Item>();
   private customers = new Map<number, Customer>();
+  private customerPayments: CustomerPayment[] = [];
   private bills = new Map<number, BillDetail>();
+  private creditNotes = new Map<number, CreditNote>();
+  private suppliers = new Map<number, Supplier>();
+  private purchases = new Map<number, Purchase>();
+  private users = new Map<number, User>();
+  private auditLogs: AuditLog[] = [];
+  private batches = new Map<number, ItemBatch>();
+  private loyaltyTransactions: LoyaltyTransaction[] = [];
+  private itemBarcodes = new Map<number, ItemBarcode>();
+  private dayEndClosures = new Map<number, DayEndClosure>();
   private movements: StockMovementRecord[] = [];
   private invoiceCounters = new Map<string, number>(); // `${fy}${prefix}` -> next seq
   private nextIds = {
-    category: 1, item: 1, customer: 1, bill: 1, line: 1, payment: 1, movement: 1, held: 1,
-    outbox: 1,
+    category: 1, item: 1, customer: 1, customerPayment: 1, bill: 1, line: 1, payment: 1, movement: 1, held: 1,
+    outbox: 1, creditNote: 1, creditNoteLine: 1, supplier: 1, purchase: 1, purchaseLine: 1, user: 1, auditLog: 1,
+    batch: 1, loyaltyTx: 1, itemBarcode: 1, dayEndClosure: 1,
   };
   private photos = new Map<number, MemoryPhoto>();
   private held = new Map<number, HeldBill>();
@@ -162,6 +200,8 @@ export class MemoryRepository implements BillingRepository {
         mrpPaise: input.mrpPaise,
         taxRateBp: input.taxRateBp,
         isActive: input.isActive,
+        hsnCode: input.hsnCode ?? existing.hsnCode ?? "",
+        costPricePaise: input.costPricePaise ?? existing.costPricePaise ?? 0,
         updatedAt: now,
       });
       return input.id;
@@ -195,6 +235,8 @@ export class MemoryRepository implements BillingRepository {
       imageHash: null,
       imageUploadedAt: null,
       remoteHash: null,
+      hsnCode: input.hsnCode ?? "",
+      costPricePaise: input.costPricePaise ?? 0,
       updatedAt: now,
     });
     if (input.openingStockMilli !== 0) {
@@ -226,7 +268,7 @@ export class MemoryRepository implements BillingRepository {
     return rows.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  async upsertCustomer(input: { id?: number; name: string; phone: string }): Promise<number> {
+  async upsertCustomer(input: CustomerInput): Promise<number> {
     if (input.name.trim() === "") throw new Error("customer name is required");
     const now = localIsoTimestamp(new Date());
     if (input.id !== undefined) {
@@ -234,12 +276,122 @@ export class MemoryRepository implements BillingRepository {
       if (!existing) throw new Error(`no customer with id ${input.id}`);
       existing.name = input.name;
       existing.phone = input.phone;
+      existing.gstin = input.gstin ?? existing.gstin ?? "";
+      existing.address = input.address ?? existing.address ?? "";
       existing.updatedAt = now;
       return input.id;
     }
     const id = this.nextIds.customer++;
-    this.customers.set(id, { id, name: input.name, phone: input.phone, createdAt: now, updatedAt: now });
+    this.customers.set(id, {
+      id,
+      name: input.name,
+      phone: input.phone,
+      gstin: input.gstin ?? "",
+      address: input.address ?? "",
+      loyaltyPoints: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
     return id;
+  }
+
+  async deleteCustomer(id: number): Promise<boolean> {
+    // Check if customer has bills
+    const hasBills = [...this.bills.values()].some((b) => b.customerId === id);
+    if (hasBills) {
+      throw new Error("cannot delete customer with existing bills");
+    }
+    const hasPayments = this.customerPayments.some((p) => p.customerId === id);
+    if (hasPayments) {
+      throw new Error("cannot delete customer with existing payment records");
+    }
+    return this.customers.delete(id);
+  }
+
+  async recordCustomerPayment(input: CustomerPaymentInput): Promise<number> {
+    if (input.amountPaise <= 0) throw new Error("payment amount must be positive");
+    const customer = this.customers.get(input.customerId);
+    if (!customer) throw new Error(`no customer with id ${input.customerId}`);
+    const id = this.nextIds.customerPayment++;
+    const payment: CustomerPayment = {
+      id,
+      customerId: input.customerId,
+      amountPaise: input.amountPaise,
+      mode: input.mode,
+      notes: input.notes ?? "",
+      createdAt: input.createdAt ?? localIsoTimestamp(new Date()),
+    };
+    this.customerPayments.push(payment);
+    return id;
+  }
+
+  async listCustomerPayments(customerId: number): Promise<CustomerPayment[]> {
+    return this.customerPayments
+      .filter((p) => p.customerId === customerId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id - b.id);
+  }
+
+  async getCustomerLedger(customerId: number): Promise<CustomerLedgerSummary> {
+    const customer = this.customers.get(customerId);
+    if (!customer) throw new Error(`no customer with id ${customerId}`);
+
+    const customerBills = [...this.bills.values()].filter(
+      (b) => b.customerId === customerId && b.status === "active",
+    );
+    const payments = await this.listCustomerPayments(customerId);
+
+    const entries: CustomerLedgerEntry[] = [];
+    let totalCreditBilled = 0;
+
+    for (const b of customerBills) {
+      const creditPaid = b.payments
+        .filter((p) => p.mode === "credit")
+        .reduce((sum, p) => sum + p.amountPaise, 0);
+      if (creditPaid > 0) {
+        totalCreditBilled += creditPaid;
+        entries.push({
+          id: `bill-${b.id}`,
+          type: "credit_bill",
+          date: b.createdAt,
+          refNumber: b.number,
+          description: `Credit bill ${b.number}`,
+          debitPaise: creditPaid,
+          creditPaise: 0,
+          balancePaise: 0,
+        });
+      }
+    }
+
+    let totalPaid = 0;
+    for (const p of payments) {
+      totalPaid += p.amountPaise;
+      entries.push({
+        id: `pay-${p.id}`,
+        type: "payment",
+        date: p.createdAt,
+        refNumber: `REC-${p.id}`,
+        description: `Payment received (${p.mode.toUpperCase()})${p.notes ? ` - ${p.notes}` : ""}`,
+        debitPaise: 0,
+        creditPaise: p.amountPaise,
+        balancePaise: 0,
+      });
+    }
+
+    entries.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+
+    let runningBalance = 0;
+    for (const entry of entries) {
+      runningBalance += entry.debitPaise - entry.creditPaise;
+      entry.balancePaise = runningBalance;
+    }
+
+    return {
+      customer,
+      totalCreditBilledPaise: totalCreditBilled,
+      totalPaidPaise: totalPaid,
+      outstandingBalancePaise: totalCreditBilled - totalPaid,
+      entries,
+    };
   }
 
   private recordMovement(
@@ -307,6 +459,8 @@ export class MemoryRepository implements BillingRepository {
       taxRateBp: l.taxRateBp,
       taxPaise: l.taxPaise,
       totalPaise: l.totalPaise,
+      discountPaise: l.discountPaise ?? 0,
+      hsnCode: l.hsnCode ?? "",
     }));
     const payments: PaymentRow[] = bill.payments.map((p) => ({
       id: this.nextIds.payment++,
@@ -325,6 +479,9 @@ export class MemoryRepository implements BillingRepository {
       subtotalPaise: bill.subtotalPaise,
       taxPaise: bill.taxPaise,
       totalPaise: bill.totalPaise,
+      discountPaise: bill.discountPaise ?? 0,
+      roundOffPaise: bill.roundOffPaise ?? 0,
+      notes: bill.notes ?? "",
       createdAt: bill.createdAt,
       voidedAt: null,
       voidReason: null,
@@ -369,6 +526,33 @@ export class MemoryRepository implements BillingRepository {
 
   async getBill(id: number): Promise<BillDetail | null> {
     return this.bills.get(id) ?? null;
+  }
+
+  async getBillsReportData(filter?: BillFilter): Promise<ReportBill[]> {
+    let rows = [...this.bills.values()];
+    if (filter?.from) rows = rows.filter((b) => b.createdAt >= filter.from!);
+    if (filter?.to) rows = rows.filter((b) => b.createdAt <= filter.to!);
+    rows.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id - b.id);
+    return rows.map((b) => ({
+      id: b.id,
+      number: b.number,
+      status: b.status,
+      createdAt: b.createdAt,
+      subtotalPaise: b.subtotalPaise,
+      taxPaise: b.taxPaise,
+      totalPaise: b.totalPaise,
+      lines: b.lines.map((l) => ({
+        itemId: l.itemId,
+        nameSnapshot: l.nameSnapshot,
+        qtyMilli: l.qtyMilli,
+        totalPaise: l.totalPaise,
+        taxPaise: l.taxPaise,
+      })),
+      payments: b.payments.map((p) => ({
+        mode: p.mode,
+        amountPaise: p.amountPaise,
+      })),
+    }));
   }
 
   async adjustStock(
@@ -576,5 +760,537 @@ export class MemoryRepository implements BillingRepository {
   async setAppSetting(key: string, value: string | null): Promise<void> {
     if (value === null) this.appSettings.delete(key);
     else this.appSettings.set(key, value);
+  }
+
+  // --- Phase 2: Credit Notes ------------------------------------------------
+
+  async createCreditNote(payload: NewCreditNotePayload): Promise<{ creditNoteId: number; number: string }> {
+    if (payload.lines.length === 0) throw new Error("a credit note needs at least one line");
+    if (!payload.reason.trim()) throw new Error("credit note reason is required");
+    const bill = this.bills.get(payload.billId);
+    if (!bill) throw new Error(`no bill with id ${payload.billId}`);
+
+    const fy = bill.fy;
+    const key = `${fy}CN-`;
+    const seq = this.invoiceCounters.get(key) ?? 1;
+    this.invoiceCounters.set(key, seq + 1);
+    const number = `CN-${fy}-${String(seq).padStart(4, "0")}`;
+
+    let subtotalPaise = 0;
+    let taxPaise = 0;
+    let totalPaise = 0;
+    for (const line of payload.lines) {
+      subtotalPaise += line.totalPaise - line.taxPaise;
+      taxPaise += line.taxPaise;
+      totalPaise += line.totalPaise;
+    }
+
+    const id = this.nextIds.creditNote++;
+    const lines: CreditNoteLine[] = payload.lines.map((l) => {
+      const lineId = this.nextIds.creditNoteLine++;
+      if (l.itemId !== null) {
+        const item = this.items.get(l.itemId);
+        if (item) {
+          this.recordMovement(l.itemId, l.qtyMilli, "return", "credit_note", String(id));
+        }
+      }
+      return {
+        id: lineId,
+        creditNoteId: id,
+        itemId: l.itemId,
+        nameSnapshot: l.nameSnapshot,
+        qtyMilli: l.qtyMilli,
+        unitPricePaise: l.unitPricePaise,
+        taxRateBp: l.taxRateBp,
+        taxPaise: l.taxPaise,
+        totalPaise: l.totalPaise,
+        hsnCode: l.hsnCode ?? "",
+      };
+    });
+
+    const note: CreditNote = {
+      id,
+      billId: payload.billId,
+      number,
+      fy,
+      reason: payload.reason.trim(),
+      subtotalPaise,
+      taxPaise,
+      totalPaise,
+      createdAt: payload.createdAt || localIsoTimestamp(new Date()),
+      lines,
+    };
+    this.creditNotes.set(id, note);
+    return { creditNoteId: id, number };
+  }
+
+  async listCreditNotes(billId?: number): Promise<CreditNote[]> {
+    const list = [...this.creditNotes.values()];
+    const filtered = billId !== undefined ? list.filter((n) => n.billId === billId) : list;
+    return filtered.sort((a, b) => b.id - a.id);
+  }
+
+  async getCreditNote(id: number): Promise<CreditNote | null> {
+    return this.creditNotes.get(id) ?? null;
+  }
+
+  // --- Phase 2: Suppliers & Purchases ---------------------------------------
+
+  async listSuppliers(search?: string): Promise<Supplier[]> {
+    let list = [...this.suppliers.values()];
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter(
+        (s) =>
+          s.name.toLowerCase().includes(q) ||
+          s.phone.toLowerCase().includes(q) ||
+          s.gstin.toLowerCase().includes(q),
+      );
+    }
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async upsertSupplier(input: SupplierInput): Promise<number> {
+    if (!input.name.trim()) throw new Error("supplier name is required");
+    if (input.id !== undefined) {
+      const existing = this.suppliers.get(input.id);
+      if (!existing) throw new Error(`no supplier with id ${input.id}`);
+      existing.name = input.name.trim();
+      existing.phone = input.phone?.trim() ?? existing.phone;
+      existing.gstin = input.gstin?.trim() ?? existing.gstin;
+      existing.address = input.address?.trim() ?? existing.address;
+      return existing.id;
+    }
+    const id = this.nextIds.supplier++;
+    const s: Supplier = {
+      id,
+      name: input.name.trim(),
+      phone: input.phone?.trim() ?? "",
+      gstin: input.gstin?.trim() ?? "",
+      address: input.address?.trim() ?? "",
+      createdAt: localIsoTimestamp(new Date()),
+    };
+    this.suppliers.set(id, s);
+    return id;
+  }
+
+  async deleteSupplier(id: number): Promise<boolean> {
+    for (const p of this.purchases.values()) {
+      if (p.supplierId === id) throw new Error("cannot delete supplier with recorded purchases");
+    }
+    return this.suppliers.delete(id);
+  }
+
+  async createPurchase(payload: NewPurchasePayload): Promise<{ purchaseId: number }> {
+    if (payload.lines.length === 0) throw new Error("a purchase invoice needs at least one line");
+    if (!payload.invoiceNo.trim()) throw new Error("purchase invoice number is required");
+    const supplier = this.suppliers.get(payload.supplierId);
+    if (!supplier) throw new Error(`no supplier with id ${payload.supplierId}`);
+
+    let subtotal = 0;
+    let tax = 0;
+    let total = 0;
+    const id = this.nextIds.purchase++;
+
+    const lines: PurchaseLine[] = payload.lines.map((l) => {
+      if (l.qtyMilli <= 0) throw new Error("quantity must be positive");
+      const lineSubtotal = Math.floor((l.qtyMilli * l.unitCostPaise) / 1000);
+      const lineTax = Math.floor((lineSubtotal * l.taxRateBp + 5000) / 10000);
+      const lineTotal = lineSubtotal + lineTax;
+      subtotal += lineSubtotal;
+      tax += lineTax;
+      total += lineTotal;
+
+      if (l.itemId !== null) {
+        const item = this.items.get(l.itemId);
+        if (item) {
+          item.costPricePaise = l.unitCostPaise;
+          this.recordMovement(l.itemId, l.qtyMilli, "purchase", "purchase", String(id));
+        }
+      }
+
+      return {
+        id: this.nextIds.purchaseLine++,
+        purchaseId: id,
+        itemId: l.itemId,
+        nameSnapshot: l.nameSnapshot,
+        qtyMilli: l.qtyMilli,
+        unitCostPaise: l.unitCostPaise,
+        taxRateBp: l.taxRateBp,
+        taxPaise: lineTax,
+        totalPaise: lineTotal,
+      };
+    });
+
+    const p: Purchase = {
+      id,
+      supplierId: payload.supplierId,
+      supplierName: supplier.name,
+      invoiceNo: payload.invoiceNo.trim(),
+      invoiceDate: payload.invoiceDate.trim(),
+      subtotalPaise: subtotal,
+      taxPaise: tax,
+      totalPaise: total,
+      status: payload.status ?? "received",
+      createdAt: payload.createdAt || localIsoTimestamp(new Date()),
+      lines,
+    };
+    this.purchases.set(id, p);
+    return { purchaseId: id };
+  }
+
+  async listPurchases(supplierId?: number): Promise<Purchase[]> {
+    let list = [...this.purchases.values()];
+    if (supplierId !== undefined) {
+      list = list.filter((p) => p.supplierId === supplierId);
+    }
+    return list
+      .map((p) => ({
+        ...p,
+        supplierName: this.suppliers.get(p.supplierId)?.name,
+      }))
+      .sort((a, b) => b.id - a.id);
+  }
+
+  async getPurchase(id: number): Promise<Purchase | null> {
+    const p = this.purchases.get(id);
+    if (!p) return null;
+    return {
+      ...p,
+      supplierName: this.suppliers.get(p.supplierId)?.name,
+    };
+  }
+
+  // --- Phase 2: Users & Roles & Audit ---------------------------------------
+
+  async listUsers(): Promise<User[]> {
+    return [...this.users.values()].sort((a, b) => a.id - b.id);
+  }
+
+  async upsertUser(input: UserInput): Promise<number> {
+    if (!input.name.trim()) throw new Error("user name is required");
+    if (input.role !== "owner" && input.role !== "cashier") throw new Error("role must be 'owner' or 'cashier'");
+    if (input.id !== undefined) {
+      const existing = this.users.get(input.id);
+      if (!existing) throw new Error(`no user with id ${input.id}`);
+      existing.name = input.name.trim();
+      existing.role = input.role;
+      existing.pin = input.pin.trim();
+      if (input.isActive !== undefined) existing.isActive = input.isActive;
+      return existing.id;
+    }
+    const id = this.nextIds.user++;
+    const u: User = {
+      id,
+      name: input.name.trim(),
+      role: input.role,
+      pin: input.pin.trim(),
+      isActive: input.isActive ?? true,
+      createdAt: localIsoTimestamp(new Date()),
+    };
+    this.users.set(id, u);
+    return id;
+  }
+
+  async verifyPin(pin: string, requiredRole?: UserRole): Promise<User | null> {
+    const trimmed = pin.trim();
+    if (!trimmed) return null;
+    for (const u of this.users.values()) {
+      if (u.isActive && u.pin === trimmed) {
+        if (!requiredRole || u.role === requiredRole) {
+          return u;
+        }
+      }
+    }
+    return null;
+  }
+
+  async recordAuditLog(input: AuditLogInput): Promise<number> {
+    if (!input.action.trim()) throw new Error("audit action is required");
+    const id = this.nextIds.auditLog++;
+    const user = input.userId ? this.users.get(input.userId) : null;
+    const log: AuditLog = {
+      id,
+      userId: input.userId ?? null,
+      userName: user?.name,
+      action: input.action.trim(),
+      details: input.details?.trim() ?? "",
+      createdAt: input.createdAt || localIsoTimestamp(new Date()),
+    };
+    this.auditLogs.push(log);
+    return id;
+  }
+
+  async listAuditLogs(limit = 100): Promise<AuditLog[]> {
+    return [...this.auditLogs]
+      .map((l) => ({
+        ...l,
+        userName: l.userId ? this.users.get(l.userId)?.name : undefined,
+      }))
+      .sort((a, b) => b.id - a.id)
+      .slice(0, limit);
+  }
+
+  // --- Phase 2: Stock Audit -------------------------------------------------
+
+  async applyStockAudit(discrepancies: StockDiscrepancyInput[]): Promise<number> {
+    let adjusted = 0;
+    for (const disc of discrepancies) {
+      const item = this.items.get(disc.itemId);
+      if (!item) throw new Error(`no item with id ${disc.itemId}`);
+      const delta = disc.physicalCountMilli - item.stockMilli;
+      if (delta !== 0) {
+        this.recordMovement(disc.itemId, delta, "adjustment", "stock_audit", null);
+        adjusted++;
+      }
+    }
+    return adjusted;
+  }
+
+  // --- Phase 3: Batches & Expiry --------------------------------------------
+
+  async upsertBatch(input: BatchInput): Promise<number> {
+    if (!input.batchNo.trim()) throw new Error("batch number is required");
+    if (!input.expiryDate.trim()) throw new Error("expiry date is required");
+
+    if (input.id) {
+      const existing = this.batches.get(input.id);
+      if (!existing) throw new Error(`no batch with id ${input.id}`);
+      const updated: ItemBatch = {
+        ...existing,
+        batchNo: input.batchNo.trim(),
+        mfgDate: input.mfgDate ? input.mfgDate.trim() : null,
+        expiryDate: input.expiryDate.trim(),
+        costPricePaise: input.costPricePaise,
+        mrpPaise: input.mrpPaise,
+        stockMilli: input.stockMilli,
+      };
+      this.batches.set(input.id, updated);
+      return input.id;
+    }
+
+    const id = this.nextIds.batch++;
+    const batch: ItemBatch = {
+      id,
+      itemId: input.itemId,
+      batchNo: input.batchNo.trim(),
+      mfgDate: input.mfgDate ? input.mfgDate.trim() : null,
+      expiryDate: input.expiryDate.trim(),
+      costPricePaise: input.costPricePaise,
+      mrpPaise: input.mrpPaise,
+      stockMilli: input.stockMilli,
+      createdAt: input.createdAt || localIsoTimestamp(new Date()),
+    };
+    this.batches.set(id, batch);
+    return id;
+  }
+
+  async listBatchesForItem(itemId: number): Promise<ItemBatch[]> {
+    const list = Array.from(this.batches.values()).filter((b) => b.itemId === itemId);
+    return sortBatchesFifo(list);
+  }
+
+  async listExpiringBatches(daysThreshold: number): Promise<ItemBatch[]> {
+    const now = new Date();
+    const cutoff = new Date(now.getTime() + daysThreshold * 24 * 60 * 60 * 1000);
+    const cutoffIso = cutoff.toISOString().slice(0, 10);
+    const list = Array.from(this.batches.values()).filter(
+      (b) => b.stockMilli > 0 && b.expiryDate.slice(0, 10) <= cutoffIso,
+    );
+    return sortBatchesFifo(list);
+  }
+
+  // --- Phase 3: Customer Loyalty Points -------------------------------------
+
+  async updateCustomerLoyalty(
+    customerId: number,
+    pointsDelta: number,
+    billId?: number | null,
+    reason?: string,
+  ): Promise<number> {
+    const customer = this.customers.get(customerId);
+    if (!customer) throw new Error(`no customer with id ${customerId}`);
+
+    const newPoints = Math.max(0, (customer.loyaltyPoints ?? 0) + pointsDelta);
+    customer.loyaltyPoints = newPoints;
+
+    const id = this.nextIds.loyaltyTx++;
+    this.loyaltyTransactions.push({
+      id,
+      customerId,
+      billId: billId ?? null,
+      pointsDelta,
+      reason: reason ?? "",
+      createdAt: localIsoTimestamp(new Date()),
+    });
+    return newPoints;
+  }
+
+  async getCustomerLoyaltyBalance(customerId: number): Promise<number> {
+    const customer = this.customers.get(customerId);
+    return customer?.loyaltyPoints ?? 0;
+  }
+
+  async listLoyaltyTransactions(customerId: number): Promise<LoyaltyTransaction[]> {
+    return this.loyaltyTransactions
+      .filter((t) => t.customerId === customerId)
+      .sort((a, b) => b.id - a.id);
+  }
+
+  // --- Phase 3: Multi-Barcodes ----------------------------------------------
+
+  async upsertItemBarcode(
+    itemId: number,
+    barcode: string,
+    packQtyMilli = 1000,
+    label = "",
+  ): Promise<number> {
+    const trimmed = barcode.trim();
+    if (!trimmed) throw new Error("barcode cannot be empty");
+
+    for (const b of this.itemBarcodes.values()) {
+      if (b.barcode === trimmed) {
+        b.itemId = itemId;
+        b.packQtyMilli = packQtyMilli;
+        b.label = label.trim();
+        return b.id;
+      }
+    }
+
+    const id = this.nextIds.itemBarcode++;
+    const row: ItemBarcode = {
+      id,
+      itemId,
+      barcode: trimmed,
+      packQtyMilli,
+      label: label.trim(),
+    };
+    this.itemBarcodes.set(id, row);
+    return id;
+  }
+
+  async listItemBarcodes(itemId: number): Promise<ItemBarcode[]> {
+    return Array.from(this.itemBarcodes.values())
+      .filter((b) => b.itemId === itemId)
+      .sort((a, b) => a.id - b.id);
+  }
+
+  async deleteItemBarcode(barcodeId: number): Promise<void> {
+    this.itemBarcodes.delete(barcodeId);
+  }
+
+  async lookupItemByAnyBarcode(barcode: string): Promise<BarcodeLookupResult | null> {
+    const trimmed = barcode.trim();
+    if (!trimmed) return null;
+
+    // 1. Check secondary barcodes
+    for (const b of this.itemBarcodes.values()) {
+      if (b.barcode === trimmed) {
+        const item = this.items.get(b.itemId);
+        if (item && item.isActive) {
+          return {
+            itemId: item.id,
+            itemName: item.name,
+            barcode: b.barcode,
+            packQtyMilli: b.packQtyMilli,
+            pricePaise: item.pricePaise,
+          };
+        }
+      }
+    }
+
+    // 2. Check primary barcode
+    for (const item of this.items.values()) {
+      if (item.barcode === trimmed && item.isActive) {
+        return {
+          itemId: item.id,
+          itemName: item.name,
+          barcode: item.barcode,
+          packQtyMilli: 1000,
+          pricePaise: item.pricePaise,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  // --- Phase 3: Day-End Closing & Z-Report -----------------------------------
+
+  async createDayEndClosure(input: DayEndClosureInput): Promise<number> {
+    const id = this.nextIds.dayEndClosure++;
+    const user = input.userId ? this.users.get(input.userId) : null;
+    const closure: DayEndClosure = {
+      id,
+      closureDate: input.closureDate.trim(),
+      userId: input.userId ?? null,
+      userName: user?.name,
+      openingCashPaise: input.openingCashPaise,
+      cashSalesPaise: input.cashSalesPaise,
+      creditReceivedPaise: input.creditReceivedPaise,
+      cashRefundsPaise: input.cashRefundsPaise,
+      expectedCashPaise: input.expectedCashPaise,
+      actualCashPaise: input.actualCashPaise,
+      variancePaise: input.variancePaise,
+      totalBillsCount: input.totalBillsCount,
+      totalSalesPaise: input.totalSalesPaise,
+      notes: input.notes?.trim() ?? "",
+      createdAt: input.createdAt || localIsoTimestamp(new Date()),
+    };
+    this.dayEndClosures.set(id, closure);
+    return id;
+  }
+
+  async listDayEndClosures(fromDate?: string, toDate?: string): Promise<DayEndClosure[]> {
+    let list = Array.from(this.dayEndClosures.values());
+    if (fromDate) {
+      list = list.filter((c) => c.closureDate >= fromDate);
+    }
+    if (toDate) {
+      list = list.filter((c) => c.closureDate <= toDate);
+    }
+    return list.sort((a, b) => b.id - a.id);
+  }
+
+  async getDayEndExpectedCash(datePrefix: string): Promise<DayEndExpectedCash> {
+    const prefix = datePrefix.trim();
+
+    let cashSalesPaise = 0;
+    let totalBillsCount = 0;
+    let totalSalesPaise = 0;
+
+    for (const b of this.bills.values()) {
+      if (b.status === "active" && b.createdAt.startsWith(prefix)) {
+        totalBillsCount++;
+        totalSalesPaise += b.totalPaise;
+        for (const p of b.payments) {
+          if (p.mode === "cash") {
+            cashSalesPaise += p.amountPaise;
+          }
+        }
+      }
+    }
+
+    let creditReceivedPaise = 0;
+    for (const cp of this.customerPayments) {
+      if (cp.mode === "cash" && cp.createdAt.startsWith(prefix)) {
+        creditReceivedPaise += cp.amountPaise;
+      }
+    }
+
+    let cashRefundsPaise = 0;
+    for (const cn of this.creditNotes.values()) {
+      if (cn.createdAt.startsWith(prefix)) {
+        cashRefundsPaise += cn.totalPaise;
+      }
+    }
+
+    return {
+      cashSalesPaise,
+      creditReceivedPaise,
+      cashRefundsPaise,
+      totalBillsCount,
+      totalSalesPaise,
+    };
   }
 }

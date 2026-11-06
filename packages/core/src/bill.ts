@@ -5,6 +5,7 @@
  * function. Mistakes are fixed with void-with-reason (see `validateVoidReason`).
  */
 
+import { allocatePaise, roundDiv } from "./money";
 import { isWholeCount, type UnitKind } from "./quantity";
 import { computeLineAmounts, type LineAmounts } from "./tax";
 
@@ -27,6 +28,10 @@ export interface BillLineInput {
   taxRateBp: number;
   /** `count` items must have whole-unit quantities. */
   unitKind?: UnitKind;
+  /** Line-level discount in paise. */
+  discountPaise?: number;
+  /** HSN/SAC code snapshot. */
+  hsnCode?: string;
 }
 
 export interface ComputedBillLine extends LineAmounts {
@@ -36,30 +41,76 @@ export interface ComputedBillLine extends LineAmounts {
   unitPricePaise: number;
   taxRateBp: number;
   unitKind?: UnitKind;
+  hsnCode: string;
 }
 
 export interface ComputedBill {
   lines: ComputedBillLine[];
-  /** Sum of line nets (before tax). */
+  /** Sum of line nets (taxable value). */
   subtotalPaise: number;
   /** Sum of line taxes. */
   taxPaise: number;
-  /** Sum of line totals = what the customer pays. */
+  /** Sum of line totals before round-off. */
+  unroundedTotalPaise: number;
+  /** Round-off adjustment in paise (to nearest whole rupee). */
+  roundOffPaise: number;
+  /** Total after round-off = what the customer pays. */
   totalPaise: number;
+  /** Total discount across all lines + bill discount. */
+  discountPaise: number;
   cgstPaise: number;
   sgstPaise: number;
 }
 
+export interface ComputeBillOpts {
+  pricesIncludeTax: boolean;
+  /** Bill-level discount in paise; spread proportionally across lines. */
+  billDiscountPaise?: number;
+  /** Round total to nearest whole rupee (0 paise). Default true. */
+  roundOff?: boolean;
+}
+
 export function computeBill(
   lines: BillLineInput[],
-  opts: { pricesIncludeTax: boolean },
+  opts: ComputeBillOpts,
 ): ComputedBill {
-  const computed = lines.map((line): ComputedBillLine => {
+  const billDiscount = Math.max(0, opts.billDiscountPaise ?? 0);
+  const roundOffEnabled = opts.roundOff ?? false;
+
+  // 1. Initial line computation with line discounts only
+  const initialLines = lines.map((line) => {
     const amounts = computeLineAmounts({
       qtyMilli: line.qtyMilli,
       unitPricePaise: line.unitPricePaise,
       taxRateBp: line.taxRateBp,
       pricesIncludeTax: opts.pricesIncludeTax,
+      discountPaise: line.discountPaise ?? 0,
+    });
+    return {
+      line,
+      amounts,
+    };
+  });
+
+  // 2. If bill-level discount is provided, spread it proportionally across lines
+  let finalDiscounts = initialLines.map((l) => l.line.discountPaise ?? 0);
+  if (billDiscount > 0 && initialLines.length > 0) {
+    const weights = initialLines.map((l) => l.amounts.totalPaise);
+    const weightSum = weights.reduce((s, w) => s + w, 0);
+    if (weightSum > 0) {
+      const billDiscountShares = allocatePaise(Math.min(billDiscount, weightSum), weights);
+      finalDiscounts = finalDiscounts.map((d, i) => d + (billDiscountShares[i] ?? 0));
+    }
+  }
+
+  // 3. Compute final line amounts with combined discounts
+  const computed: ComputedBillLine[] = lines.map((line, i) => {
+    const amounts = computeLineAmounts({
+      qtyMilli: line.qtyMilli,
+      unitPricePaise: line.unitPricePaise,
+      taxRateBp: line.taxRateBp,
+      pricesIncludeTax: opts.pricesIncludeTax,
+      discountPaise: finalDiscounts[i],
     });
     return {
       itemId: line.itemId,
@@ -68,16 +119,37 @@ export function computeBill(
       unitPricePaise: line.unitPricePaise,
       taxRateBp: line.taxRateBp,
       unitKind: line.unitKind,
+      hsnCode: line.hsnCode ?? "",
       ...amounts,
     };
   });
+
   const sum = (pick: (l: ComputedBillLine) => number) =>
     computed.reduce((s, l) => s + pick(l), 0);
+
+  const subtotalPaise = sum((l) => l.netPaise);
+  const taxPaise = sum((l) => l.taxPaise);
+  const unroundedTotalPaise = sum((l) => l.totalPaise);
+  const discountPaise = sum((l) => l.discountPaise);
+
+  let roundOffPaise = 0;
+  let totalPaise = unroundedTotalPaise;
+
+  if (roundOffEnabled && unroundedTotalPaise > 0) {
+    // Nearest rupee: round(paise / 100) * 100
+    const rounded = roundDiv(unroundedTotalPaise, 100) * 100;
+    roundOffPaise = rounded - unroundedTotalPaise;
+    totalPaise = rounded;
+  }
+
   return {
     lines: computed,
-    subtotalPaise: sum((l) => l.netPaise),
-    taxPaise: sum((l) => l.taxPaise),
-    totalPaise: sum((l) => l.totalPaise),
+    subtotalPaise,
+    taxPaise,
+    unroundedTotalPaise,
+    roundOffPaise,
+    totalPaise,
+    discountPaise,
     cgstPaise: sum((l) => l.cgstPaise),
     sgstPaise: sum((l) => l.sgstPaise),
   };
@@ -88,6 +160,10 @@ export interface PaymentInput {
   amountPaise: number;
 }
 
+export interface ValidateBillOpts {
+  customerId?: number | null;
+}
+
 /**
  * Validate a computed bill + its payments before saving. Returns a list of
  * machine-readable error codes ("" none). Rules:
@@ -95,8 +171,13 @@ export interface PaymentInput {
  *  - at least one payment; amounts > 0; known modes
  *  - payments sum to >= total; overpayment (change) is allowed only when a
  *    `cash` payment is present (you cannot overpay on UPI/card)
+ *  - credit sales require an attached customer
  */
-export function validateBill(bill: ComputedBill, payments: PaymentInput[]): string[] {
+export function validateBill(
+  bill: ComputedBill,
+  payments: PaymentInput[],
+  opts?: ValidateBillOpts,
+): string[] {
   const errors: string[] = [];
   if (bill.lines.length === 0) errors.push("bill.no_lines");
   for (const line of bill.lines) {
@@ -107,14 +188,19 @@ export function validateBill(bill: ComputedBill, payments: PaymentInput[]): stri
     }
   }
   if (payments.length === 0) errors.push("bill.no_payments");
+  let hasCredit = false;
   const paid = payments.reduce((s, p) => {
     if (!isPaymentMode(p.mode)) errors.push("payment.unknown_mode");
     if (p.amountPaise <= 0) errors.push("payment.amount_not_positive");
+    if (p.mode === "credit") hasCredit = true;
     return s + p.amountPaise;
   }, 0);
   if (paid < bill.totalPaise) errors.push("payment.insufficient");
   if (paid > bill.totalPaise && !payments.some((p) => p.mode === "cash")) {
     errors.push("payment.overpay_requires_cash");
+  }
+  if (hasCredit && (opts?.customerId === undefined || opts?.customerId === null)) {
+    errors.push("payment.credit_requires_customer");
   }
   return [...new Set(errors)];
 }

@@ -5,7 +5,7 @@ import { formatQty, parseQty } from "@mytowncart-billing/core";
 import type { ShopProfile } from "@mytowncart-billing/storage";
 import { BackupPanel } from "../components/BackupPanel";
 import { DiagnosticsPanel } from "../components/DiagnosticsPanel";
-import { t } from "../i18n";
+import { setLocale as setI18nLocale, t, type SupportedLocale } from "../i18n";
 import { getRepository } from "../lib/repository";
 import { useAppStore } from "../store/appStore";
 
@@ -15,6 +15,13 @@ const labelCls = "block text-sm font-medium text-gray-700";
 export function SettingsScreen() {
   const profile = useAppStore((s) => s.profile);
   const setProfile = useAppStore((s) => s.setProfile);
+  const locale = useAppStore((s) => s.locale);
+  const setAppLocale = useAppStore((s) => s.setAppLocale);
+
+  const handleLanguageChange = (next: SupportedLocale) => {
+    setI18nLocale(next);
+    setAppLocale(next);
+  };
 
   const [form, setForm] = useState<Partial<ShopProfile>>({});
   const [lowStock, setLowStock] = useState("0");
@@ -155,7 +162,44 @@ export function SettingsScreen() {
           <h2 className="font-semibold mt-4 mb-2 text-gray-800">{t("settings.updates")}</h2>
           <p>{t("settings.updates_note")}</p>
           <h2 className="font-semibold mt-4 mb-2 text-gray-800">{t("settings.language")}</h2>
-          <p>{t("settings.language_en")}</p>
+          <div className="flex flex-wrap gap-2 mt-2">
+            <button
+              type="button"
+              data-testid="lang-en"
+              onClick={() => handleLanguageChange("en")}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+                locale === "en"
+                  ? "bg-blue-50 border-blue-500 text-blue-700 shadow-xs"
+                  : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              English
+            </button>
+            <button
+              type="button"
+              data-testid="lang-hi"
+              onClick={() => handleLanguageChange("hi")}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+                locale === "hi"
+                  ? "bg-blue-50 border-blue-500 text-blue-700 shadow-xs"
+                  : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              हिन्दी (Hindi)
+            </button>
+            <button
+              type="button"
+              data-testid="lang-ta"
+              onClick={() => handleLanguageChange("ta")}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+                locale === "ta"
+                  ? "bg-blue-50 border-blue-500 text-blue-700 shadow-xs"
+                  : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              தமிழ் (Tamil)
+            </button>
+          </div>
         </section>
 
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
