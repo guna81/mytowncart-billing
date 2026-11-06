@@ -22,7 +22,7 @@ system browser. Notify only; no in-app install, no signing keys.
 - i18n: `i18n/en.ts`, `hi.ts`, `ta.ts` (typed `I18nKey`; all three must have
   every key). `t("key", {param})` style interpolation, e.g. `{count}`.
 - CSP in `apps/desktop/src-tauri/tauri.conf.json`:
-  `connect-src 'self' ipc: http://ipc.localhost https://mytowncart.in https://api.mytowncart.in`.
+  `connect-src 'self' ipc: http://ipc.localhost https://mytowncart.com https://api.mytowncart.com`.
 - Capabilities: `apps/desktop/src-tauri/capabilities/default.json`
   (`core:default` only).
 - Repo: `guna81/mytowncart-billing`. Release flow: tag `v*` -> draft release ->

@@ -10,7 +10,7 @@ The seller opens **MyTownCart**, clicks *Connect*, and the app shows a
 device-code panel:
 
 1. The app POSTs to create a connect session and displays a user code plus a
-   link to `mytowncart.in`.
+   link to `mytowncart.com`.
 2. The seller approves on the website while signed in.
 3. The app polls until a `ConnectionToken` arrives and stores it:
    - desktop: OS keychain, key `mytowncart.integration`;

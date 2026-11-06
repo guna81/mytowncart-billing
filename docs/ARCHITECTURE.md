@@ -33,7 +33,7 @@ that the UI drives; the shell only stores what the connector returns.
 └──────────────┬──────────────┘                               │
 ┌──────────────▼──────────────┐                 SQLite: app-data/mytowncart-billing.db
 │ packages/connector-mytowncart│
-│ MarketplaceConnector iface   │─── HTTPS ──▶ api.mytowncart.in/api/v1/integrations
+│ MarketplaceConnector iface   │─── HTTPS ──▶ api.mytowncart.com/api/v1/integrations
 │ MyTownCartConnector (HTTP)   │             (catalog, images, stock, orders)
 └─────────────────────────────┘
 ┌─────────────────────────────┐
