@@ -9,5 +9,6 @@
 
 export * from "./types";
 export * from "./repository";
-export { TauriRepository } from "./tauri";
+export { TauriRepository, type InvokeFn } from "./tauri";
 export { MemoryRepository } from "./memory";
+export { HttpRepository, createHttpInvoker } from "./http";

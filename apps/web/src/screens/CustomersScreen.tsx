@@ -4,6 +4,8 @@ import { formatPaise, parsePaise } from "@mytowncart-billing/core";
 import type { Customer, CustomerLedgerSummary } from "@mytowncart-billing/storage";
 import { t } from "../i18n";
 import { getRepository } from "../lib/repository";
+import { formatDate } from "../lib/formatDate";
+import { EmptyState, PageHeader } from "../components/ui";
 
 const inputCls = "mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm";
 const labelCls = "block text-sm font-medium text-gray-700";
@@ -333,8 +335,8 @@ function CustomerLedgerDialog({
                   <tbody className="divide-y divide-gray-100">
                     {ledger.entries.map((e, idx) => (
                       <tr key={idx} className="hover:bg-gray-50">
-                        <td className="whitespace-nowrap px-3 py-2 text-gray-600">
-                          {new Date(e.date).toLocaleDateString()}
+                        <td className="whitespace-nowrap px-3 py-2 text-gray-700">
+                          {formatDate(e.date)}
                         </td>
                         <td className="px-3 py-2 text-gray-800">
                           {e.description}
@@ -417,17 +419,19 @@ export function CustomersScreen() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-lg font-bold">{t("customers.title")}</h1>
-        <button
-          type="button"
-          data-testid="customers-add"
-          className="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
-          onClick={() => setEditingCustomer("new")}
-        >
-          {t("customers.add")}
-        </button>
-      </div>
+      <PageHeader
+        title={t("customers.title")}
+        actions={
+          <button
+            type="button"
+            data-testid="customers-add"
+            className="rounded-md bg-blue-600 px-3.5 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+            onClick={() => setEditingCustomer("new")}
+          >
+            {t("customers.add")}
+          </button>
+        }
+      />
 
       {notice ? (
         <div className="mb-3 rounded bg-green-50 p-2.5 text-sm text-green-700">{notice}</div>
@@ -437,25 +441,38 @@ export function CustomersScreen() {
       ) : null}
 
       <input
-        className="mb-3 w-full max-w-sm rounded border border-gray-300 px-3 py-2 text-sm"
+        className="mb-4 w-full max-w-sm rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         placeholder={t("customers.search_ph")}
         value={search}
         onChange={(e) => setSearch(e.target.value)}
       />
 
       {customers.length === 0 ? (
-        <p className="text-sm text-gray-500">{t("customers.empty")}</p>
+        <EmptyState
+          title={t("customers.empty")}
+          hint={t("customers.empty_hint")}
+          action={
+            <button
+              type="button"
+              className="rounded-md bg-blue-600 px-3.5 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+              onClick={() => setEditingCustomer("new")}
+            >
+              {t("customers.add")}
+            </button>
+          }
+        />
       ) : (
-        <table className="w-full rounded border border-gray-200 bg-white text-sm">
-          <thead>
-            <tr className="border-b border-gray-200 text-left text-gray-500">
-              <th className="px-3 py-2">{t("common.name")}</th>
-              <th className="px-3 py-2">{t("common.phone")}</th>
-              <th className="px-3 py-2">{t("customers.gstin")}</th>
-              <th className="px-3 py-2 text-right">Loyalty Points</th>
-              <th className="px-3 py-2 text-right">{t("common.actions")}</th>
-            </tr>
-          </thead>
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-200 bg-gray-50 text-left font-semibold text-gray-700">
+                <th className="px-3 py-2.5">{t("common.name")}</th>
+                <th className="px-3 py-2.5">{t("common.phone")}</th>
+                <th className="px-3 py-2.5">{t("customers.gstin")}</th>
+                <th className="px-3 py-2.5 text-right">Loyalty Points</th>
+                <th className="px-3 py-2.5 text-right">{t("common.actions")}</th>
+              </tr>
+            </thead>
           <tbody>
             {customers.map((c) => (
               <tr
@@ -503,6 +520,7 @@ export function CustomersScreen() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       {editingCustomer ? (

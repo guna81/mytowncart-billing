@@ -33,6 +33,7 @@ export function HourlyHeatmap({
           const y = chartHeight - barH + 6;
           const intensity = Math.min(1, b.totalPaise / maxVal);
           const fillColor = b.totalPaise === 0 ? "#E5E7EB" : `rgba(37, 99, 235, ${Math.max(0.3, intensity)})`;
+          const tooltip = `${String(b.hour).padStart(2, "0")}:00 - ${String(b.hour).padStart(2, "0")}:59: ₹${formatPaise(b.totalPaise)} (${b.count} bills)`;
 
           return (
             <g key={b.hour}>
@@ -43,9 +44,12 @@ export function HourlyHeatmap({
                 height={b.totalPaise === 0 ? 4 : Math.max(4, barH)}
                 rx="2"
                 fill={fillColor}
-                className="transition-all hover:opacity-80"
+                tabIndex={0}
+                role="graphics-symbol"
+                aria-label={tooltip}
+                className="transition-all hover:opacity-80 focus:outline-none focus:stroke-blue-600 focus:stroke-1 cursor-pointer"
               >
-                <title>{`${String(b.hour).padStart(2, "0")}:00 - ${String(b.hour).padStart(2, "0")}:59: ₹${formatPaise(b.totalPaise)} (${b.count} bills)`}</title>
+                <title>{tooltip}</title>
               </rect>
 
               {/* Hour marker */}
@@ -54,7 +58,7 @@ export function HourlyHeatmap({
                   x={x + barWidth / 2}
                   y={height - 4}
                   textAnchor="middle"
-                  className="text-[9px] fill-gray-400 font-mono"
+                  className="text-[7.5px] fill-gray-500 font-mono"
                 >
                   {b.hour}h
                 </text>

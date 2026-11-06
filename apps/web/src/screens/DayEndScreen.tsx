@@ -68,6 +68,7 @@ export function DayEndScreen() {
 
   const openingCashPaise = Math.max(0, parsePaise(openingCashStr) ?? 0);
   const countedCashPaise = computeDenominationsTotalPaise(denominations);
+  const isDrawerTouched = Object.values(denominations).some((c) => (c ?? 0) > 0);
 
   const cashSalesPaise = Number(expectedCash?.cashSalesPaise ?? 0);
   const creditReceivedPaise = Number(expectedCash?.creditReceivedPaise ?? 0);
@@ -97,7 +98,7 @@ export function DayEndScreen() {
     setMessage(null);
     try {
       const repo = getRepository();
-      const closureId = await repo.createDayEndClosure({
+      await repo.createDayEndClosure({
         closureDate: date,
         userId: currentUser?.id ?? null,
         openingCashPaise,
@@ -163,7 +164,7 @@ export function DayEndScreen() {
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200 pb-4">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Day-End Closing & Cash Drawer (Z-Report)</h1>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <p className="text-xs text-gray-600 mt-0.5">
             Reconcile physical cash drawer notes, calculate variances, and close business day.
           </p>
         </div>
@@ -219,10 +220,10 @@ export function DayEndScreen() {
                 >
                   <div className="w-16">
                     <span className="font-bold text-sm text-gray-800">{d.label}</span>
-                    <span className="text-[10px] text-gray-400 block">{d.isCoin ? "Coins" : "Note"}</span>
+                    <span className="text-[10px] text-gray-500 block">{d.isCoin ? "Coins" : "Note"}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-gray-400 text-xs">×</span>
+                    <span className="text-gray-500 text-xs">×</span>
                     <input
                       type="number"
                       min="0"
@@ -304,7 +305,9 @@ export function DayEndScreen() {
               <div
                 data-testid="cash-variance-box"
                 className={`rounded-lg p-3.5 border text-center ${
-                  variancePaise === 0
+                  !isDrawerTouched
+                    ? "bg-gray-50 border-gray-200 text-gray-700"
+                    : variancePaise === 0
                     ? "bg-green-50 border-green-200 text-green-800"
                     : variancePaise > 0
                     ? "bg-blue-50 border-blue-200 text-blue-800"
@@ -312,14 +315,16 @@ export function DayEndScreen() {
                 }`}
               >
                 <div className="text-xs uppercase font-bold tracking-wider">
-                  {variancePaise === 0
+                  {!isDrawerTouched
+                    ? t("day_end.count_hint")
+                    : variancePaise === 0
                     ? "✓ Drawer Perfectly Balanced"
                     : variancePaise > 0
                     ? "Cash Surplus (+)"
                     : "Cash Shortage (-)"}
                 </div>
                 <div className="text-2xl font-black font-mono mt-1" data-testid="cash-variance-value">
-                  {variancePaise > 0 ? "+" : ""}₹{formatPaise(variancePaise)}
+                  {!isDrawerTouched ? "—" : `${variancePaise > 0 ? "+" : ""}₹${formatPaise(variancePaise)}`}
                 </div>
               </div>
 

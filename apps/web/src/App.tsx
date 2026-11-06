@@ -8,6 +8,7 @@ import { PrintView } from "./print/PrintView";
 import { t } from "./i18n";
 import { checkAndRunAutoBackup } from "./lib/autoBackup";
 import { DIAGNOSTICS_KEY, setDiagnosticsEnabled } from "./lib/diagnostics";
+import { SHOP_LOGO_KEY } from "./lib/shopLogo";
 import { getRepository } from "./lib/repository";
 import { BillDetailScreen } from "./screens/BillDetailScreen";
 import { BillsScreen } from "./screens/BillsScreen";
@@ -35,19 +36,27 @@ export function App() {
   const profile = useAppStore((s) => s.profile);
   const locale = useAppStore((s) => s.locale);
   const setProfile = useAppStore((s) => s.setProfile);
+  const setShopLogo = useAppStore((s) => s.setShopLogo);
   const setBooted = useAppStore((s) => s.setBooted);
+  const runUpdateCheck = useAppStore((s) => s.runUpdateCheck);
 
   useEffect(() => {
     void (async () => {
       const repo = getRepository();
-      const [p, diag] = await Promise.all([repo.getShopProfile(), repo.getAppSetting(DIAGNOSTICS_KEY)]);
+      const [p, diag, logo] = await Promise.all([
+        repo.getShopProfile(),
+        repo.getAppSetting(DIAGNOSTICS_KEY),
+        repo.getAppSetting(SHOP_LOGO_KEY),
+      ]);
       setProfile(p);
+      setShopLogo(logo);
       // Pilot diagnostics stay off unless the seller opted in (B4).
       setDiagnosticsEnabled(diag === "1");
       setBooted(true);
       void checkAndRunAutoBackup();
+      void runUpdateCheck();
     })();
-  }, [setProfile, setBooted]);
+  }, [setProfile, setShopLogo, setBooted, runUpdateCheck]);
 
   if (!booted) {
     return <main className="p-8 text-gray-600">{t("common.loading")}</main>;

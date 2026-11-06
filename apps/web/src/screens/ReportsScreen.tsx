@@ -15,11 +15,14 @@ import {
   type ReportBill,
 } from "@mytowncart-billing/core";
 import type { CreditNote, Customer, Item } from "@mytowncart-billing/storage";
+import { Link } from "react-router-dom";
 import { SalesTrendChart } from "../components/charts/SalesTrendChart";
 import { t, type I18nKey } from "../i18n";
 import { paymentModeLabel } from "../lib/labels";
 import { getRepository } from "../lib/repository";
+import { formatDate } from "../lib/formatDate";
 import { useAppStore } from "../store/appStore";
+import { EmptyState } from "../components/ui";
 
 function downloadText(filename: string, text: string): void {
   const blob = new Blob([text], { type: "text/csv;charset=utf-8;" });
@@ -289,39 +292,51 @@ export function ReportsScreen() {
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-lg font-bold">{t("reports.title")}</h1>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {presets.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                data-testid={`reports-preset-${p.id}`}
-                className="rounded border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-100"
-                onClick={() => setRange(getPresetRange(p.id))}
-              >
-                {t(p.labelKey as I18nKey)}
-              </button>
-            ))}
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">{t("reports.title")}</h1>
+          <div className="mt-1 text-xs text-gray-600 font-medium">
+            {formatDate(range.from)} → {formatDate(range.to)}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {presets.map((p) => {
+              const pRange = getPresetRange(p.id);
+              const isActive = range.from === pRange.from && range.to === pRange.to;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  aria-pressed={isActive}
+                  data-testid={`reports-preset-${p.id}`}
+                  className={`rounded-md border px-2.5 py-1 text-xs transition-colors ${
+                    isActive
+                      ? "border-blue-600 bg-blue-50 text-blue-700 font-semibold shadow-xs"
+                      : "border-gray-200 bg-white font-medium text-gray-700 hover:bg-gray-100"
+                  }`}
+                  onClick={() => setRange(pRange)}
+                >
+                  {t(p.labelKey as I18nKey)}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <div className="flex items-end gap-2">
-          <label className="block text-sm">
-            <span className="text-gray-600">{t("reports.from")}</span>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700">
+            <span>{t("reports.from")}</span>
             <input
               type="date"
-              className="mt-1 rounded border border-gray-300 px-3 py-1.5 text-sm"
+              className="mt-1 block rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-normal"
               value={range.from}
               onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
             />
           </label>
-          <label className="block text-sm">
-            <span className="text-gray-600">{t("reports.to")}</span>
+          <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700">
+            <span>{t("reports.to")}</span>
             <input
               type="date"
-              className="mt-1 rounded border border-gray-300 px-3 py-1.5 text-sm"
+              className="mt-1 block rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-normal"
               value={range.to}
               onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
             />
@@ -329,7 +344,7 @@ export function ReportsScreen() {
           <button
             type="button"
             data-testid="reports-export"
-            className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
+            className="rounded-md border border-gray-300 bg-white px-3.5 py-1.5 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition-colors"
             onClick={() => onExport("daily")}
           >
             {t("reports.export_csv")}
@@ -338,11 +353,21 @@ export function ReportsScreen() {
       </div>
 
       {loading ? (
-        <p className="py-8 text-center text-sm text-gray-500">{t("common.loading")}</p>
+        <p className="py-8 text-center text-sm text-gray-600">{t("common.loading")}</p>
       ) : daily.length === 0 ? (
-        <p className="text-sm text-gray-500" data-testid="reports-empty">
-          {bills.length === 0 ? t("reports.empty") : t("reports.empty_void_only")}
-        </p>
+        <EmptyState
+          data-testid="reports-empty"
+          title={bills.length === 0 ? t("reports.empty") : t("reports.empty_void_only")}
+          hint={t("reports.empty_hint")}
+          action={
+            <Link
+              to="/"
+              className="rounded-md bg-blue-600 px-3.5 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+            >
+              {t("pos.title")}
+            </Link>
+          }
+        />
       ) : (
         <div className="space-y-6">
           <p className="text-sm text-gray-600" data-testid="reports-summary">
@@ -444,9 +469,9 @@ export function ReportsScreen() {
               <h2 className="font-semibold">{t("reports.daily")}</h2>
               {exportButton("daily", "reports-export-daily")}
             </div>
-            <table className="w-full rounded border border-gray-200 bg-white text-sm">
+            <table className="w-full rounded-lg border border-gray-200 bg-white text-sm shadow-sm overflow-hidden">
               <thead>
-                <tr className="border-b border-gray-200 text-left text-gray-500">
+                <tr className="border-b border-gray-200 bg-gray-50 text-left font-semibold text-gray-700">
                   <th className="px-3 py-2">{t("reports.date")}</th>
                   <th className="px-3 py-2 text-right">{t("reports.bills")}</th>
                   <th className="px-3 py-2 text-right">{t("pos.tax")}</th>
@@ -455,8 +480,8 @@ export function ReportsScreen() {
               </thead>
               <tbody>
                 {daily.map((r) => (
-                  <tr key={r.date} className="border-b border-gray-100 last:border-0">
-                    <td className="px-3 py-2">{r.date}</td>
+                  <tr key={r.date} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+                    <td className="px-3 py-2 text-gray-900 font-medium">{formatDate(r.date)}</td>
                     <td className="px-3 py-2 text-right">{r.billCount}</td>
                     <td className="px-3 py-2 text-right">{formatPaise(r.taxPaise)}</td>
                     <td className="px-3 py-2 text-right font-medium">

@@ -13,7 +13,9 @@ import {
 import type { Item } from "@mytowncart-billing/storage";
 import { t } from "../i18n";
 import { getRepository } from "../lib/repository";
+import { effectiveLowStockThreshold } from "../lib/stockAlerts";
 import { useAppStore } from "../store/appStore";
+import { EmptyState, PageHeader } from "../components/ui";
 
 function downloadText(filename: string, text: string): void {
   const blob = new Blob([text], { type: "text/csv" });
@@ -46,7 +48,7 @@ export function ItemsScreen() {
     void refresh();
   }, [refresh, dataVersion]);
 
-  const threshold = profile?.lowStockThresholdMilli ?? 0;
+  const threshold = effectiveLowStockThreshold(profile);
 
   const onImportFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const input = e.target;
@@ -143,47 +145,49 @@ export function ItemsScreen() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-lg font-bold">{t("items.title")}</h1>
-        <div className="flex gap-2">
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".csv,text/csv"
-            className="hidden"
-            data-testid="items-import-file"
-            onChange={(e) => void onImportFile(e)}
-          />
-          <button
-            type="button"
-            className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
-            onClick={() => fileRef.current?.click()}
-          >
-            {t("items.import_csv")}
-          </button>
-          <button
-            type="button"
-            className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
-            onClick={onExport}
-          >
-            {t("items.export_csv")}
-          </button>
-          <Link
-            to="/items/labels"
-            data-testid="items-print-labels"
-            className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50 text-gray-700"
-          >
-            🏷️ Barcode Labels
-          </Link>
-          <Link
-            to="/items/new"
-            data-testid="items-new"
-            className="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
-          >
-            {t("items.new")}
-          </Link>
-        </div>
-      </div>
+      <PageHeader
+        title={t("items.title")}
+        actions={
+          <>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              data-testid="items-import-file"
+              onChange={(e) => void onImportFile(e)}
+            />
+            <button
+              type="button"
+              className="rounded-md border border-gray-300 bg-white px-3.5 py-1.5 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50"
+              onClick={() => fileRef.current?.click()}
+            >
+              {t("items.import_csv")}
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-gray-300 bg-white px-3.5 py-1.5 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50"
+              onClick={onExport}
+            >
+              {t("items.export_csv")}
+            </button>
+            <Link
+              to="/items/labels"
+              data-testid="items-print-labels"
+              className="rounded-md border border-gray-300 bg-white px-3.5 py-1.5 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50"
+            >
+              🏷️ Barcode Labels
+            </Link>
+            <Link
+              to="/items/new"
+              data-testid="items-new"
+              className="rounded-md bg-blue-600 px-3.5 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+            >
+              {t("items.new")}
+            </Link>
+          </>
+        }
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
@@ -227,11 +231,31 @@ export function ItemsScreen() {
       ) : null}
 
       {items.length === 0 ? (
-        <p className="text-sm text-gray-500">{t("items.empty")}</p>
+        <EmptyState
+          title={t("items.empty")}
+          hint={t("items.empty_hint")}
+          action={
+            <div className="flex flex-wrap gap-3">
+              <Link
+                to="/items/new"
+                className="rounded-md bg-blue-600 px-3.5 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+              >
+                {t("items.add_first")}
+              </Link>
+              <button
+                type="button"
+                className="rounded-md border border-gray-300 bg-white px-3.5 py-1.5 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50"
+                onClick={() => fileRef.current?.click()}
+              >
+                {t("items.import_csv")}
+              </button>
+            </div>
+          }
+        />
       ) : (
-        <table className="w-full bg-white rounded border border-gray-200 text-sm">
+        <table className="w-full bg-white rounded-lg border border-gray-200 text-sm shadow-sm overflow-hidden">
           <thead>
-            <tr className="border-b border-gray-200 text-left text-gray-500">
+            <tr className="border-b border-gray-200 text-left text-gray-700 bg-gray-50 font-semibold">
               <th className="px-3 py-2">{t("common.name")}</th>
               <th className="px-3 py-2">{t("items.barcode")}</th>
               <th className="px-3 py-2">{t("items.category")}</th>
@@ -245,7 +269,7 @@ export function ItemsScreen() {
               <tr key={item.id} className="border-b border-gray-100 last:border-0">
                 <td className="px-3 py-2 font-medium">
                   {item.name}
-                  {isLowStock(item.stockMilli, threshold) ? (
+                  {threshold > 0 && isLowStock(item.stockMilli, threshold) ? (
                     <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
                       {t("items.low_stock")}
                     </span>

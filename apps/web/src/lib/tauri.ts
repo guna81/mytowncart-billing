@@ -17,6 +17,7 @@ export interface HelloResult {
 
 export function isInTauri(): boolean {
   return (
+    typeof window !== "undefined" &&
     (window as unknown as { __TAURI_INTERNALS__?: unknown })
       .__TAURI_INTERNALS__ !== undefined
   );
@@ -45,4 +46,31 @@ export function keychainGet(key: string): Promise<string | null> {
 
 export function keychainDelete(key: string): Promise<void> {
   return invokeCmd<void>("keychain_delete", { key });
+}
+
+export interface LanServerStatus {
+  running: boolean;
+  port: number;
+  urls: string[];
+}
+
+export function lanServerStatus(): Promise<LanServerStatus> {
+  return invokeCmd<LanServerStatus>("lan_server_status");
+}
+
+export function lanServerStart(port: number): Promise<LanServerStatus> {
+  return invokeCmd<LanServerStatus>("lan_server_start", { port });
+}
+
+export function lanServerStop(): Promise<LanServerStatus> {
+  return invokeCmd<LanServerStatus>("lan_server_stop");
+}
+
+export async function openReleasePage(url: string): Promise<void> {
+  if (isInTauri()) {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(url);
+  } else {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
 }

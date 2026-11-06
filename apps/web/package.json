@@ -16,6 +16,7 @@
     "@mytowncart-billing/core": "workspace:*",
     "@mytowncart-billing/storage": "workspace:*",
     "@tauri-apps/api": "^2.2.0",
+    "@tauri-apps/plugin-opener": "^2.7.2",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

@@ -5,6 +5,7 @@ import type { Item, StockDiscrepancyInput } from "@mytowncart-billing/storage";
 import { Badge, Button, Input } from "../components/ui";
 import { t } from "../i18n";
 import { getRepository } from "../lib/repository";
+import { effectiveLowStockThreshold } from "../lib/stockAlerts";
 import { useAppStore } from "../store/appStore";
 
 function downloadCsv(filename: string, content: string): void {
@@ -97,17 +98,14 @@ export function StockAuditScreen() {
   };
 
   // Reorder items: items where current stock <= low stock threshold
+  const threshold = effectiveLowStockThreshold(profile);
   const reorderItems = useMemo(() => {
-    const defaultThreshold =
-      profile?.lowStockThresholdMilli && profile.lowStockThresholdMilli > 0
-        ? profile.lowStockThresholdMilli
-        : 5000;
+    if (threshold === 0) return [];
     return items
       .filter((item) => {
-        return isLowStock(item.stockMilli, defaultThreshold);
+        return isLowStock(item.stockMilli, threshold);
       })
       .map((item) => {
-        const threshold = defaultThreshold;
         const toOrderMilli = Math.max(threshold * 2 - item.stockMilli, threshold, 1000);
         const costPrice = item.costPricePaise ?? 0;
         const estCostPaise = Math.round((toOrderMilli * costPrice) / 1000);
@@ -119,7 +117,7 @@ export function StockAuditScreen() {
           estCostPaise,
         };
       });
-  }, [items, profile]);
+  }, [items, threshold]);
 
   const handleExportReorderCsv = () => {
     const header = [
@@ -256,7 +254,7 @@ export function StockAuditScreen() {
                     <tr key={item.id} className="hover:bg-gray-50/50">
                       <td className="px-4 py-3">
                         <p className="font-medium text-gray-900">{item.name}</p>
-                        <p className="text-xs text-gray-400 font-mono">{item.barcode || "—"}</p>
+                        <p className="text-xs text-gray-600 font-mono">{item.barcode || "—"}</p>
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-500">{item.categoryName || "General"}</td>
                       <td className="px-4 py-3 text-right font-medium text-gray-700">
@@ -279,7 +277,7 @@ export function StockAuditScreen() {
                       </td>
                       <td className="px-4 py-3 text-center">
                         {delta === null ? (
-                          <span className="text-xs text-gray-400">—</span>
+                          <span className="text-xs text-gray-600">—</span>
                         ) : delta === 0 ? (
                           <Badge variant="gray">0</Badge>
                         ) : delta > 0 ? (

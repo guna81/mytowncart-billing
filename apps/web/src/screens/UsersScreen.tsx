@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useState, type FormEvent } from "react";
 import type { User, UserRole } from "@mytowncart-billing/storage";
-import { Badge, Button, Input, Modal } from "../components/ui";
+import { Badge, Button, Input, Modal, EmptyState, PageHeader } from "../components/ui";
 import { t } from "../i18n";
 import { getRepository } from "../lib/repository";
 
@@ -132,61 +132,68 @@ export function UsersScreen() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-lg font-bold">{t("users.title")}</h1>
-        <Button variant="primary" data-testid="users-add" onClick={() => setEditing(null)}>
-          + {t("users.add")}
-        </Button>
-      </div>
+      <PageHeader
+        title={t("users.title")}
+        actions={
+          <Button variant="primary" data-testid="users-add" onClick={() => setEditing(null)}>
+            + {t("users.add")}
+          </Button>
+        }
+      />
 
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-        <table className="w-full text-sm">
-          <thead className="border-b border-gray-200 bg-gray-50 text-left text-gray-600 font-medium">
-            <tr>
-              <th className="px-3 py-2">ID</th>
-              <th className="px-3 py-2">{t("users.name")}</th>
-              <th className="px-3 py-2">{t("users.role")}</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2 text-right">{t("common.actions")}</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {users.map((u) => (
-              <tr key={u.id} data-testid={`user-row-${u.id}`}>
-                <td className="px-3 py-2 font-mono text-gray-500">#{u.id}</td>
-                <td className="px-3 py-2 font-medium text-gray-900">{u.name}</td>
-                <td className="px-3 py-2">
-                  <Badge variant={u.role === "owner" ? "purple" : "blue"}>
-                    {u.role === "owner" ? t("users.role.owner") : t("users.role.cashier")}
-                  </Badge>
-                </td>
-                <td className="px-3 py-2">
-                  <Badge variant={u.isActive ? "green" : "gray"}>
-                    {u.isActive ? "Active" : "Inactive"}
-                  </Badge>
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <button
-                    type="button"
-                    className="text-xs text-blue-600 hover:underline"
-                    data-testid={`user-edit-${u.id}`}
-                    onClick={() => setEditing(u)}
-                  >
-                    {t("common.edit")}
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {users.length === 0 ? (
+      {users.length === 0 ? (
+        <EmptyState
+          title={t("users.empty")}
+          hint={t("users.empty_hint")}
+          action={
+            <Button variant="primary" onClick={() => setEditing(null)}>
+              + {t("users.add")}
+            </Button>
+          }
+        />
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+          <table className="w-full text-sm">
+            <thead className="border-b border-gray-200 bg-gray-50 text-left text-gray-700 font-semibold">
               <tr>
-                <td colSpan={5} className="p-4 text-center text-gray-500">
-                  No users configured yet. Add users to enable cashier quick-lock and supervisor overrides.
-                </td>
+                <th className="px-3 py-2.5">ID</th>
+                <th className="px-3 py-2.5">{t("users.name")}</th>
+                <th className="px-3 py-2.5">{t("users.role")}</th>
+                <th className="px-3 py-2.5">Status</th>
+                <th className="px-3 py-2.5 text-right">{t("common.actions")}</th>
               </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {users.map((u) => (
+                <tr key={u.id} data-testid={`user-row-${u.id}`} className="hover:bg-gray-50">
+                  <td className="px-3 py-2.5 font-mono text-gray-600">#{u.id}</td>
+                  <td className="px-3 py-2.5 font-medium text-gray-900">{u.name}</td>
+                  <td className="px-3 py-2.5">
+                    <Badge variant={u.role === "owner" ? "purple" : "blue"}>
+                      {u.role === "owner" ? t("users.role.owner") : t("users.role.cashier")}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <Badge variant={u.isActive ? "green" : "gray"}>
+                      {u.isActive ? "Active" : "Inactive"}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-2.5 text-right">
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                      data-testid={`user-edit-${u.id}`}
+                      onClick={() => setEditing(u)}
+                    >
+                      {t("common.edit")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {editing !== undefined ? (
         <UserDialog

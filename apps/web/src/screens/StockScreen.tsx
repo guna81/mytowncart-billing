@@ -5,6 +5,7 @@ import { formatQty, isBatchExpired, isBatchNearExpiry, isLowStock, parseQty } fr
 import type { Item, ItemBatch, StockMovementRecord } from "@mytowncart-billing/storage";
 import { t, type I18nKey } from "../i18n";
 import { getRepository } from "../lib/repository";
+import { effectiveLowStockThreshold } from "../lib/stockAlerts";
 import { useAppStore } from "../store/appStore";
 
 const inputCls = "mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm";
@@ -178,9 +179,9 @@ export function StockScreen() {
     void refresh();
   }, [refresh, dataVersion]);
 
-  const threshold = profile?.lowStockThresholdMilli ?? 0;
+  const threshold = effectiveLowStockThreshold(profile);
   const visible = lowOnly
-    ? items.filter((i) => isLowStock(i.stockMilli, threshold))
+    ? items.filter((i) => threshold > 0 && isLowStock(i.stockMilli, threshold))
     : items;
 
   const itemMap = new Map<number, Item>(items.map((i) => [i.id, i]));

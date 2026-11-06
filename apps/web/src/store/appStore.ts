@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { create } from "zustand";
 
+import { APP_VERSION } from "@mytowncart-billing/core";
 import type { DayEndClosure, ShopProfile, User } from "@mytowncart-billing/storage";
+import { isInTauri } from "../lib/tauri";
+import { checkForUpdate, type UpdateCheckResult } from "../lib/updateCheck";
 
 export interface PrintJob {
   billId?: number;
@@ -15,10 +18,12 @@ export type SupportedLocale = "en" | "hi" | "ta";
 interface AppState {
   booted: boolean;
   profile: ShopProfile | null;
+  shopLogo: string | null;
   /** Set once `me()` reports it; drives the honest "pending store approval" state. */
   sellerIsApproved: boolean | null;
   setSellerIsApproved(approved: boolean | null): void;
   setProfile(profile: ShopProfile | null): void;
+  setShopLogo(shopLogo: string | null): void;
   setBooted(booted: boolean): void;
 
   printJob: PrintJob | null;
@@ -38,6 +43,12 @@ interface AppState {
   /** App UI Locale */
   locale: SupportedLocale;
   setAppLocale(locale: SupportedLocale): void;
+
+  /** Update notifications (decision B4-3) */
+  updateInfo: { tag: string; url: string } | null;
+  updateChecking: boolean;
+  updateCheckResult: UpdateCheckResult | null;
+  runUpdateCheck(force?: boolean): Promise<UpdateCheckResult | null>;
 }
 
 const initialLocale =
@@ -49,9 +60,11 @@ const initialLocale =
 export const useAppStore = create<AppState>((set) => ({
   booted: false,
   profile: null,
+  shopLogo: null,
   sellerIsApproved: null,
   setSellerIsApproved: (sellerIsApproved) => set({ sellerIsApproved }),
   setProfile: (profile) => set({ profile }),
+  setShopLogo: (shopLogo) => set({ shopLogo }),
   setBooted: (booted) => set({ booted }),
 
   printJob: null,
@@ -72,5 +85,32 @@ export const useAppStore = create<AppState>((set) => ({
       localStorage.setItem("mtc_locale", locale);
     }
     set({ locale });
+  },
+
+  updateInfo: null,
+  updateChecking: false,
+  updateCheckResult: null,
+  runUpdateCheck: async (force?: boolean) => {
+    if (!isInTauri()) {
+      return null;
+    }
+    set({ updateChecking: true });
+    try {
+      const result = await checkForUpdate({ current: APP_VERSION, force });
+      if (result.available && result.tag && result.url) {
+        set({
+          updateInfo: { tag: result.tag, url: result.url },
+          updateCheckResult: result,
+        });
+      } else {
+        if (!result.failed) {
+          set({ updateInfo: null });
+        }
+        set({ updateCheckResult: result });
+      }
+      return result;
+    } finally {
+      set({ updateChecking: false });
+    }
   },
 }));

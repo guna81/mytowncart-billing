@@ -540,7 +540,7 @@ describe("batches and expiry tracking", () => {
   it("tracks batches with FIFO sorting and expiry alerts", async () => {
     const itemId = await makeItem();
 
-    const b1 = await repo.upsertBatch({
+    const _b1 = await repo.upsertBatch({
       itemId,
       batchNo: "BATCH-MAY",
       mfgDate: "2026-01-01",
@@ -549,7 +549,7 @@ describe("batches and expiry tracking", () => {
       mrpPaise: 1500,
       stockMilli: 2000,
     });
-    const b2 = await repo.upsertBatch({
+    const _b2 = await repo.upsertBatch({
       itemId,
       batchNo: "BATCH-FEB",
       mfgDate: "2025-11-01",

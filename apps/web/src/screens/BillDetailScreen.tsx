@@ -11,10 +11,11 @@ import {
 } from "@mytowncart-billing/core";
 import type { BillDetail, CreditNote, Customer } from "@mytowncart-billing/storage";
 import { CreditNoteModal } from "../components/CreditNoteModal";
-import { Money } from "../components/ui";
+import { Money, PageHeader, Badge } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
 import { paymentModeLabel } from "../lib/labels";
 import { getRepository } from "../lib/repository";
+import { formatDateTime } from "../lib/formatDate";
 import { useAppStore } from "../store/appStore";
 
 export function BillDetailScreen() {
@@ -80,174 +81,211 @@ export function BillDetailScreen() {
   };
 
   return (
-    <div className="max-w-3xl">
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-lg font-bold">{t("bill.title", { number: bill.number })}</h1>
-        <Link to="/bills" className="text-sm text-blue-600 hover:underline">
-          {t("common.back")}
-        </Link>
-      </div>
+    <div className="max-w-4xl mx-auto space-y-6">
+      <PageHeader
+        title={t("bill.title", { number: bill.number })}
+        subtitle={formatDateTime(bill.createdAt)}
+        actions={
+          <Link
+            to="/bills"
+            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition-colors"
+          >
+            ← {t("common.back")}
+          </Link>
+        }
+      />
 
-      <div className="mb-4 rounded border border-gray-200 bg-white p-4 text-sm">
-        <div className="flex flex-wrap gap-x-8 gap-y-1 text-gray-600">
-          <span>{new Date(bill.createdAt).toLocaleString()}</span>
-          <span>{t("bill.fy", { fy: bill.fy })}</span>
-          <span>
-            {t("bills.status")}: {t(`bills.status.${bill.status}` as I18nKey)}
-          </span>
-          {bill.customerName ? (
-            <span>
-              {t("bills.customer")}: {bill.customerName}
-            </span>
-          ) : null}
+      {/* Bill Metadata Card */}
+      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-gray-700">
+            <div>
+              <span className="text-gray-500 font-medium">Date: </span>
+              <span className="font-semibold">{formatDateTime(bill.createdAt)}</span>
+            </div>
+            <div>
+              <span className="text-gray-500 font-medium">FY: </span>
+              <span className="font-semibold">{bill.fy}</span>
+            </div>
+            {bill.customerName ? (
+              <div>
+                <span className="text-gray-500 font-medium">{t("bills.customer")}: </span>
+                <span className="font-semibold">{bill.customerName}</span>
+              </div>
+            ) : null}
+          </div>
+          <div>
+            <Badge variant={bill.status === "void" ? "red" : "green"}>
+              {t(`bills.status.${bill.status}` as I18nKey)}
+            </Badge>
+          </div>
         </div>
+
         {bill.status === "void" && bill.voidedAt ? (
-          <p className="mt-2 rounded bg-red-50 px-2 py-1 text-red-700" data-testid="bill-voided">
+          <p className="mt-3 rounded-lg bg-red-50 p-2.5 text-sm font-medium text-red-700 border border-red-200" data-testid="bill-voided">
             {t("bill.voided", {
-              date: new Date(bill.voidedAt).toLocaleString(),
+              date: formatDateTime(bill.voidedAt),
               reason: bill.voidReason ?? "",
             })}
           </p>
         ) : null}
       </div>
 
-      <table className="mb-4 w-full rounded border border-gray-200 bg-white text-sm">
-        <thead>
-          <tr className="border-b border-gray-200 text-left text-gray-500">
-            <th className="px-3 py-2">{t("print.item")}</th>
-            <th className="px-3 py-2 text-right">{t("common.qty")}</th>
-            <th className="px-3 py-2 text-right">{t("common.price")}</th>
-            <th className="px-3 py-2 text-right">{t("pos.line_discount")}</th>
-            <th className="px-3 py-2 text-right">{t("pos.tax")}</th>
-            <th className="px-3 py-2 text-right">{t("common.total")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {bill.lines.map((l) => (
-            <tr key={l.id} className="border-b border-gray-100 last:border-0">
-              <td className="px-3 py-2 font-medium">
-                {l.nameSnapshot}
-                {l.hsnCode ? <span className="ml-1 text-xs text-gray-400 font-mono">(HSN: {l.hsnCode})</span> : null}
-              </td>
-              <td className="px-3 py-2 text-right">{formatQty(l.qtyMilli)}</td>
-              <td className="px-3 py-2 text-right">{formatPaise(l.unitPricePaise)}</td>
-              <td className="px-3 py-2 text-right text-amber-700">
-                {l.discountPaise > 0 ? formatPaise(l.discountPaise) : "—"}
-              </td>
-              <td className="px-3 py-2 text-right">{formatPaise(l.taxPaise)}</td>
-              <td className="px-3 py-2 text-right">{formatPaise(l.totalPaise)}</td>
+      {/* Items Table */}
+      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 bg-gray-50 text-left font-semibold text-gray-700">
+              <th className="px-3 py-2.5">{t("print.item")}</th>
+              <th className="px-3 py-2.5 text-right">{t("common.qty")}</th>
+              <th className="px-3 py-2.5 text-right">{t("common.price")}</th>
+              <th className="px-3 py-2.5 text-right">{t("pos.line_discount")}</th>
+              <th className="px-3 py-2.5 text-right">{t("pos.tax")}</th>
+              <th className="px-3 py-2.5 text-right">{t("common.total")}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <div className="mb-4 flex justify-end">
-        <table className="w-72 rounded border border-gray-200 bg-white p-3 text-sm">
-          <tbody>
-            <tr>
-              <td>{t("pos.subtotal")}</td>
-              <td className="text-right">{formatPaise(bill.subtotalPaise)}</td>
-            </tr>
-            {bill.discountPaise > 0 ? (
-              <tr>
-                <td>{t("pos.bill_discount")}</td>
-                <td className="text-right text-amber-700">-₹{formatPaise(bill.discountPaise)}</td>
-              </tr>
-            ) : null}
-            {bill.taxPaise > 0 ? (
-              <>
-                <tr>
-                  <td>{t("print.cgst")}</td>
-                  <td className="text-right">{formatPaise(tax.cgstPaise)}</td>
-                </tr>
-                <tr>
-                  <td>{t("print.sgst")}</td>
-                  <td className="text-right">{formatPaise(tax.sgstPaise)}</td>
-                </tr>
-              </>
-            ) : null}
-            {bill.roundOffPaise !== 0 ? (
-              <tr>
-                <td>{t("pos.round_off")}</td>
-                <td className="text-right">
-                  {bill.roundOffPaise > 0 ? "+" : ""}₹{formatPaise(bill.roundOffPaise)}
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {bill.lines.map((l) => (
+              <tr key={l.id} className="hover:bg-gray-50">
+                <td className="px-3 py-2.5 font-medium text-gray-900">
+                  {l.nameSnapshot}
+                  {l.hsnCode ? <span className="ml-1 text-xs text-gray-600 font-mono">(HSN: {l.hsnCode})</span> : null}
                 </td>
+                <td className="px-3 py-2.5 text-right text-gray-700 font-mono">{formatQty(l.qtyMilli)}</td>
+                <td className="px-3 py-2.5 text-right text-gray-700 font-mono">₹{formatPaise(l.unitPricePaise)}</td>
+                <td className="px-3 py-2.5 text-right text-gray-600 font-mono">
+                  {l.discountPaise > 0 ? `₹${formatPaise(l.discountPaise)}` : "—"}
+                </td>
+                <td className="px-3 py-2.5 text-right text-gray-700 font-mono">₹{formatPaise(l.taxPaise)}</td>
+                <td className="px-3 py-2.5 text-right font-semibold text-gray-900 font-mono">₹{formatPaise(l.totalPaise)}</td>
               </tr>
-            ) : null}
-            <tr className="font-bold">
-              <td className="pt-1">{t("pos.total")}</td>
-              <td className="pt-1 text-right" data-testid="bill-total">
-                ₹{formatPaise(bill.totalPaise)}
-              </td>
-            </tr>
+            ))}
           </tbody>
         </table>
       </div>
 
-      <p className="mb-4 text-sm text-gray-600">
-        {t("bill.payments")}:{" "}
-        {bill.payments
-          .map((p) => `${paymentModeLabel(p.mode)} ${formatPaise(p.amountPaise)}`)
-          .join(" · ")}
-      </p>
+      {/* Totals Summary */}
+      <div className="flex justify-end">
+        <div className="w-80 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <dl className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <dt className="text-gray-600">{t("pos.subtotal")}</dt>
+              <dd className="font-mono font-medium text-gray-900">₹{formatPaise(bill.subtotalPaise)}</dd>
+            </div>
+            {bill.discountPaise > 0 ? (
+              <div className="flex justify-between text-green-700">
+                <dt>{t("pos.bill_discount")}</dt>
+                <dd className="font-mono font-medium">-₹{formatPaise(bill.discountPaise)}</dd>
+              </div>
+            ) : null}
+            {bill.taxPaise > 0 ? (
+              <>
+                <div className="flex justify-between text-gray-600 text-xs">
+                  <dt>{t("print.cgst")}</dt>
+                  <dd className="font-mono">₹{formatPaise(tax.cgstPaise)}</dd>
+                </div>
+                <div className="flex justify-between text-gray-600 text-xs">
+                  <dt>{t("print.sgst")}</dt>
+                  <dd className="font-mono">₹{formatPaise(tax.sgstPaise)}</dd>
+                </div>
+              </>
+            ) : null}
+            {bill.roundOffPaise !== 0 ? (
+              <div className="flex justify-between text-gray-600 text-xs">
+                <dt>{t("pos.round_off")}</dt>
+                <dd className="font-mono">
+                  {bill.roundOffPaise > 0 ? "+" : ""}₹{formatPaise(bill.roundOffPaise)}
+                </dd>
+              </div>
+            ) : null}
+            <div className="border-t border-gray-200 pt-2 flex justify-between items-baseline font-bold">
+              <dt className="text-base text-gray-900">{t("pos.total")}</dt>
+              <dd className="text-2xl font-black text-blue-900 font-mono tracking-tight" data-testid="bill-total">
+                ₹{formatPaise(bill.totalPaise)}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+
+      {/* Payment Breakdown as Labelled Rows */}
+      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-700 mb-2">
+          {t("bill.payments")}
+        </h3>
+        <div className="flex flex-wrap gap-2.5">
+          {bill.payments.map((p, idx) => (
+            <div key={idx} className="flex items-center gap-2 rounded-lg bg-gray-50 border border-gray-200 px-3 py-1.5 text-sm">
+              <span className="font-medium text-gray-700">{paymentModeLabel(p.mode)}:</span>
+              <span className="font-bold text-gray-900">₹{formatPaise(p.amountPaise)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
 
       {notice ? (
-        <div className="mb-4 rounded-md bg-green-50 p-3 text-sm text-green-800 border border-green-200" data-testid="bill-notice">
+        <div className="rounded-xl bg-green-50 p-3 text-sm font-semibold text-green-800 border border-green-200" data-testid="bill-notice">
           {notice}
         </div>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          data-testid="bill-print-receipt"
-          className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
-          onClick={() => requestPrint({ billId: bill.id, variant: "receipt-80" })}
-        >
-          {t("bill.reprint_receipt")}
-        </button>
-        <button
-          type="button"
-          data-testid="bill-print-invoice"
-          className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
-          onClick={() => requestPrint({ billId: bill.id, variant: "invoice-a4" })}
-        >
-          {t("bill.print_invoice")}
-        </button>
-        {bill.status === "active" ? (
-          <>
+      {/* Action Buttons: Primary Print, Secondary Return, Separated Destructive Void */}
+      <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-gray-200">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            data-testid="bill-print-receipt"
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-colors"
+            onClick={() => requestPrint({ billId: bill.id, variant: "receipt-80" })}
+          >
+            🖨️ {t("bill.reprint_receipt")}
+          </button>
+          <button
+            type="button"
+            data-testid="bill-print-invoice"
+            className="rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition-colors"
+            onClick={() => requestPrint({ billId: bill.id, variant: "invoice-a4" })}
+          >
+            📄 {t("bill.print_invoice")}
+          </button>
+          {bill.status === "active" ? (
             <button
               type="button"
               data-testid="bill-return"
-              className="rounded border border-amber-400 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-100"
+              className="rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-2 text-sm font-semibold text-amber-800 shadow-sm hover:bg-amber-100 transition-colors"
               onClick={() => setReturning(true)}
             >
-              {t("returns.btn")}
+              ↩ {t("returns.btn")}
             </button>
+          ) : null}
+          {customer?.phone || bill.customerName ? (
+            <button
+              type="button"
+              data-testid="bill-share-whatsapp"
+              className="rounded-lg border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-sm font-semibold text-emerald-800 shadow-sm hover:bg-emerald-100 transition-colors"
+              onClick={() => {
+                const phone = customer?.phone || "";
+                const msg = `Bill ${bill.number} from ${profile?.name || "Store"}. Total: ₹${formatPaise(bill.totalPaise)}. Thank you for shopping with us!`;
+                const url = generateWhatsAppBillShareUrl(phone, msg);
+                window.open(url, "_blank");
+              }}
+            >
+              💬 {t("bill.share_whatsapp")}
+            </button>
+          ) : null}
+        </div>
+
+        {bill.status === "active" ? (
+          <div>
             <button
               type="button"
               data-testid="bill-void"
-              className="rounded border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
+              className="rounded-lg border border-red-300 bg-white px-3.5 py-2 text-sm font-semibold text-red-600 shadow-sm hover:bg-red-50 hover:border-red-400 transition-colors"
               onClick={() => setVoiding(true)}
             >
-              {t("bill.void")}
+              ✕ {t("bill.void")}
             </button>
-          </>
-        ) : null}
-        {customer?.phone || bill.customerName ? (
-          <button
-            type="button"
-            data-testid="bill-share-whatsapp"
-            className="rounded border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-800 hover:bg-emerald-100"
-            onClick={() => {
-              const phone = customer?.phone || "";
-              const msg = `Bill ${bill.number} from ${profile?.name || "Store"}. Total: ₹${formatPaise(bill.totalPaise)}. Thank you for shopping with us!`;
-              const url = generateWhatsAppBillShareUrl(phone, msg);
-              window.open(url, "_blank");
-            }}
-          >
-            {t("bill.share_whatsapp")}
-          </button>
+          </div>
         ) : null}
       </div>
 

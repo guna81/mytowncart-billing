@@ -3,7 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import type { Supplier } from "@mytowncart-billing/storage";
 import { t } from "../i18n";
 import { getRepository } from "../lib/repository";
-import { Button, Input, Modal } from "../components/ui";
+import { Button, Input, Modal, EmptyState, PageHeader } from "../components/ui";
 
 function SupplierDialog({
   initial,
@@ -129,21 +129,23 @@ export function SuppliersScreen() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-lg font-bold">{t("suppliers.title")}</h1>
-        <Button
-          variant="primary"
-          data-testid="suppliers-add"
-          onClick={() => setEditing(null)}
-        >
-          + {t("suppliers.add")}
-        </Button>
-      </div>
+      <PageHeader
+        title={t("suppliers.title")}
+        actions={
+          <Button
+            variant="primary"
+            data-testid="suppliers-add"
+            onClick={() => setEditing(null)}
+          >
+            + {t("suppliers.add")}
+          </Button>
+        }
+      />
 
       <div className="mb-4">
         <input
           type="text"
-          className="w-full max-w-md rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+          className="w-full max-w-md rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           data-testid="suppliers-search"
           placeholder={t("suppliers.search_ph")}
           value={search}
@@ -152,59 +154,67 @@ export function SuppliersScreen() {
       </div>
 
       {error ? (
-        <div className="mb-4 rounded bg-red-50 p-3 text-sm text-red-700 border border-red-200">
+        <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 border border-red-200">
           {error}
         </div>
       ) : null}
 
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-        <table className="w-full text-sm">
-          <thead className="border-b border-gray-200 bg-gray-50 text-left text-gray-600 font-medium">
-            <tr>
-              <th className="px-3 py-2">{t("suppliers.name")}</th>
-              <th className="px-3 py-2">{t("suppliers.phone")}</th>
-              <th className="px-3 py-2">{t("suppliers.gstin")}</th>
-              <th className="px-3 py-2">{t("suppliers.address")}</th>
-              <th className="px-3 py-2 text-right">{t("common.actions")}</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {suppliers.map((s) => (
-              <tr key={s.id} data-testid={`supplier-row-${s.id}`}>
-                <td className="px-3 py-2 font-medium text-gray-900">{s.name}</td>
-                <td className="px-3 py-2 font-mono text-gray-600">{s.phone || "—"}</td>
-                <td className="px-3 py-2 font-mono text-gray-600">{s.gstin || "—"}</td>
-                <td className="px-3 py-2 text-gray-500 max-w-xs truncate">{s.address || "—"}</td>
-                <td className="px-3 py-2 text-right space-x-2">
-                  <button
-                    type="button"
-                    className="text-xs text-blue-600 hover:underline"
-                    data-testid={`supplier-edit-${s.id}`}
-                    onClick={() => setEditing(s)}
-                  >
-                    {t("common.edit")}
-                  </button>
-                  <button
-                    type="button"
-                    className="text-xs text-red-600 hover:underline"
-                    data-testid={`supplier-delete-${s.id}`}
-                    onClick={() => void onDelete(s)}
-                  >
-                    {t("common.delete")}
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {suppliers.length === 0 ? (
+      {suppliers.length === 0 ? (
+        <EmptyState
+          title={t("suppliers.empty")}
+          hint={t("suppliers.empty_hint")}
+          action={
+            <Button
+              variant="primary"
+              onClick={() => setEditing(null)}
+            >
+              + {t("suppliers.add")}
+            </Button>
+          }
+        />
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+          <table className="w-full text-sm">
+            <thead className="border-b border-gray-200 bg-gray-50 text-left text-gray-700 font-semibold">
               <tr>
-                <td colSpan={5} className="p-4 text-center text-gray-500">
-                  {t("suppliers.empty")}
-                </td>
+                <th className="px-3 py-2.5">{t("suppliers.name")}</th>
+                <th className="px-3 py-2.5">{t("suppliers.phone")}</th>
+                <th className="px-3 py-2.5">{t("suppliers.gstin")}</th>
+                <th className="px-3 py-2.5">{t("suppliers.address")}</th>
+                <th className="px-3 py-2.5 text-right">{t("common.actions")}</th>
               </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {suppliers.map((s) => (
+                <tr key={s.id} data-testid={`supplier-row-${s.id}`} className="hover:bg-gray-50">
+                  <td className="px-3 py-2.5 font-medium text-gray-900">{s.name}</td>
+                  <td className="px-3 py-2.5 font-mono text-gray-600">{s.phone || "—"}</td>
+                  <td className="px-3 py-2.5 font-mono text-gray-600">{s.gstin || "—"}</td>
+                  <td className="px-3 py-2.5 text-gray-600 max-w-xs truncate">{s.address || "—"}</td>
+                  <td className="px-3 py-2.5 text-right space-x-2">
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                      data-testid={`supplier-edit-${s.id}`}
+                      onClick={() => setEditing(s)}
+                    >
+                      {t("common.edit")}
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-red-600 hover:text-red-800 hover:underline"
+                      data-testid={`supplier-delete-${s.id}`}
+                      onClick={() => void onDelete(s)}
+                    >
+                      {t("common.delete")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {editing !== undefined ? (
         <SupplierDialog

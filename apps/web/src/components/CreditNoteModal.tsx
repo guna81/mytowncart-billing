@@ -124,7 +124,7 @@ export function CreditNoteModal({ bill, isOpen, onClose, onSuccess }: Props) {
                     <td className="px-3 py-2">
                       <div className="font-medium text-gray-800">{l.nameSnapshot}</div>
                       {l.hsnCode ? (
-                        <div className="text-xs text-gray-400 font-mono">HSN: {l.hsnCode}</div>
+                        <div className="text-xs text-gray-600 font-mono">HSN: {l.hsnCode}</div>
                       ) : null}
                     </td>
                     <td className="px-3 py-2 text-right text-gray-700">

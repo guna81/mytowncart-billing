@@ -25,16 +25,23 @@ function ReceiptDoc({
   bill,
   customer,
   profile,
+  logo,
 }: {
   bill: BillDetail;
   customer: Customer | null;
   profile: ShopProfile | null;
+  logo?: string | null;
 }) {
   const tax = splitGst(bill.taxPaise);
   const showGst = profile?.gstEnabled && bill.taxPaise > 0;
 
   return (
     <div className="font-mono text-xs leading-tight">
+      {logo ? (
+        <div className="flex justify-center mb-1.5">
+          <img src={logo} alt="" className="h-10 max-w-[120px] object-contain grayscale" />
+        </div>
+      ) : null}
       <p className="text-center font-bold text-sm">{profile?.name ?? ""}</p>
       {profile?.address ? <p className="text-center">{profile.address}</p> : null}
       {profile?.phone ? <p className="text-center">{profile.phone}</p> : null}
@@ -202,10 +209,12 @@ function InvoiceDoc({
   bill,
   customer,
   profile,
+  logo,
 }: {
   bill: BillDetail;
   customer: Customer | null;
   profile: ShopProfile | null;
+  logo?: string | null;
 }) {
   const tax = splitGst(bill.taxPaise);
   const isGst = profile?.gstEnabled ?? false;
@@ -228,11 +237,16 @@ function InvoiceDoc({
   return (
     <div className="text-sm">
       <div className="flex justify-between items-start mb-6">
-        <div>
-          <h1 className="text-xl font-bold">{profile?.name ?? ""}</h1>
-          {profile?.address ? <p>{profile.address}</p> : null}
-          {profile?.phone ? <p>{profile.phone}</p> : null}
-          {profile?.gstin ? <p>GSTIN: {profile.gstin}</p> : null}
+        <div className="flex items-start gap-3">
+          {logo ? (
+            <img src={logo} alt="" className="h-14 w-14 object-contain rounded border border-gray-200 p-0.5" />
+          ) : null}
+          <div>
+            <h1 className="text-xl font-bold">{profile?.name ?? ""}</h1>
+            {profile?.address ? <p>{profile.address}</p> : null}
+            {profile?.phone ? <p>{profile.phone}</p> : null}
+            {profile?.gstin ? <p>GSTIN: {profile.gstin}</p> : null}
+          </div>
         </div>
         <div className="text-right">
           <h2 className="text-lg font-semibold">{docTitle}</h2>
@@ -511,6 +525,7 @@ export function PrintView() {
   const printJob = useAppStore((s) => s.printJob);
   const clearPrintJob = useAppStore((s) => s.clearPrintJob);
   const profile = useAppStore((s) => s.profile);
+  const shopLogo = useAppStore((s) => s.shopLogo);
   const [bill, setBill] = useState<BillDetail | null>(null);
   const [creditNote, setCreditNote] = useState<CreditNote | null>(null);
   const [zReportData, setZReportData] = useState<DayEndClosure | null>(null);
@@ -616,9 +631,9 @@ export function PrintView() {
       ) : creditNote ? (
         <CreditNoteDoc creditNote={creditNote} profile={profile} />
       ) : printJob.variant === "invoice-a4" ? (
-        bill ? <InvoiceDoc bill={bill} customer={customer} profile={profile} /> : null
+        bill ? <InvoiceDoc bill={bill} customer={customer} profile={profile} logo={shopLogo} /> : null
       ) : (
-        bill ? <ReceiptDoc bill={bill} customer={customer} profile={profile} /> : null
+        bill ? <ReceiptDoc bill={bill} customer={customer} profile={profile} logo={shopLogo} /> : null
       )}
     </div>
   );

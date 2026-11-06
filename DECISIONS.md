@@ -100,3 +100,32 @@ token-like strings. Cloud telemetry stays out of scope (zero-spend).
 key the owner generates and stores, which is an O-series owner task. The
 release workflow keeps publishing unsigned installers + SHA-256 checksums, and
 the Settings screen tells users to download the new build manually.
+
+## B4-3 — "Update available" button via GitHub Releases check (notify only)
+**Date:** 2026-11-06 · **Builds on:** B4-2
+
+Until updater signing keys exist (B4-2), the desktop app tells the user when a
+newer release is published instead of installing it. On launch (at most once
+per 24 h) and on a manual "Check for updates" click, the app reads
+`https://api.github.com/repos/guna81/mytowncart-billing/releases/latest`,
+compares `tag_name` with `APP_VERSION` (semver), and shows an
+**Update available (vX.Y.Z)** button. Clicking it opens that release page in
+the system browser; the user downloads and installs manually exactly as today
+(unsigned installers + SHA-256 checksums, D12).
+
+- **No new secrets, keys, or backend.** `/releases/latest` ignores drafts and
+  prereleases, so "published the draft" in `docs/RELEASING.md` step 6 is the
+  release signal. `release.yml` is unchanged.
+- **Network is best-effort.** Offline, rate-limited (60 req/h unauthenticated),
+  or malformed responses fail silently; billing never depends on the check.
+  Nothing is sent beyond a plain GET (no telemetry, per the diagnostics rule).
+- **Needs:** `https://api.github.com` added to the CSP `connect-src`, and a way
+  to open the URL in the system browser (`tauri-plugin-opener`, scoped to
+  `https://github.com/guna81/mytowncart-billing/releases/*`), since
+  `window.open` inside the webview is not a reliable external-browser launch.
+- **Version sources must stay in sync** (`tauri.conf.json`, `Cargo.toml`,
+  `APP_VERSION`, the git tag) — already required by `docs/RELEASING.md`; a
+  mismatch would show a false "update available".
+- **Upgrade path:** the real one-click updater (Tauri updater plugin + signed
+  `latest.json`) can replace the click action later; the check, banner and
+  button UI stay.

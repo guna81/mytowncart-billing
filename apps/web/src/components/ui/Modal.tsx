@@ -9,6 +9,8 @@ export function Modal({
   maxWidth = "max-w-md",
   testId = "modal",
   dataTestId,
+  hideCloseButton = false,
+  closable = true,
 }: {
   isOpen: boolean;
   onClose(): void;
@@ -17,11 +19,13 @@ export function Modal({
   maxWidth?: string;
   testId?: string;
   dataTestId?: string;
+  hideCloseButton?: boolean;
+  closable?: boolean;
 }) {
   const modalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !closable) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -32,7 +36,7 @@ export function Modal({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, closable]);
 
   if (!isOpen) return null;
 
@@ -40,7 +44,7 @@ export function Modal({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 transition-opacity"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (closable && e.target === e.currentTarget) onClose();
       }}
     >
       <div
@@ -51,14 +55,16 @@ export function Modal({
         {title ? (
           <div className="flex items-center justify-between pb-3 border-b border-gray-200 mb-4">
             <h2 className="text-base font-bold text-gray-900">{title}</h2>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-              aria-label="Close"
-            >
-              ✕
-            </button>
+            {!hideCloseButton && closable ? (
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            ) : null}
           </div>
         ) : null}
         <div className="flex-1 overflow-y-auto">{children}</div>

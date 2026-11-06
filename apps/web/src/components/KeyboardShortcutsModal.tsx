@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect } from "react";
-import { t } from "../i18n";
 
 interface ShortcutItem {
   keyCombo: string;

@@ -7,17 +7,18 @@
 //! multi-table write is a dedicated typed command running in ONE
 //! transaction (see `repo.rs`).
 
-mod backup;
-mod db;
-mod keychain;
-mod media;
-mod reconcile;
-mod repo;
-mod sync;
+pub(crate) mod backup;
+pub(crate) mod db;
+pub(crate) mod keychain;
+pub(crate) mod media;
+pub(crate) mod reconcile;
+pub(crate) mod repo;
+pub(crate) mod server;
+pub(crate) mod sync;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use tauri::Manager;
@@ -25,16 +26,17 @@ use tauri::Manager;
 /// Upper bound for anything read from disk into memory (backups, photos).
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
-struct AppState {
-    data_dir: PathBuf,
-    db_path: PathBuf,
+#[derive(Clone)]
+pub struct AppState {
+    pub data_dir: PathBuf,
+    pub db_path: PathBuf,
     /// Single shared connection. Commands that write take the mutex and run
     /// their whole transaction under it; a busy_timeout covers any reader
     /// connections (e.g. the B0 `db_status` path) racing a writer.
-    conn: Mutex<rusqlite::Connection>,
+    pub conn: Arc<Mutex<rusqlite::Connection>>,
     /// Set while a restore swaps the database file; every other command
     /// refuses to run so no write lands in the discarded file.
-    restoring: AtomicBool,
+    pub restoring: Arc<AtomicBool>,
 }
 
 #[derive(Serialize)]
@@ -714,10 +716,35 @@ fn get_day_end_expected_cash(
     repo::get_day_end_expected_cash(&conn, &date_prefix)
 }
 
+#[tauri::command]
+fn lan_server_status(
+    server_mgr: tauri::State<'_, server::LanServerManager>,
+) -> server::LanServerStatus {
+    server_mgr.status()
+}
+
+#[tauri::command]
+fn lan_server_start(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    server_mgr: tauri::State<'_, server::LanServerManager>,
+    port: u16,
+) -> Result<server::LanServerStatus, String> {
+    server_mgr.start(&app, &state, port)
+}
+
+#[tauri::command]
+fn lan_server_stop(
+    server_mgr: tauri::State<'_, server::LanServerManager>,
+) -> Result<server::LanServerStatus, String> {
+    server_mgr.stop()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(driver_script: Option<String>) {
     let script = driver_script.map(std::sync::Arc::new);
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .on_page_load(move |win, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
                 if let Some(script) = script.as_deref() {
@@ -743,15 +770,40 @@ pub fn run(driver_script: Option<String>) {
                 );
             }
             let conn = db::open(&db_path).map_err(|e| e.to_string())?;
-            app.manage(AppState {
+            let app_state = AppState {
                 data_dir,
                 db_path,
-                conn: Mutex::new(conn),
-                restoring: AtomicBool::new(false),
-            });
+                conn: Arc::new(Mutex::new(conn)),
+                restoring: Arc::new(AtomicBool::new(false)),
+            };
+            app.manage(app_state.clone());
+
+            let server_mgr = server::LanServerManager::new();
+            if let Ok(c) = app_state.conn.lock() {
+                let autostart = sync::get_setting(&c, "lan.autostart")
+                    .ok()
+                    .flatten()
+                    .map(|v| v == "true" || v == "1")
+                    .unwrap_or(false);
+                let port = sync::get_setting(&c, "lan.port")
+                    .ok()
+                    .flatten()
+                    .and_then(|p| p.parse::<u16>().ok())
+                    .unwrap_or(8080);
+                drop(c);
+                if autostart {
+                    if let Err(e) = server_mgr.start(&app.handle().clone(), &app_state, port) {
+                        eprintln!("[lan_server] autostart failed: {e}");
+                    }
+                }
+            }
+            app.manage(server_mgr);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            lan_server_status,
+            lan_server_start,
+            lan_server_stop,
             db_status,
             db_hello,
             keychain_set,

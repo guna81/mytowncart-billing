@@ -95,7 +95,7 @@ export function generateGstr1Dataset(
     if (bill.status !== "active") continue;
 
     // Check if customer is GST registered
-    const customer = (bill as any).customerId ? customersMap.get((bill as any).customerId) : undefined;
+    const customer = (bill as { customerId?: number }).customerId ? customersMap.get((bill as { customerId?: number }).customerId!) : undefined;
     const isB2b = Boolean(customer && customer.gstin && customer.gstin.trim().length === 15);
 
     const invoiceDate = bill.createdAt.slice(0, 10);
@@ -128,7 +128,7 @@ export function generateGstr1Dataset(
       }
 
       // HSN summary line
-      const hsn = (line as any).hsnCode || "9999";
+      const hsn = (line as { hsnCode?: string }).hsnCode || "9999";
       const hsnEntry = hsnMap.get(hsn) || {
         description: line.nameSnapshot,
         uqc: "NOS",

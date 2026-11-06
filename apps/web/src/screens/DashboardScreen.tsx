@@ -18,6 +18,7 @@ import { HourlyHeatmap } from "../components/charts/HourlyHeatmap";
 import { PaymentModePieChart } from "../components/charts/PaymentModePieChart";
 import { t, type I18nKey } from "../i18n";
 import { getRepository } from "../lib/repository";
+import { effectiveLowStockThreshold } from "../lib/stockAlerts";
 import { useAppStore } from "../store/appStore";
 
 export function DashboardScreen() {
@@ -42,8 +43,8 @@ export function DashboardScreen() {
 
       if (!cancelled) {
         setBills(reportBills);
-        const threshold = profile?.lowStockThresholdMilli ?? 0;
-        setLowStockItems(allItems.filter((i) => isLowStock(i.stockMilli, threshold)));
+        const threshold = effectiveLowStockThreshold(profile);
+        setLowStockItems(threshold === 0 ? [] : allItems.filter((i) => isLowStock(i.stockMilli, threshold)));
         const backupSettings = parseBackupSettings(backupRaw);
         setLastBackupAt(backupSettings?.lastSuccessAt ?? null);
         setLoading(false);
@@ -143,37 +144,37 @@ export function DashboardScreen() {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm" data-testid="dashboard-today-sales">
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+          <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
             {t("dashboard.today_sales")}
           </p>
           <p className="mt-2 text-2xl font-bold text-blue-700">₹{formatPaise(totalSalesPaise)}</p>
-          <p className="mt-1 text-xs text-gray-400">Net revenue today</p>
+          <p className="mt-1 text-xs text-gray-600">Net revenue today</p>
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm" data-testid="dashboard-today-bills">
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+          <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
             {t("dashboard.today_bills")}
           </p>
           <p className="mt-2 text-2xl font-bold text-gray-900">{billCount}</p>
-          <p className="mt-1 text-xs text-gray-400">Total completed orders</p>
+          <p className="mt-1 text-xs text-gray-600">Total completed orders</p>
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm" data-testid="dashboard-average-bill">
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+          <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
             {t("dashboard.average_bill")}
           </p>
           <p className="mt-2 text-2xl font-bold text-gray-900">₹{formatPaise(avgBillPaise)}</p>
-          <p className="mt-1 text-xs text-gray-400">Average ticket size</p>
+          <p className="mt-1 text-xs text-gray-600">Average ticket size</p>
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm" data-testid="dashboard-today-credit">
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+          <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
             {t("dashboard.today_credit")}
           </p>
           <p className={`mt-2 text-2xl font-bold ${creditDuePaise > 0 ? "text-amber-600" : "text-gray-900"}`}>
             ₹{formatPaise(creditDuePaise)}
           </p>
-          <p className="mt-1 text-xs text-gray-400">Outstanding credit issued</p>
+          <p className="mt-1 text-xs text-gray-600">Outstanding credit issued</p>
         </div>
       </div>
 
@@ -250,7 +251,7 @@ export function DashboardScreen() {
       <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm" data-testid="dashboard-hourly-activity">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-sm font-bold text-gray-800">Hourly Store Traffic & Sales Velocity</h2>
-          <span className="text-xs text-gray-400 font-mono">00:00 - 23:59</span>
+          <span className="text-xs text-gray-600 font-mono">00:00 - 23:59</span>
         </div>
         <HourlyHeatmap buckets={hourlyBuckets} height={120} />
       </div>
@@ -265,7 +266,14 @@ export function DashboardScreen() {
               {t("common.actions")} →
             </Link>
           </div>
-          {lowStockItems.length === 0 ? (
+          {effectiveLowStockThreshold(profile) === 0 ? (
+            <p className="py-6 text-center text-xs text-gray-600 bg-gray-50 rounded">
+              {t("dashboard.low_stock_off")} ·{" "}
+              <Link to="/settings" className="text-blue-600 underline font-semibold">
+                {t("nav.settings")}
+              </Link>
+            </p>
+          ) : lowStockItems.length === 0 ? (
             <p className="py-6 text-center text-xs text-green-700 bg-green-50 rounded">
               ✓ {t("dashboard.low_stock_none")}
             </p>
@@ -275,7 +283,7 @@ export function DashboardScreen() {
                 <div key={item.id} className="py-2 flex items-center justify-between">
                   <div>
                     <p className="font-medium text-gray-800">{item.name}</p>
-                    <p className="text-gray-400 font-mono text-[11px]">{item.barcode || "—"}</p>
+                    <p className="text-gray-600 font-mono text-xs">{item.barcode || "—"}</p>
                   </div>
                   <span className="rounded bg-red-50 px-2 py-0.5 font-bold text-red-600">
                     {formatQty(item.stockMilli)} left

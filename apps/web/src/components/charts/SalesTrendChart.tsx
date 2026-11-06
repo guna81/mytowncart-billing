@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { formatPaise } from "@mytowncart-billing/core";
+import { t } from "../../i18n";
 
 export interface SalesTrendPoint {
   date: string;
@@ -16,8 +17,8 @@ export function SalesTrendChart({
 }) {
   if (points.length === 0) {
     return (
-      <div className="flex h-44 items-center justify-center text-xs text-gray-400">
-        No sales trend data available.
+      <div className="flex h-44 items-center justify-center text-xs text-gray-500">
+        {t("reports.empty")}
       </div>
     );
   }
@@ -42,6 +43,11 @@ export function SalesTrendChart({
 
   return (
     <div className="w-full overflow-x-auto" data-testid="sales-trend-chart">
+      {points.length < 2 && (
+        <div className="text-xs text-gray-500 text-center mb-1 font-medium">
+          {t("reports.not_enough_data")}
+        </div>
+      )}
       <svg
         viewBox={`0 0 ${chartWidth} ${height}`}
         className="w-full h-auto"
@@ -102,7 +108,7 @@ export function SalesTrendChart({
               x={c.x}
               y={height - 5}
               textAnchor={idx === 0 ? "start" : idx === points.length - 1 ? "end" : "middle"}
-              className="text-[10px] fill-gray-500 font-sans"
+              className="text-[10px] fill-gray-600 font-sans"
             >
               {c.point.date.slice(5)}
             </text>

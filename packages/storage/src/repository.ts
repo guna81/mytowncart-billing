@@ -103,7 +103,7 @@ export interface BillFilter {
 }
 
 export interface BillingRepository {
-  readonly kind: "tauri" | "memory";
+  readonly kind: "tauri" | "memory" | "http";
 
   getShopProfile(): Promise<ShopProfile | null>;
   saveShopProfile(profile: Omit<ShopProfile, "updatedAt"> & { updatedAt?: string }): Promise<void>;

@@ -25,7 +25,7 @@ export function PaymentModePieChart({
 
   if (totalAmount === 0) {
     return (
-      <div className="flex h-44 items-center justify-center text-xs text-gray-400">
+      <div className="flex h-44 items-center justify-center text-xs text-gray-500 font-medium">
         No payment data available.
       </div>
     );
@@ -118,7 +118,7 @@ export function PaymentModePieChart({
               style={{ backgroundColor: arc.color }}
             />
             <span className="font-medium text-gray-700 capitalize">{arc.slice.mode}</span>
-            <span className="text-gray-400 font-mono">({arc.percentage}%)</span>
+            <span className="text-gray-600 font-mono">({arc.percentage}%)</span>
             <span className="font-mono text-gray-900 font-semibold ml-auto">
               ₹{formatPaise(arc.slice.amountPaise)}
             </span>

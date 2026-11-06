@@ -55,9 +55,9 @@ import type {
 
 type Row = Record<string, unknown>;
 
-type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+export type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
-async function invoker(): Promise<InvokeFn> {
+async function defaultTauriInvoker(): Promise<InvokeFn> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke as InvokeFn;
 }
@@ -155,10 +155,19 @@ function itemToPayload(input: ItemInput, now: string): Record<string, unknown> {
 }
 
 export class TauriRepository implements BillingRepository {
-  readonly kind = "tauri" as const;
+  readonly kind: "tauri" | "http" = "tauri";
+  protected readonly customInvoker?: InvokeFn;
 
-  private async query(sql: string, params: unknown[] = []): Promise<Row[]> {
-    const invoke = await invoker();
+  constructor(customInvoker?: InvokeFn) {
+    this.customInvoker = customInvoker;
+  }
+
+  protected async getInvoke(): Promise<InvokeFn> {
+    return this.customInvoker ?? defaultTauriInvoker();
+  }
+
+  protected async query(sql: string, params: unknown[] = []): Promise<Row[]> {
+    const invoke = await this.getInvoke();
     return invoke<Row[]>("query_rows", { sql, params });
   }
 
@@ -183,7 +192,7 @@ export class TauriRepository implements BillingRepository {
   async saveShopProfile(
     profile: Omit<ShopProfile, "updatedAt"> & { updatedAt?: string },
   ): Promise<void> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     await invoke("save_shop_profile", {
       profile: { ...profile, updatedAt: profile.updatedAt ?? new Date().toISOString() },
     });
@@ -200,7 +209,7 @@ export class TauriRepository implements BillingRepository {
   }
 
   async upsertCategory(input: { id?: number; name: string }): Promise<number> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<number>("upsert_category", {
       category: { id: input.id ?? null, name: input.name },
     });
@@ -210,7 +219,7 @@ export class TauriRepository implements BillingRepository {
     categoryId: number,
     marketplaceCategoryId: string | null,
   ): Promise<void> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     await invoke<void>("record_publish", {
       outcomes: [],
       categoryMappings: [{ categoryId, marketplaceCategoryId }],
@@ -221,7 +230,7 @@ export class TauriRepository implements BillingRepository {
     outcomes: readonly PublishOutcome[],
     marketplaceCategoryIds: ReadonlyMap<number, string>,
   ): Promise<void> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     const updatedAt = localIsoTimestamp(new Date());
     await invoke<void>("record_publish", {
       outcomes: outcomes.map((o) => ({
@@ -267,12 +276,12 @@ export class TauriRepository implements BillingRepository {
   }
 
   async upsertItem(input: ItemInput): Promise<number> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<number>("upsert_item", { item: itemToPayload(input, new Date().toISOString()) });
   }
 
   async importItems(items: ItemInput[]): Promise<ImportRowOutcome[]> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     const now = new Date().toISOString();
     return invoke<ImportRowOutcome[]>("import_items", {
       items: items.map((i) => itemToPayload(i, now)),
@@ -301,7 +310,7 @@ export class TauriRepository implements BillingRepository {
   }
 
   async upsertCustomer(input: CustomerInput): Promise<number> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<number>("upsert_customer", {
       customer: {
         id: input.id ?? null,
@@ -315,12 +324,12 @@ export class TauriRepository implements BillingRepository {
   }
 
   async deleteCustomer(id: number): Promise<boolean> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<boolean>("delete_customer", { customerId: id });
   }
 
   async recordCustomerPayment(input: CustomerPaymentInput): Promise<number> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<number>("record_customer_payment", {
       payment: {
         customerId: input.customerId,
@@ -333,7 +342,7 @@ export class TauriRepository implements BillingRepository {
   }
 
   async listCustomerPayments(customerId: number): Promise<CustomerPayment[]> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<CustomerPayment[]>("list_customer_payments", { customerId });
   }
 
@@ -403,12 +412,12 @@ export class TauriRepository implements BillingRepository {
   }
 
   async createBill(bill: NewBillPayload): Promise<CreatedBill> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<CreatedBill>("create_bill", { bill });
   }
 
   async voidBill(billId: number, reason: string): Promise<void> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     await invoke("void_bill", { billId, reason, voidedAt: new Date().toISOString() });
   }
 
@@ -469,7 +478,7 @@ export class TauriRepository implements BillingRepository {
   }
 
   async getBillsReportData(filter?: BillFilter): Promise<ReportBill[]> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<ReportBill[]>("get_bills_report_data", {
       from: filter?.from ?? null,
       to: filter?.to ?? null,
@@ -481,7 +490,7 @@ export class TauriRepository implements BillingRepository {
     deltaMilli: number,
     reason: "adjustment" | "purchase" | "import",
   ): Promise<number> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<number>("adjust_stock", {
       itemId,
       deltaMilli,
@@ -514,7 +523,7 @@ export class TauriRepository implements BillingRepository {
   // --- B2 images -----------------------------------------------------------
 
   async setItemPhoto(itemId: number, bytes: Uint8Array, imageHash: string): Promise<void> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     await invoke("set_item_photo", {
       itemId,
       bytes: Array.from(bytes),
@@ -524,14 +533,14 @@ export class TauriRepository implements BillingRepository {
   }
 
   async clearItemPhoto(itemId: number): Promise<void> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     await invoke("clear_item_photo", { itemId, now: localIsoTimestamp(new Date()) });
   }
 
   async readItemPhoto(itemId: number): Promise<{ bytes: Uint8Array; imageHash: string | null } | null> {
     const item = await this.getItem(itemId);
     if (!item || item.photoFile === "") return null;
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     const bytes = await invoke<number[]>("read_item_photo", { itemId });
     return { bytes: new Uint8Array(bytes), imageHash: item.imageHash };
   }
@@ -540,7 +549,7 @@ export class TauriRepository implements BillingRepository {
     uploads: readonly { itemId: number; imageHash: string; uploadedAt: string }[],
   ): Promise<void> {
     if (uploads.length === 0) return;
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     await invoke("record_image_uploads", { uploads });
   }
 
@@ -560,14 +569,14 @@ export class TauriRepository implements BillingRepository {
   }
 
   async saveHeldBill(bill: HeldBillInput): Promise<number> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<number>("save_held_bill", {
       bill: { ...bill, id: bill.id ?? null, createdAt: localIsoTimestamp(new Date()) },
     });
   }
 
   async takeHeldBill(id: number): Promise<void> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     await invoke("take_held_bill", { id });
   }
 
@@ -602,7 +611,7 @@ export class TauriRepository implements BillingRepository {
   async recordOutboxResults(
     results: readonly { idempotencyKey: string; outcome: "done" | "retry"; nextAttemptAt?: string }[],
   ): Promise<void> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     await invoke("record_outbox_results", {
       results: results.map((r) => ({
         idempotencyKey: r.idempotencyKey,
@@ -613,7 +622,7 @@ export class TauriRepository implements BillingRepository {
   }
 
   async dropOutbox(keys: readonly string[]): Promise<void> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     await invoke("drop_outbox", { keys });
   }
 
@@ -623,7 +632,7 @@ export class TauriRepository implements BillingRepository {
   }
 
   async setSyncCursor(key: string, value: string): Promise<void> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     await invoke("set_sync_cursor", { key, value });
   }
 
@@ -636,7 +645,7 @@ export class TauriRepository implements BillingRepository {
       createdAt: string;
     }[],
   ): Promise<{ externalId: string; itemId: number | null; deltaMilli: number }[]> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<{ externalId: string; itemId: number | null; deltaMilli: number }[]>(
       "apply_stock_pull",
       { cursor: nextCursor, moves },
@@ -644,7 +653,7 @@ export class TauriRepository implements BillingRepository {
   }
 
   async recordRemoteCatalog(items: readonly RemoteItemLink[]): Promise<number> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<number>("record_remote_catalog", { items });
   }
 
@@ -666,7 +675,7 @@ export class TauriRepository implements BillingRepository {
   }
 
   async recordRemoteOrders(orders: readonly RemoteOrderRecord[]): Promise<number> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<number>("record_orders", {
       orders: orders.map((o) => ({
         id: o.id,
@@ -683,7 +692,7 @@ export class TauriRepository implements BillingRepository {
   }
 
   async applyReconcileFixes(fixes: readonly ReconcileFix[]): Promise<void> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     await invoke("apply_reconcile_fixes", {
       fixes: fixes.map((f) => ({
         itemId: f.itemId,
@@ -700,19 +709,19 @@ export class TauriRepository implements BillingRepository {
   // --- generic settings ----------------------------------------------------
 
   async getAppSetting(key: string): Promise<string | null> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<string | null>("get_app_setting", { key });
   }
 
   async setAppSetting(key: string, value: string | null): Promise<void> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     await invoke("set_app_setting", { key, value });
   }
 
   // --- Phase 2: Credit Notes ------------------------------------------------
 
   async createCreditNote(payload: NewCreditNotePayload): Promise<{ creditNoteId: number; number: string }> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<{ creditNoteId: number; number: string }>("create_credit_note", {
       creditNote: {
         billId: payload.billId,
@@ -733,24 +742,24 @@ export class TauriRepository implements BillingRepository {
   }
 
   async listCreditNotes(billId?: number): Promise<CreditNote[]> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<CreditNote[]>("list_credit_notes", { billId: billId ?? null });
   }
 
   async getCreditNote(id: number): Promise<CreditNote | null> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<CreditNote | null>("get_credit_note", { id });
   }
 
   // --- Phase 2: Suppliers & Purchases ---------------------------------------
 
   async listSuppliers(search?: string): Promise<Supplier[]> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<Supplier[]>("list_suppliers", { search: search ?? null });
   }
 
   async upsertSupplier(input: SupplierInput): Promise<number> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<number>("upsert_supplier", {
       supplier: {
         id: input.id ?? null,
@@ -764,12 +773,12 @@ export class TauriRepository implements BillingRepository {
   }
 
   async deleteSupplier(id: number): Promise<boolean> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<boolean>("delete_supplier", { supplierId: id });
   }
 
   async createPurchase(payload: NewPurchasePayload): Promise<{ purchaseId: number }> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     const purchaseId = await invoke<number>("create_purchase", {
       purchase: {
         supplierId: payload.supplierId,
@@ -790,24 +799,24 @@ export class TauriRepository implements BillingRepository {
   }
 
   async listPurchases(supplierId?: number): Promise<Purchase[]> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<Purchase[]>("list_purchases", { supplierId: supplierId ?? null });
   }
 
   async getPurchase(id: number): Promise<Purchase | null> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<Purchase | null>("get_purchase", { id });
   }
 
   // --- Phase 2: Users & Roles & Audit ---------------------------------------
 
   async listUsers(): Promise<User[]> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<User[]>("list_users");
   }
 
   async upsertUser(input: UserInput): Promise<number> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<number>("upsert_user", {
       user: {
         id: input.id ?? null,
@@ -821,7 +830,7 @@ export class TauriRepository implements BillingRepository {
   }
 
   async verifyPin(pin: string, requiredRole?: UserRole): Promise<User | null> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<User | null>("verify_pin", {
       pin,
       requiredRole: requiredRole ?? null,
@@ -829,7 +838,7 @@ export class TauriRepository implements BillingRepository {
   }
 
   async recordAuditLog(input: AuditLogInput): Promise<number> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<number>("record_audit_log", {
       auditLog: {
         userId: input.userId ?? null,
@@ -841,14 +850,14 @@ export class TauriRepository implements BillingRepository {
   }
 
   async listAuditLogs(limit = 100): Promise<AuditLog[]> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<AuditLog[]>("list_audit_logs", { limit });
   }
 
   // --- Phase 2: Stock Audit -------------------------------------------------
 
   async applyStockAudit(discrepancies: StockDiscrepancyInput[]): Promise<number> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<number>("apply_stock_audit", {
       discrepancies: discrepancies.map((d) => ({
         itemId: d.itemId,
@@ -862,7 +871,7 @@ export class TauriRepository implements BillingRepository {
   // --- Phase 3: Batches & Expiry --------------------------------------------
 
   async upsertBatch(input: BatchInput): Promise<number> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<number>("upsert_batch", {
       batch: {
         id: input.id ?? null,
@@ -879,13 +888,13 @@ export class TauriRepository implements BillingRepository {
   }
 
   async listBatchesForItem(itemId: number): Promise<ItemBatch[]> {
-    const invoke = await invoker();
-    const rows = await invoke<any[]>("list_batches_for_item", { itemId });
+    const invoke = await this.getInvoke();
+    const rows = await invoke<Record<string, unknown>[]>("list_batches_for_item", { itemId });
     return (rows || []).map((r) => ({
       id: Number(r.id),
       itemId: Number(r.itemId ?? r.item_id),
       batchNo: String(r.batchNo ?? r.batch_no ?? ""),
-      mfgDate: r.mfgDate ?? r.mfg_date ?? null,
+      mfgDate: (r.mfgDate ?? r.mfg_date ?? null) as string | null,
       expiryDate: String(r.expiryDate ?? r.expiry_date ?? ""),
       costPricePaise: Number(r.costPricePaise ?? r.cost_price_paise ?? 0),
       mrpPaise: Number(r.mrpPaise ?? r.mrp_paise ?? 0),
@@ -895,8 +904,8 @@ export class TauriRepository implements BillingRepository {
   }
 
   async listExpiringBatches(daysThreshold: number): Promise<ItemBatch[]> {
-    const invoke = await invoker();
-    const rows = await invoke<any[]>("list_expiring_batches", {
+    const invoke = await this.getInvoke();
+    const rows = await invoke<Record<string, unknown>[]>("list_expiring_batches", {
       daysThreshold,
       nowIso: new Date().toISOString().slice(0, 10),
     });
@@ -904,7 +913,7 @@ export class TauriRepository implements BillingRepository {
       id: Number(r.id),
       itemId: Number(r.itemId ?? r.item_id),
       batchNo: String(r.batchNo ?? r.batch_no ?? ""),
-      mfgDate: r.mfgDate ?? r.mfg_date ?? null,
+      mfgDate: (r.mfgDate ?? r.mfg_date ?? null) as string | null,
       expiryDate: String(r.expiryDate ?? r.expiry_date ?? ""),
       costPricePaise: Number(r.costPricePaise ?? r.cost_price_paise ?? 0),
       mrpPaise: Number(r.mrpPaise ?? r.mrp_paise ?? 0),
@@ -921,7 +930,7 @@ export class TauriRepository implements BillingRepository {
     billId?: number | null,
     reason = "",
   ): Promise<number> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<number>("update_customer_loyalty", {
       customerId,
       pointsDelta,
@@ -932,17 +941,17 @@ export class TauriRepository implements BillingRepository {
   }
 
   async getCustomerLoyaltyBalance(customerId: number): Promise<number> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<number>("get_customer_loyalty_balance", { customerId });
   }
 
   async listLoyaltyTransactions(customerId: number): Promise<LoyaltyTransaction[]> {
-    const invoke = await invoker();
-    const rows = await invoke<any[]>("list_loyalty_transactions", { customerId });
+    const invoke = await this.getInvoke();
+    const rows = await invoke<Record<string, unknown>[]>("list_loyalty_transactions", { customerId });
     return (rows || []).map((r) => ({
       id: Number(r.id),
       customerId: Number(r.customerId ?? r.customer_id),
-      billId: r.billId ?? r.bill_id ?? null,
+      billId: (r.billId ?? r.bill_id ?? null) as number | null,
       pointsDelta: Number(r.pointsDelta ?? r.points_delta ?? 0),
       reason: String(r.reason ?? ""),
       createdAt: String(r.createdAt ?? r.created_at ?? ""),
@@ -957,7 +966,7 @@ export class TauriRepository implements BillingRepository {
     packQtyMilli = 1000,
     label = "",
   ): Promise<number> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<number>("upsert_item_barcode", {
       itemId,
       barcode,
@@ -967,8 +976,8 @@ export class TauriRepository implements BillingRepository {
   }
 
   async listItemBarcodes(itemId: number): Promise<ItemBarcode[]> {
-    const invoke = await invoker();
-    const rows = await invoke<any[]>("list_item_barcodes", { itemId });
+    const invoke = await this.getInvoke();
+    const rows = await invoke<Record<string, unknown>[]>("list_item_barcodes", { itemId });
     return (rows || []).map((r) => ({
       id: Number(r.id),
       itemId: Number(r.itemId ?? r.item_id),
@@ -979,13 +988,13 @@ export class TauriRepository implements BillingRepository {
   }
 
   async deleteItemBarcode(barcodeId: number): Promise<void> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     await invoke<void>("delete_item_barcode", { barcodeId });
   }
 
   async lookupItemByAnyBarcode(barcode: string): Promise<BarcodeLookupResult | null> {
-    const invoke = await invoker();
-    const r = await invoke<any | null>("lookup_item_by_any_barcode", { barcode });
+    const invoke = await this.getInvoke();
+    const r = await invoke<Record<string, unknown> | null>("lookup_item_by_any_barcode", { barcode });
     if (!r) return null;
     return {
       itemId: Number(r.itemId ?? r.item_id),
@@ -999,7 +1008,7 @@ export class TauriRepository implements BillingRepository {
   // --- Phase 3: Day-End Closing & Z-Report -----------------------------------
 
   async createDayEndClosure(input: DayEndClosureInput): Promise<number> {
-    const invoke = await invoker();
+    const invoke = await this.getInvoke();
     return invoke<number>("create_day_end_closure", {
       closure: {
         closureDate: input.closureDate,
@@ -1020,16 +1029,16 @@ export class TauriRepository implements BillingRepository {
   }
 
   async listDayEndClosures(fromDate?: string, toDate?: string): Promise<DayEndClosure[]> {
-    const invoke = await invoker();
-    const rows = await invoke<any[]>("list_day_end_closures", {
+    const invoke = await this.getInvoke();
+    const rows = await invoke<Record<string, unknown>[]>("list_day_end_closures", {
       fromDate: fromDate ?? null,
       toDate: toDate ?? null,
     });
     return (rows || []).map((r) => ({
       id: Number(r.id),
       closureDate: String(r.closureDate ?? r.closure_date ?? ""),
-      userId: r.userId ?? r.user_id ?? null,
-      userName: r.userName ?? r.user_name ?? null,
+      userId: (r.userId ?? r.user_id ?? null) as number | null,
+      userName: (r.userName ?? r.user_name ?? undefined) as string | undefined,
       openingCashPaise: Number(r.openingCashPaise ?? r.opening_cash_paise ?? 0),
       cashSalesPaise: Number(r.cashSalesPaise ?? r.cash_sales_paise ?? 0),
       creditReceivedPaise: Number(r.creditReceivedPaise ?? r.credit_received_paise ?? 0),
@@ -1045,8 +1054,8 @@ export class TauriRepository implements BillingRepository {
   }
 
   async getDayEndExpectedCash(datePrefix: string): Promise<DayEndExpectedCash> {
-    const invoke = await invoker();
-    const r = await invoke<any>("get_day_end_expected_cash", { datePrefix });
+    const invoke = await this.getInvoke();
+    const r = await invoke<Record<string, unknown>>("get_day_end_expected_cash", { datePrefix });
     return {
       cashSalesPaise: Number(r?.cashSalesPaise ?? r?.cash_sales_paise ?? 0),
       creditReceivedPaise: Number(r?.creditReceivedPaise ?? r?.credit_received_paise ?? 0),

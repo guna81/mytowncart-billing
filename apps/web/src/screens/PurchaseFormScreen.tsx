@@ -362,7 +362,7 @@ export function PurchaseFormScreen() {
               })}
               {lines.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-4 text-center text-gray-400">
+                  <td colSpan={6} className="p-4 text-center text-gray-600">
                     No items added yet. Add items using the box above.
                   </td>
                 </tr>

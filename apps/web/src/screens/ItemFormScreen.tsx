@@ -15,6 +15,7 @@ import {
   type UnitKind,
 } from "@mytowncart-billing/core";
 import type { Category, ItemBarcode } from "@mytowncart-billing/storage";
+import { PageHeader } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
 import { getRepository } from "../lib/repository";
 import { useAppStore } from "../store/appStore";
@@ -206,23 +207,25 @@ export function ItemFormScreen() {
   };
 
   return (
-    <form onSubmit={(e) => void submit(e)} className="max-w-lg space-y-4">
-      <h1 className="text-lg font-bold">
-        {t(editId === null ? "item_form.add_title" : "item_form.edit_title")}
-      </h1>
+    <div className="max-w-2xl mx-auto pb-24">
+      <PageHeader
+        title={t(editId === null ? "item_form.add_title" : "item_form.edit_title")}
+        subtitle={editId !== null ? `#${editId}` : undefined}
+      />
 
-      <label className={labelCls}>
-        {t("item_form.name")}
-        <input data-testid="item-name" className={inputCls} value={name} autoFocus
-          onChange={(e) => setName(e.target.value)} />
-      </label>
+      <form onSubmit={(e) => void submit(e)} className="mt-4 space-y-4">
+        <label className={labelCls}>
+          {t("item_form.name")}
+          <input data-testid="item-name" className={inputCls} value={name} autoFocus
+            onChange={(e) => setName(e.target.value)} />
+        </label>
 
-      <label className={labelCls}>
-        {t("item_form.barcode")}
-        <input data-testid="item-barcode" className={`${inputCls} font-mono`} value={barcode}
-          onChange={(e) => setBarcode(e.target.value)} />
-        <span className="text-xs text-gray-500">{t("item_form.barcode_hint")}</span>
-      </label>
+        <label className={labelCls}>
+          {t("item_form.barcode")}
+          <input data-testid="item-barcode" className={`${inputCls} font-mono`} value={barcode}
+            onChange={(e) => setBarcode(e.target.value)} />
+          <span className="text-xs text-gray-600">{t("item_form.barcode_hint")}</span>
+        </label>
 
       <div className="grid grid-cols-2 gap-4">
         <label className={labelCls}>
@@ -308,7 +311,7 @@ export function ItemFormScreen() {
           {t("item_form.opening_stock")}
           <input data-testid="item-opening-stock" className={inputCls} inputMode="decimal"
             value={openingStock} onChange={(e) => setOpeningStock(e.target.value)} />
-          <span className="text-xs text-gray-500">{t("item_form.opening_stock_hint")}</span>
+          <span className="text-xs text-gray-600">{t("item_form.opening_stock_hint")}</span>
         </label>
       ) : null}
 
@@ -321,7 +324,7 @@ export function ItemFormScreen() {
       {editId !== null && (
         <div className="rounded border border-gray-200 bg-white p-4" data-testid="item-secondary-barcodes">
           <h2 className="mb-2 font-semibold text-gray-800">Secondary Barcodes & Pack Multipliers</h2>
-          <p className="mb-3 text-xs text-gray-500">
+          <p className="mb-3 text-xs text-gray-600">
             Link multiple barcodes (e.g. inner cartons, outer cases, or alternate supplier barcodes) to this item.
           </p>
 
@@ -365,14 +368,14 @@ export function ItemFormScreen() {
           {secError && <p className="mb-3 text-xs text-red-600">{secError}</p>}
 
           {secondaryBarcodes.length === 0 ? (
-            <p className="text-xs text-gray-400">No secondary barcodes registered.</p>
+            <p className="text-xs text-gray-600">No secondary barcodes registered.</p>
           ) : (
             <div className="divide-y divide-gray-100 rounded border border-gray-100">
               {secondaryBarcodes.map((b) => (
                 <div key={b.id} className="flex items-center justify-between p-2 text-xs">
                   <div>
                     <span className="font-mono font-medium text-gray-800">{b.barcode}</span>
-                    <span className="ml-2 text-gray-500">
+                    <span className="ml-2 text-gray-600">
                       ({formatQty(b.packQtyMilli)} units{b.label ? ` · ${b.label}` : ""})
                     </span>
                   </div>
@@ -398,11 +401,11 @@ export function ItemFormScreen() {
             {photoUrl ? (
               <img src={photoUrl} alt="" className="h-full w-full object-cover" />
             ) : (
-              <span className="text-xs text-gray-400">{t("common.none")}</span>
+              <span className="text-xs text-gray-600">{t("common.none")}</span>
             )}
           </div>
           {editId === null ? (
-            <p className="text-sm text-gray-500">{t("item_form.photo_save_first")}</p>
+            <p className="text-sm text-gray-600">{t("item_form.photo_save_first")}</p>
           ) : (
             <div className="space-y-2">
               <label className="inline-block cursor-pointer rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
@@ -431,12 +434,19 @@ export function ItemFormScreen() {
             </div>
           )}
         </div>
-        <p className="mt-1 text-xs text-gray-500">{t("item_form.photo_hint")}</p>
+        <p className="mt-1 text-xs text-gray-600">{t("item_form.photo_hint")}</p>
       </div>
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
-      <div className="flex gap-2">
+      <div className="sticky bottom-0 -mx-4 -mb-4 bg-white/95 backdrop-blur-xs border-t border-gray-200 p-4 flex justify-end gap-3 z-10 shadow-lg">
+        <button
+          type="button"
+          className="rounded border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50"
+          onClick={() => navigate("/items")}
+        >
+          {t("common.cancel")}
+        </button>
         <button
           type="submit"
           data-testid="item-save"
@@ -445,15 +455,9 @@ export function ItemFormScreen() {
         >
           {t("common.save")}
         </button>
-        <button
-          type="button"
-          className="rounded border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50"
-          onClick={() => navigate("/items")}
-        >
-          {t("common.cancel")}
-        </button>
       </div>
-    </form>
+      </form>
+    </div>
   );
 }
 
