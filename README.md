@@ -34,6 +34,19 @@ See [all releases](https://github.com/guna81/mytowncart-billing/releases) for av
 installers and `checksums-<platform>.txt` files. Builds are unsigned; read the
 [installation notes](#installing-a-release-build) before installing.
 
+## Recent improvements
+
+The current source adds a sales dashboard and charts, discounts and split
+payments, customer balances and payment collection, returns and credit notes,
+suppliers and purchase receiving, stock audits, barcode labels, day-end cash
+reconciliation, user/PIN records, loyalty balances, and English, Tamil and Hindi.
+Reports include profit summaries and GSTR-1 CSV datasets.
+
+The latest published installer is **v0.1.0**. Features in newer source commits
+and local development changes are not automatically included in that installer.
+See [what changed](docs/WHATS-NEW.md) for the source/release distinction and
+[screen workflows](docs/SCREENS.md) for instructions.
+
 ## Billing and inventory features
 
 | Feature | What you can do |
@@ -41,12 +54,14 @@ installers and `checksums-<platform>.txt` files. Builds are unsigned; read the
 | Retail POS billing | Add products by barcode or name, change quantities, and hold and resume bills. |
 | GST invoices | Configure GST registration, tax-inclusive or tax-exclusive prices, and CGST/SGST calculations. |
 | Receipt and invoice printing | Preview and print 58 mm or 80 mm receipts and A4 invoices through the system print dialog. |
-| Payment recording | Record cash, UPI, card, and customer credit sales, with cash-change calculations. |
+| Payment recording | Record cash, UPI, card, and customer credit sales, split payments, discounts, and round-off. |
 | Product catalog | Manage prices, MRP, barcodes, categories, units, product photos, and CSV imports and exports. |
 | Inventory management | Track stock levels, low-stock indicators, adjustments, and stock movement history. |
-| Customer records | Store customer names and phone numbers and associate customers with bills and credit sales. |
-| Sales reports | Review daily sales, item sales, and payment-mode totals, with CSV downloads. |
+| Customer records | Manage customer details, outstanding balances, received payments, and loyalty balances. |
+| Sales reports | Review daily, item, payment-mode and profit reports, charts, and GSTR-1 CSV datasets. |
 | MyTownCart integration | Publish products and photos, pull online orders, and reconcile marketplace stock. |
+| Returns and purchasing | Issue credit notes, manage suppliers, and receive purchase stock. |
+| Shop operations | Count stock, print barcode labels, and reconcile the cash drawer at day end. |
 | Encrypted backups | Back up and restore local data using encrypted files in a folder you choose. |
 
 ## Getting started with your shop
@@ -70,7 +85,8 @@ Implementation decisions and limitations are recorded in [DECISIONS.md](DECISION
 
 **Windows is the supported platform for v1.** macOS and Linux builds are
 unsupported community builds. The browser-only development mode uses an
-in-memory repository and resets its data on reload; use the desktop app for
+in-memory repository and resets its data on reload. Development LAN browser clients instead use
+the host desktop database (see [LAN access](docs/LAN.md)); use the desktop app for
 persistent shop data, backups, and marketplace sync.
 
 The app uses **Tauri 2, Rust, React, TypeScript, and SQLite** in a pnpm monorepo.
@@ -117,7 +133,11 @@ store via Tauri commands — never into SQLite.
 
 ## Privacy: what leaves the machine
 
-Only what Publish and sync need: catalog fields (name, price, MRP, stock,
+Optional LAN access in the development source shares shop data with browsers on
+the local network; see [LAN access and its limits](docs/LAN.md). Release checks
+contact the GitHub Releases API to look for a newer version.
+
+Marketplace traffic includes only what Publish and sync need: catalog fields (name, price, MRP, stock,
 barcode, category, photo), stock deltas and order pulls, and only when the
 shop has linked a MyTownCart account. Bills and customer data stay on the
 shop's PC. Backups are encrypted on the machine before being written to the
@@ -143,9 +163,10 @@ Builds are **unsigned** (zero-spend, see `DECISIONS.md` B0-6):
   `chmod +x MyTownCart-Billing-linux-x64.AppImage` and run. For Debian/Ubuntu, install
   with `sudo dpkg -i MyTownCart-Billing-linux-x64.deb`.
 
-Auto-update is not enabled yet (`DECISIONS.md` B4-2 — updater signing keys are
-an owner task), so upgrading means downloading the new installer from the
-releases page and running it; the SQLite database is kept in the app-data dir
+Automatic installation is not enabled (`DECISIONS.md` B4-2). The development
+source checks GitHub Releases at launch (at most once per 24 hours) and from
+Settings. **Update available** opens the release page for a manual download.
+Back up first, then run the new installer; the SQLite database is kept in the app-data dir
 and survives the reinstall.
 
 ## Continuous integration and releases
@@ -208,6 +229,8 @@ For code contributions, read the [contribution guide](CONTRIBUTING.md).
 
 ## Documentation
 
+- [Recent improvements and release status](docs/WHATS-NEW.md)
+- [LAN browser access (development)](docs/LAN.md)
 - [Documentation overview](docs/README.md)
 - [Shop setup and pilot guide](docs/PILOT.md)
 - [POS screens, invoicing, inventory, and printing](docs/SCREENS.md)

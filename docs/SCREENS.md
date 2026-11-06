@@ -14,7 +14,16 @@ via `t(key)`; add a key there rather than hard-coding a string.
 | `#/stock` | `StockScreen` | stock levels, adjustments, movement history |
 | `#/reports` | `ReportsScreen` | daily / by item / by payment mode, CSV export |
 | `#/mytowncart` | `MyTownCartScreen` (Catalog / Sync tabs) | connect, map, publish, sync |
-| `#/settings` | `SettingsScreen` | shop profile, backup, diagnostics, printer/updates/language notes |
+| `#/dashboard` | `DashboardScreen` | sales overview, charts, low-stock and backup indicators |
+| `#/items/labels` | `BarcodeLabelsScreen` | printable barcode labels |
+| `#/suppliers` | `SuppliersScreen` | supplier details |
+| `#/purchases`, `#/purchases/new` | `PurchasesScreen`, `PurchaseFormScreen` | purchase history and stock receiving |
+| `#/stock-audit` | `StockAuditScreen` | physical stock counts and corrections |
+| `#/day-end` | `DayEndScreen` | cash count, variance, closure and Z-report |
+| `#/users` | `UsersScreen` | user, role and PIN records |
+| `#/settings` | `SettingsScreen` | shop profile, backup, diagnostics, updates check, printer/language notes |
+
+For source/release availability, see [recent improvements](WHATS-NEW.md).
 
 ## Setup wizard
 
@@ -53,7 +62,12 @@ Keyboard-first, barcode-first.
 - Saved/error outcomes show as a notice above the table.
 
 Sales reduce stock through the ledger. A bill is immutable; mistakes are
-voided from the bill detail.
+voided from the bill detail. Returns can instead be recorded as credit notes.
+The POS also supports line/bill discounts, round-off and split payments.
+Search suggestions can be selected with the arrow keys and Enter.
+
+The keyboard help overlay currently disagrees with the POS handler for
+F4/F7/F9. The implemented POS keys above are the reference.
 
 ## Items
 
@@ -91,11 +105,16 @@ voided from the bill detail.
 ## Customers
 
 Add/edit name and phone; a customer is required for credit sales and is shown
-on bills and invoices.
+on bills and invoices. Customer records also include GSTIN/address,
+outstanding balances, received payments and loyalty balances.
 
 ## Reports
 
-Three sections for the selected date range, each with its own CSV download:
+Alongside the sales tables, the screen provides profit summaries, charts and
+GSTR-1 B2B/B2CS/CDNR/HSN CSV exports for the selected period. Review exported
+data before using it in a filing workflow.
+
+Three sales sections for the selected date range, each with its own CSV download:
 
 - **Daily sales** — per-day bills, net, tax, gross.
 - **By item** — quantity sold and revenue per item (uses bill line
@@ -135,8 +154,13 @@ open. The browser build disables the button with an explanation.
   screens visited (ids collapsed) and errors (message only). *Show and copy
   report* produces the environment summary plus events, with recovery keys
   and token-like strings redacted. Nothing is sent automatically.
-- **Printer / Updates / Language:** informational; printing uses the system
-  dialog, auto-update is not enabled yet (`DECISIONS.md` B4-2), English only.
+- **Printer:** printing uses the system dialog.
+- **Language:** choose English, Tamil or Hindi; some text remains English.
+- **Updates (development):** a launch check reads GitHub Releases at most once
+  per 24 hours; **Check for updates** forces a fresh check. **Update available**
+  opens the release page. Download/install manually; no automatic installation.
+- **LAN server (development):** start/stop, port, autostart, URL copy and QR
+  sharing. See [LAN setup and access limits](LAN.md).
 
 ### Printer tips
 
@@ -152,3 +176,17 @@ preview*. While previewing, the normal UI is hidden. A receipt shows shop
 name/address/GSTIN, invoice number and time, lines (name, qty × price,
 amount), subtotal, CGST/SGST (only when tax > 0), total, payment lines and
 the footer/thank-you text.
+
+## Purchasing, stock audit and day end
+
+Create a supplier first, then use **Purchases → New** to record its invoice,
+items, quantities and costs. Receiving writes the purchase and stock changes.
+Use **Stock audit** to compare counted quantities with recorded stock and
+apply corrections. **Items → Labels** provides printable barcode labels.
+
+At **Day end**, select the date, enter opening cash and denomination counts,
+review expected cash and variance, then save the closure and print its
+Z-report. Earlier closures remain available for review.
+
+**Users** stores user names, roles, PINs and active state. These records do
+not provide network authentication for the development LAN endpoint.

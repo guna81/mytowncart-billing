@@ -65,6 +65,7 @@ footer a{color:var(--muted)}
   </a>
   <nav>
     <a href="#features">Features</a>
+    <a href="#improvements">What’s new</a>
     <a href="#download">Download</a>
     <a href="#start">Get started</a>
     <a href="#faq">FAQ</a>
@@ -97,6 +98,21 @@ footer a{color:var(--muted)}
       <div class="card"><h3>Encrypted backups</h3><p>Back up and restore to a folder you choose, protected by a recovery key.</p></div>
       <div class="card"><h3>MyTownCart integration</h3><p>Optionally publish products and sync marketplace orders and stock when online.</p></div>
     </div>
+  </section>
+
+  <section id="improvements">
+    <h2>More ways to run your shop</h2>
+    <p class="sub">Recent source improvements · November 6, 2026</p>
+    <p>The latest published installer is <strong>v0.1.0</strong>. The improvements below describe current source development and may require a newer build. Publishing this website does not update the installer.</p>
+    <div class="grid">
+      <div class="card"><h3>Flexible counter billing</h3><p>Search suggestions, discounts, round-off and split payments, with customer credit balances and payment collection.</p></div>
+      <div class="card"><h3>Returns &amp; purchases</h3><p>Credit notes, supplier records, purchase receiving and cost prices for profit reporting.</p></div>
+      <div class="card"><h3>Daily shop controls</h3><p>Sales dashboard, stock audits, barcode labels, loyalty balances and day-end cash reconciliation with a Z-report.</p></div>
+      <div class="card"><h3>Reports &amp; languages</h3><p>Sales and payment charts, profit summaries, GSTR-1 CSV datasets for review, and English, Tamil and Hindi selection.</p></div>
+      <div class="card"><h3>Refreshed interface</h3><p>Development updates bring clearer navigation, page headers, forms, tables and helpful empty states.</p></div>
+      <div class="card"><h3>LAN access &amp; release notices</h3><p>Development builds add optional browser access on a trusted shop network and release notifications that open GitHub for manual installation.</p></div>
+    </div>
+    <p><a href="https://github.com/guna81/mytowncart-billing/blob/main/docs/WHATS-NEW.md">Read the improvement notes</a> · <a href="https://github.com/guna81/mytowncart-billing/blob/main/docs/LAN.md">LAN setup and access limits</a></p>
   </section>
 
   <section id="download">
@@ -132,7 +148,7 @@ footer a{color:var(--muted)}
 
   <section id="privacy">
     <h2>Your data stays on your computer</h2>
-    <p>Bills and customer data live in a local SQLite database on the shop's PC. Only catalog fields, stock changes and order pulls leave the machine, and only if you link a MyTownCart account. Backups are encrypted before they are written, and diagnostics are off by default.</p>
+    <p>Bills and customer data live in a local SQLite database on the shop's PC. Linking a MyTownCart account sends catalog fields, stock changes and order pulls to the marketplace. Development builds can also share shop data with LAN browsers when the optional server is enabled, and contact GitHub to check for new releases. Backups are encrypted before they are written, and diagnostics are off by default.</p>
   </section>
 
   <section id="faq">
@@ -141,6 +157,7 @@ footer a{color:var(--muted)}
     <details><summary>Does it work offline?</summary><p>Yes. Everyday billing uses local storage. Publishing and syncing with MyTownCart need internet and a linked account.</p></details>
     <details><summary>Does it support GST and receipt printers?</summary><p>Yes: shop GST settings, item tax rates, CGST/SGST, A4 invoices, and 58 mm / 80 mm receipts via the system print dialog.</p></details>
     <details><summary>Does recording UPI or card process the payment?</summary><p>No. The POS records the payment mode on the bill; complete the payment with your usual UPI or card service.</p></details>
+    <details><summary>How do I get the new features?</summary><p>Check the <a href="https://github.com/guna81/mytowncart-billing/blob/main/docs/WHATS-NEW.md">source and release notes</a>. Download buttons point to the latest published installer; source changes need a new desktop build. Development release notifications open GitHub for manual download and installation.</p></details>
     <details><summary>Found a bug or want a feature?</summary><p>Open an issue on the <a href="https://github.com/guna81/mytowncart-billing/issues">GitHub issue tracker</a>.</p></details>
   </section>
 </div>

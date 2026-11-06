@@ -2,6 +2,8 @@
 
 | Document | Read it for |
 |---|---|
+| [`WHATS-NEW.md`](WHATS-NEW.md) | current improvements, development changes, and published installer status |
+| [`LAN.md`](LAN.md) | optional LAN browser access, host setup, and network limits |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | layers, package boundaries, Tauri commands, boot and print flow |
 | [`DATA-MODEL.md`](DATA-MODEL.md) | units, every SQLite table/column, settings keys, what is not stored in SQLite |
 | [`SYNC.md`](SYNC.md) | marketplace connection, outbox/merge, stock pull, catalog push, photos (D9), reconcile, orders |

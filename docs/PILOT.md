@@ -3,6 +3,10 @@
 For the first shops running MyTownCart Billing for real. Goal: real bills on
 real days with a safe way back and enough information to fix problems.
 
+See [recent improvements](WHATS-NEW.md) for feature availability in source
+versus the published installer. LAN access is a development feature; follow
+[LAN.md](LAN.md) before enabling it.
+
 ## Before day one
 
 1. **Install** the Windows installer from the release page, allow the
@@ -32,8 +36,9 @@ real days with a safe way back and enough information to fix problems.
 ## Every day
 
 - Bill with the scanner; use *Hold (F4)* for a customer who steps away.
-- At close: open **Reports → Daily sales** for the day and reconcile the
-  cash / UPI totals against the drawer and the UPI app.
+- At close: review **Reports** and **Day end**. Enter opening cash and
+  denomination counts, compare expected cash with counted cash, save the
+  closure and print the Z-report. Reconcile UPI/card totals with those services.
 - Run *Sync now* (MyTownCart → Sync) before closing, and read the problems
   and reconcile lists.
 - Plug in the backup drive and run *Back up now*. The panel warns after 7

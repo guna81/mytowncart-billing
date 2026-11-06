@@ -1,5 +1,9 @@
 # MyTownCart Billing — Product Review: Missing Features & UI Improvements
 
+> Historical review: this records the earlier baseline and proposed work.
+> For current implemented workflows and remaining development changes, read
+> [recent improvements](WHATS-NEW.md) and [screens](SCREENS.md).
+
 **Date:** 2026-11-06 · **Version reviewed:** 0.1.0 (commit `e81b766`)
 **Scope:** static review of `apps/web` (React screens), `packages/core`, `packages/storage`, the SQLite schema and docs. I did not run the app; `pnpm` is not installed in this shell, so the test suite was not executed.
 

@@ -177,6 +177,33 @@ Key/value JSON-ish TEXT used by the web layer:
   `app_settings`).
 - `hello_log` — B0 endpoint check (`db_hello`); harmless leftover.
 
+## Later schema additions (0006–0008)
+
+The base tables above are extended by these forward-only migrations. SQL files
+are the exact column/default/index reference.
+
+| Migration | Additions |
+|---|---|
+| `0006_phase1_pilot.sql` | Item HSN/cost price; customer GSTIN/address; bill discount, round-off and notes; line discount/HSN snapshots; `customer_payments` ledger |
+| `0007_phase2_daily_driver.sql` | `credit_notes`, `credit_note_lines`, `suppliers`, `purchases`, `purchase_lines`, `users`, `audit_logs` |
+| `0008_phase3_growth.sql` | `item_batches`, customer `loyalty_points`, `loyalty_transactions`, `item_barcodes` with pack quantities, `day_end_closures` |
+
+Customer payments record amount, mode (`cash`, `upi`, `card`, `bank`), notes
+and timestamp. Credit notes retain a reference to the original bill plus
+snapshot lines. Purchases reference suppliers and retain cost/tax snapshots.
+Day-end closures store opening cash, sales, credit received, refunds,
+expected/actual cash, variance, bill/sales totals, notes and optional user id.
+
+`users` stores name, role, PIN, active flag and creation time. PINs are currently
+stored as text; these records are not authentication for the LAN HTTP API.
+The existence of batch and alternate-barcode tables does not mean every
+workflow has a dedicated management screen.
+
+The development LAN host also uses app settings `lan.port` (port as text) and
+`lan.autostart` (`"true"`/`"false"`; reading also accepts `"1"`).
+Release-check cache values `mtc.updateCheck.lastAt` and `mtc.updateCheck.latest`
+are browser localStorage entries, not SQLite settings.
+
 ## What is not in SQLite
 
 - **Marketplace integration token** — OS keychain, key `mytowncart.integration`

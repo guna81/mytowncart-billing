@@ -126,3 +126,12 @@ Plaintext is the gzip-compressed SQLite snapshot produced by the Rust shell
 - Cloud backup (M5) is out of scope and gated (zero-spend D12).
 - The browser dev build shows "backups need the desktop app" — it has no
   filesystem access and no keychain.
+
+## Startup backup check
+
+The current source calls `checkAndRunAutoBackup` at desktop startup. It attempts
+an encrypted backup when a saved destination and recovery key exist and the
+last successful backup is over 24 hours old (or absent). The destination must
+be available. This is a startup check, not an operating-system background
+schedule; keep the manual daily backup routine and verify the resulting file.
+Browser and LAN clients do not run native backups.

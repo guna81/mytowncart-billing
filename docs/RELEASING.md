@@ -14,8 +14,11 @@ replace installation and billing checks on each operating system.
 
 Windows is the supported v1 platform. macOS and Linux are community builds.
 The installers are unsigned, and macOS builds are not notarized. Automatic
-updates are disabled; users download and run a newer installer to upgrade.
-Back up shop data before upgrading. See the [installation notes](../README.md#installing-a-release-build).
+in-app installation is disabled; instead, a notify-only "Update available"
+button in the development source appears when a newer published release exists, opening the
+release page so users can download and upgrade manually. Drafts and
+prereleases do not notify. Back up shop data before upgrading.
+See the [installation notes](../README.md#installing-a-release-build).
 
 ## Stable download links
 
@@ -82,8 +85,11 @@ Checksums detect changed or incomplete downloads; they are not code signatures.
    verify hashes, and test installation, launch, and a basic billing workflow
    on the platforms being offered. Document any unavailable community build.
 6. Edit the release notes, publish the draft, and mark the stable release as
-   latest. Check each README download link after publication. Do not reuse or
-   move a published version tag; make a new version for corrections.
+   latest. Publishing the draft (as the latest, non-prerelease release) is what
+   triggers the in-app "Update available" button for users on older builds;
+   drafts and prereleases will not trigger notifications. Check each README
+   download link after publication. Do not reuse or move a published version tag;
+   make a new version for corrections.
 
 ## How the workflow works
 
@@ -99,3 +105,21 @@ Checksums detect changed or incomplete downloads; they are not code signatures.
 - The workflow uses GitHub's supplied `GITHUB_TOKEN` with `contents: write`;
   publishing remains a separate maintainer step. Code signing and automatic
   updates require additional setup and are not enabled by this workflow.
+
+## Publish documentation and GitHub Pages
+
+The static landing page lives in `site/`; it has no application build step.
+The [Pages workflow](../.github/workflows/pages.yml) uploads that directory
+and deploys it when `site/**` or the workflow changes on `main`. Documentation
+under `docs/` is linked from the site and rendered by GitHub.
+
+1. Keep README, operator/developer docs and `site/index.html` aligned with the
+   reviewed source. Mark unreleased features explicitly; publishing Pages does
+   not update the latest desktop installer.
+2. Check local assets, internal links, HTML structure and desktop/mobile layout.
+3. Commit only intended documentation/site changes and push `main`.
+4. Watch **Deploy site to GitHub Pages** finish, then verify
+   <https://guna81.github.io/mytowncart-billing/> contains the new content.
+
+No version bump, release tag or installer rebuild is needed for a docs-only
+site update. Preserve the stable download filenames.

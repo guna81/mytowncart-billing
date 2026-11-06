@@ -55,19 +55,23 @@ that the UI drives; the shell only stores what the connector returns.
 integer thousandths (`qtyMilli`) for quantities, basis points for tax
 (`taxRateBp`, 0–2800). Floats never carry money or quantity.
 
-## Two repository adapters
+## Repository adapters
 
-`apps/web/src/lib/repository.ts` picks one at first use:
+`apps/web/src/lib/repository.ts` picks one at first use (in priority order):
 
 - **Tauri** (`isInTauri()` true, i.e. `window.__TAURI_INTERNALS__` exists):
   `TauriRepository`, one Rust command per method.
+- **HTTP (development LAN)** (`window.__MTC_LAN_SERVER__` true):
+  `HttpRepository`, calling the desktop server at the page origin. The Rust
+  `server.rs` serves assets/photos and dispatches `/api/invoke` to the host
+  repository. See [LAN access and limits](LAN.md).
 - **Memory**: `MemoryRepository`, used by Vitest and by the Vite dev server /
   Playwright. Data lives in Maps and is lost on reload; it implements the
   same semantics (invoice counters per FY+prefix, compensating void
   movements, per-row CSV import isolation, outbox mirroring).
 
-Both adapters implement `BillingRepository` (`packages/storage/src/repository.ts`).
-A behaviour change must land in both, with a `memory.test.ts` case.
+All three adapters implement `BillingRepository` (`packages/storage/src/repository.ts`).
+A behaviour change must cover each applicable adapter and the LAN dispatcher, with a `memory.test.ts` case.
 
 ## Tauri commands
 
@@ -121,3 +125,14 @@ The print CSS hides `main` while `body.printing` is set.
 `DECISIONS.md` holds every deviation from the roadmap spec, numbered
 `B<phase>-<n>` with date and rationale. Read it before changing a shape that
 the marketplace sees (publish input, push/pull payloads, backup envelope).
+
+## Expanded application workflows
+
+Migrations 0006–0008 add discounts, customer payments, returns/credit notes,
+suppliers/purchases, users/audit records, batches, loyalty, alternate barcodes
+and day-end closures. The route inventory is in [SCREENS.md](SCREENS.md).
+
+At boot the UI also attempts an overdue configured desktop backup and checks
+for a newer published release. `lib/updateCheck.ts` validates and compares the
+release response, uses a 24-hour local cache and an 8-second request timeout.
+`UpdateAvailableButton` opens the release URL; it never installs application code.

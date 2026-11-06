@@ -41,8 +41,13 @@ connection with `saveConnection`, override `getConnector().me` and
 
 ### Driving the UI
 
-There is no committed Playwright suite yet (see `DECISIONS.md` B0-4).
-`@playwright/test` is a dependency of `apps/web`. For manual checks, drive
+Playwright scenarios live in `apps/web/e2e/`. Run
+`pnpm --filter @mytowncart-billing/web exec playwright install chromium` once,
+then `pnpm --filter @mytowncart-billing/web test:e2e`. The configuration starts
+its own Vite server on port 5179. Browser tests use the memory adapter; test
+real SQLite, keychain and LAN-host behavior separately in the desktop shell.
+
+For manual checks, drive
 the dev server with Playwright (or the IDE browser) and use these handles: `setup-shop-name`, `setup-gst-no`, `setup-start`,
 `items-new`, `item-name`, `item-barcode`, `item-price`,
 `item-opening-stock`, `item-save`, `items-scan`, `pos-scan`, `pos-qty-<itemId>`,
@@ -55,6 +60,14 @@ the dev server with Playwright (or the IDE browser) and use these handles: `setu
 Headless Chromium has no print dialog: stub `window.print` in an init
 script (e.g. dispatch `afterprint` after a tick) if you drive the
 save-and-print path.
+
+## LAN development
+
+The optional desktop HTTP server serves the built web UI and repository calls.
+Build the UI with `pnpm build` before trying LAN clients; Vite alone does not
+provide this host. See [LAN.md](LAN.md) for startup and network limitations.
+Changes to repository methods must cover `http.ts` and `server.rs` as well as
+the memory and Tauri adapters.
 
 ## Running the desktop app on macOS
 
