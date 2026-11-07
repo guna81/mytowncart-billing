@@ -1,6 +1,6 @@
 # MyTownCart Billing — Free, Open-Source Billing Software for Local Shops
 
-![MyTownCart Billing — desktop POS, invoicing, and inventory software](apps/web/public/brand/logo-full.svg)
+<img src="apps/web/public/brand/logo-full.svg" alt="MyTownCart Billing — desktop POS, invoicing, and inventory software" height="48">
 
 **MyTownCart Billing** is free, open-source desktop billing software for local
 shops and small retail businesses. Create bills and GST invoices, scan barcodes,
