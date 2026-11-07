@@ -509,8 +509,10 @@ fn set_app_setting(
     state: tauri::State<'_, AppState>,
     key: String,
     value: Option<String>,
+    session: Option<String>,
 ) -> Result<(), String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    state.auth.authorize_setting(&conn, &key, session.as_deref())?;
     sync::set_setting(&conn, &key, value)
 }
 

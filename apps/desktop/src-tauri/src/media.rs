@@ -31,6 +31,7 @@ impl ImageKind {
         }
     }
 
+    #[allow(dead_code)]
     pub fn mime(self) -> &'static str {
         match self {
             ImageKind::Jpeg => "image/jpeg",

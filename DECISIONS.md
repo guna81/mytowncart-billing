@@ -148,6 +148,13 @@ PINs live in `user_pins` as `h1$salt$iterated-SHA-256` (migration 0009); the old
 active owner cannot be demoted or deactivated. The UI hides owner-only screens
 and buttons, but only mirrors this policy.
 
-Not gated: reads through `query_rows` (reports, lists), `set_app_setting`
-(background jobs write settings), and the sync/backup commands, which are not
-reachable from the LAN server.
+`set_app_setting` is gated by key: `lan.*`, `shop.logo` and `pilot.diagnostics`
+need the owner; other keys (backup/sync status, caches) are written by background
+jobs, even while the terminal is locked, so they are open. `/api/photos` needs the access key like every other
+LAN data request, and no response carries CORS headers.
+
+Deliberately not gated: reads through `query_rows`. Reports and the day-end
+count are what a cashier closes the till with, so they stay readable; hiding
+revenue from cashiers would need a separate "till-only" report set first. The
+sync/backup commands are not reachable from the LAN server. A forgotten owner
+PIN is reset offline by clearing `user_pins` (see PILOT.md).

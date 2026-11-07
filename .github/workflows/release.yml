@@ -12,7 +12,24 @@ permissions:
   contents: write
 
 jobs:
+  verify-version:
+    name: Tag matches app version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag against tauri.conf.json, Cargo.toml and APP_VERSION
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          conf=$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)
+          cargo=$(grep -m1 '^version' apps/desktop/src-tauri/Cargo.toml | cut -d'"' -f2)
+          core=$(grep -oE 'APP_VERSION = "[^"]+"' packages/core/src/index.ts | cut -d'"' -f2)
+          echo "tag=$tag tauri=$conf cargo=$cargo core=$core"
+          for v in "$conf" "$cargo" "$core"; do
+            [ "$v" = "$tag" ] || { echo "::error::Version mismatch: tag $tag vs $v. Bump all version files, then tag again."; exit 1; }
+          done
+
   build-installers:
+    needs: verify-version
     name: ${{ matrix.platform }}${{ matrix.required == true && ' (supported)' || ' (community build)' }}
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ !matrix.required }}
@@ -94,3 +111,38 @@ jobs:
           DOWNLOAD_PLATFORM: ${{ matrix.platform }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: python tooling/release-downloads.py
+
+  publish:
+    name: Publish release
+    needs: build-installers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the Windows installer, then publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' | tee assets.txt
+          for f in "MyTownCart-Billing-windows-x64.exe" "checksums-windows-x64.txt"; do
+            grep -qx "$f" assets.txt || { echo "::error::$f is missing; leaving the release as a draft."; exit 1; }
+          done
+          # Tags like v1.2.0-rc1 are published as pre-releases and never become "latest".
+          if [[ "$TAG" == *-* ]]; then
+            gh release edit "$TAG" --repo "$REPO" --draft=false --prerelease
+          else
+            gh release edit "$TAG" --repo "$REPO" --draft=false --prerelease=false --latest
+          fi
+          echo "Missing community builds (informational):"
+          for f in macos-arm64.dmg macos-x64.dmg linux-x64.deb linux-x64.AppImage; do
+            grep -qx "MyTownCart-Billing-$f" assets.txt || echo "  - $f"
+          done
+
+  site:
+    name: Refresh download page
+    needs: publish
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml

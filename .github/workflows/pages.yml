@@ -1,10 +1,17 @@
 name: Deploy site to GitHub Pages
 
+# Runs on site changes, on demand, when a release is published by hand, and
+# is called by release.yml right after it publishes a release. Each run writes
+# site/release.json from the latest published release so the download section
+# always shows the current version and only the installers that exist.
 on:
   push:
     branches: [main]
     paths: ['site/**', '.github/workflows/pages.yml']
+  release:
+    types: [published, edited, deleted]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -23,7 +30,19 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: actions/configure-pages@v5
+      - name: Write release.json from the latest published release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh api "repos/${{ github.repository }}/releases/latest" > latest.json 2>/dev/null; then
+            jq '{tag: .tag_name, published: .published_at, assets: [.assets[].name]}' latest.json > site/release.json
+          else
+            echo '{}' > site/release.json
+          fi
+          cat site/release.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

@@ -21,6 +21,7 @@ pub struct ReconcileFixPayload {
     pub kind: String,
     pub price_paise: Option<i64>,
     pub stock_units: Option<i64>,
+    #[allow(dead_code)]
     pub is_active: Option<bool>,
     pub pull_to_local: bool,
 }

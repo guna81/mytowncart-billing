@@ -218,6 +218,14 @@ impl Auth {
 
     /// Authorise `cmd` for the holder of `token`. Open in setup mode (no PINs yet).
     /// Returns the acting user's id (None when no login is involved) for the audit log.
+    pub fn authorize_setting(&self, conn: &Connection, key: &str, token: Option<&str>) -> Result<Option<i64>, String> {
+        if !is_owner_setting(key) {
+            // Background jobs (auto-backup, sync status) write these while the terminal is locked.
+            return Ok(token.and_then(|t| self.session(t)).map(|s| s.user_id));
+        }
+        self.authorize(conn, "save_shop_profile", token)
+    }
+
     pub fn authorize(&self, conn: &Connection, cmd: &str, token: Option<&str>) -> Result<Option<i64>, String> {
         let sess = token.and_then(|t| self.session(t));
         let Some(min) = required_role(cmd) else { return Ok(sess.map(|s| s.user_id)) };
@@ -231,6 +239,13 @@ impl Auth {
             Err(format!("This action ({cmd}) needs the owner. Lock the terminal and log in with the owner PIN."))
         }
     }
+}
+
+/// Settings that change how the shop's terminal is exposed or branded. Other
+/// keys (backup status, sync status, caches) are written by routine work that
+/// cashiers also do, so they stay open to every signed-in user.
+pub fn is_owner_setting(key: &str) -> bool {
+    key.starts_with("lan.") || key == "shop.logo" || key == "pilot.diagnostics"
 }
 
 /// Record a sensitive action (who did what) in the audit log. Best effort: a

@@ -25,12 +25,12 @@ published installer release.
 LAN-served pages set `window.__MTC_LAN_SERVER__` and select `HttpRepository`.
 Requests go to `POST /api/invoke` on the host; the host dispatches supported
 repository operations against the same SQLite database used by the desktop.
-Photos are served at `/api/photos/<itemId>`, with `/api/health` for status.
-A normal Vite browser session still uses disposable in-memory data.
-
-The server binds to all interfaces (`0.0.0.0`) and currently uses HTTP, wildcard
-CORS, and no request authentication. Anyone able to reach the port can invoke
-supported data operations; the user/PIN UI does not secure this endpoint.
+Photos are served at `/api/photos/<itemId>?key=<access key>`, with `/api/health`
+for status (it reveals nothing about the shop). The server binds to all
+interfaces (`0.0.0.0`) over plain HTTP. It sends no cross-origin (CORS)
+headers, and every data request needs the per-start access key (below) plus,
+once PINs exist, a PIN login session. Traffic is not encrypted, so anyone able
+to watch the network could read it.
 Use only an isolated, trusted shop network; do not expose or forward this port
 to the internet. This implementation does not provide encrypted transport,
 per-client authorization, or a separate offline database on each counter.

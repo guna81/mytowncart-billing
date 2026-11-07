@@ -188,29 +188,40 @@ fn handle_http_request(
             "mode": "lan-server"
         });
         let resp = Response::from_string(body.to_string())
-            .with_header(Header::from_bytes("Content-Type", "application/json").unwrap())
-            .with_header(Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap());
+            .with_header(Header::from_bytes("Content-Type", "application/json").unwrap());
         let _ = request.respond(resp);
         return;
     }
 
-    // Photo direct endpoint: /api/photos/{itemId}
+    // Photo direct endpoint: /api/photos/{itemId}?key=TOKEN (an <img> tag cannot send headers)
     if let Some(id_str) = path.strip_prefix("api/photos/") {
+        let from_query = url_str
+            .split_once('?')
+            .map(|(_, q)| q)
+            .unwrap_or("")
+            .split('&')
+            .find_map(|kv| kv.strip_prefix("key="))
+            .unwrap_or("");
+        let from_header = request
+            .headers()
+            .iter()
+            .find(|h| h.field.equiv("X-MTC-Key"))
+            .map(|h| h.value.as_str().to_string())
+            .unwrap_or_default();
+        if !token_matches(from_query, token) && !token_matches(&from_header, token) {
+            let _ = request.respond(Response::from_string("Unauthorized").with_status_code(401));
+            return;
+        }
         if let Ok(item_id) = id_str.parse::<i64>() {
             if let Ok(bytes) = read_item_photo_bytes(state, item_id) {
                 let resp = Response::from_data(bytes)
                     .with_header(Header::from_bytes("Content-Type", "image/jpeg").unwrap())
-                    .with_header(Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap())
-                    .with_header(
-                        Header::from_bytes("Cache-Control", "public, max-age=3600").unwrap(),
-                    );
+                    .with_header(Header::from_bytes("Cache-Control", "private, max-age=3600").unwrap());
                 let _ = request.respond(resp);
                 return;
             }
         }
-        let resp = Response::from_string("Photo not found")
-            .with_status_code(404)
-            .with_header(Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap());
+        let resp = Response::from_string("Photo not found").with_status_code(404);
         let _ = request.respond(resp);
         return;
     }
@@ -328,8 +339,7 @@ fn serve_static_asset(
         }
 
         let resp = Response::from_data(bytes)
-            .with_header(Header::from_bytes("Content-Type", mime).unwrap())
-            .with_header(Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap());
+            .with_header(Header::from_bytes("Content-Type", mime).unwrap());
         let _ = request.respond(resp);
         return;
     }
@@ -345,16 +355,13 @@ fn serve_static_asset(
                 bytes = injected.into_bytes();
             }
             let resp = Response::from_data(bytes)
-                .with_header(Header::from_bytes("Content-Type", mime).unwrap())
-                .with_header(Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap());
+                .with_header(Header::from_bytes("Content-Type", mime).unwrap());
             let _ = request.respond(resp);
             return;
         }
     }
 
-    let resp = Response::from_string("Not Found")
-        .with_status_code(404)
-        .with_header(Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap());
+    let resp = Response::from_string("Not Found").with_status_code(404);
     let _ = request.respond(resp);
 }
 
@@ -696,6 +703,7 @@ pub fn dispatch_invoke(
             let key: String = get_arg(&args, "key", "key")?;
             let val: Option<String> = get_opt_arg(&args, "value", "value")?;
             let conn = state.conn.lock().map_err(|e| e.to_string())?;
+            state.auth.authorize_setting(&conn, &key, session)?;
             sync::set_setting(&conn, &key, val)?;
             Ok(serde_json::Value::Null)
         }

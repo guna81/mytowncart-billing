@@ -173,6 +173,7 @@ pub struct Manifest {
 }
 
 pub struct ParsedBundle<'a> {
+    #[allow(dead_code)]
     pub manifest: Manifest,
     pub db_gz: &'a [u8],
     /// Photo bytes in manifest order.

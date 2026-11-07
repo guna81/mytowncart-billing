@@ -55,6 +55,7 @@ pub fn set_setting(conn: &Connection, key: &str, value: Option<String>) -> RepoR
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn get_cursor(conn: &Connection, key: &str) -> RepoResult<Option<String>> {
     conn.query_row("SELECT value FROM sync_state WHERE key = ?1", rusqlite::params![key], |r| r.get(0))
         .map(Some)
@@ -80,6 +81,7 @@ pub fn set_cursor(conn: &Connection, key: &str, value: &str) -> RepoResult<()> {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct OutboxRow {
     pub id: i64,
     pub kind: String,
@@ -123,6 +125,7 @@ pub fn enqueue_stock_outbox(
     Ok(inserted)
 }
 
+#[allow(dead_code)]
 pub fn list_outbox(conn: &Connection, status: Option<&str>) -> RepoResult<Vec<OutboxRow>> {
     let mut sql = String::from(
         "SELECT id, kind, payload_json, idempotency_key, attempts, next_attempt_at, status
@@ -305,7 +308,9 @@ pub fn apply_stock_pull(
 #[serde(rename_all = "camelCase")]
 pub struct RemoteItemPayload {
     pub external_id: String,
+    #[allow(dead_code)]
     pub stock_units: i64,
+    #[allow(dead_code)]
     pub price_paise: i64,
     /// Fingerprint of what the marketplace now holds for this item.
     pub remote_hash: String,

@@ -43,6 +43,10 @@ h2{font-size:1.75rem;margin:0 0 8px;letter-spacing:-.01em}
 .dl a{display:block;padding:14px 16px;border:1px solid var(--line);border-radius:12px;text-decoration:none;color:var(--fg);background:var(--card)}
 .dl a small{display:block;color:var(--muted)}
 .dl a:hover{border-color:var(--brand)}
+.dl a.rec{border-color:var(--brand);box-shadow:0 0 0 2px var(--brand) inset}
+.dl a[hidden]{display:none}
+.detected{padding:10px 14px;border-radius:10px;background:var(--card);border:1px solid var(--brand)}
+h3.inst{margin:28px 0 10px}
 ol{padding-left:20px}
 ol li{margin-bottom:8px}
 details{border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:10px;background:var(--card)}
@@ -50,6 +54,10 @@ summary{cursor:pointer;font-weight:600}
 details p{color:var(--muted);margin:8px 0 0}
 code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px}
 pre{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto}
+.shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
+.shots figure{margin:0}
+.shots img{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(15,23,42,.12)}
+.shots figcaption{margin-top:8px;color:var(--muted);font-size:14px;text-align:center}
 footer{border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:14px}
 footer a{color:var(--muted)}
 </style>
@@ -65,6 +73,7 @@ footer a{color:var(--muted)}
   </a>
   <nav>
     <a href="#features">Features</a>
+    <a href="#screenshots">Screenshots</a>
     <a href="#improvements">What’s new</a>
     <a href="#download">Download</a>
     <a href="#start">Get started</a>
@@ -115,22 +124,55 @@ footer a{color:var(--muted)}
     <p><a href="https://github.com/guna81/mytowncart-billing/blob/main/docs/WHATS-NEW.md">Read the improvement notes</a> · <a href="https://github.com/guna81/mytowncart-billing/blob/main/docs/LAN.md">LAN setup and access limits</a></p>
   </section>
 
+  <section id="screenshots">
+    <h2>See it in action</h2>
+    <p class="sub">Billing, dashboard and item catalog, shown with sample shop data.</p>
+    <div class="shots">
+      <figure><a href="screenshots/billing.png"><img src="screenshots/billing.png" width="1366" height="800" loading="lazy" alt="MyTownCart Billing counter screen with five items in the bill, payment options and a total of ₹412.00"></a><figcaption>Billing counter: scan items, take payment, save &amp; print</figcaption></figure>
+      <figure><a href="screenshots/dashboard.png"><img src="screenshots/dashboard.png" width="1366" height="800" loading="lazy" alt="MyTownCart Billing dashboard showing today's sales, payment breakdown chart and top selling items"></a><figcaption>Dashboard: daily sales, payment mix and top sellers</figcaption></figure>
+      <figure><a href="screenshots/items.png"><img src="screenshots/items.png" width="1366" height="800" loading="lazy" alt="MyTownCart Billing item catalog listing products with barcode, price and stock"></a><figcaption>Item catalog with barcodes, prices and stock</figcaption></figure>
+    </div>
+    <p class="note">Screenshots are from the current source build and may differ slightly from the latest published installer.</p>
+  </section>
+
   <section id="download">
     <h2>Download</h2>
-    <p class="sub">Latest release: <strong id="release-version">v0.1.2</strong> — straight from GitHub.</p>
+    <p class="sub">Latest release: <strong id="release-version">loading…</strong> <span id="release-date"></span> — published automatically from GitHub Releases.</p>
+    <p id="detected" class="detected" hidden></p>
     <div class="dl">
-      <a data-platform="windows-x64" data-ext=".exe" href="https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-windows-x64.exe"><strong>Windows</strong><small>64-bit installer · supported</small></a>
-      <a data-platform="macos-arm64" data-ext=".dmg" href="https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-macos-arm64.dmg"><strong>macOS</strong><small>Apple Silicon (M1 and newer) · community build</small></a>
-      <a data-platform="macos-x64" data-ext=".dmg" href="https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-macos-x64.dmg"><strong>macOS</strong><small>Intel · community build</small></a>
-      <a data-platform="linux-x64" data-ext=".deb" href="https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-linux-x64.deb"><strong>Linux .deb</strong><small>Debian / Ubuntu · community build</small></a>
-      <a data-platform="linux-x64" data-ext=".AppImage" href="https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-linux-x64.AppImage"><strong>Linux AppImage</strong><small>64-bit · community build</small></a>
-      <a href="https://github.com/guna81/mytowncart-billing/releases"><strong>All releases</strong><small>Installers and SHA-256 checksums</small></a>
+      <a data-platform="windows-x64" data-ext=".exe" href="https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-windows-x64.exe"><strong>Windows</strong><small>64-bit installer (.exe) · supported</small></a>
+      <a data-platform="windows-x64" data-ext=".msi" href="https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-windows-x64.msi"><strong>Windows (MSI)</strong><small>For IT-managed installs · supported</small></a>
+      <a data-platform="macos-arm64" data-ext=".dmg" href="https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-macos-arm64.dmg"><strong>macOS — Apple Silicon</strong><small>M1, M2, M3 and newer · community build</small></a>
+      <a data-platform="macos-x64" data-ext=".dmg" href="https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-macos-x64.dmg"><strong>macOS — Intel</strong><small>Older Intel Macs · community build</small></a>
+      <a data-platform="linux-x64" data-ext=".deb" href="https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-linux-x64.deb"><strong>Linux .deb</strong><small>Debian / Ubuntu · community build</small></a>
+      <a data-platform="linux-x64" data-ext=".AppImage" href="https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-linux-x64.AppImage"><strong>Linux AppImage</strong><small>Any 64-bit distro · community build</small></a>
+      <a href="https://github.com/guna81/mytowncart-billing/releases"><strong>All releases</strong><small>Installers, notes and SHA-256 checksums</small></a>
     </div>
-    <p class="note">Builds are unsigned, so your OS will warn you on first launch.</p>
-    <details><summary>Windows install notes</summary><p>SmartScreen will warn: click <strong>More info → Run anyway</strong>. Verify the installer against <code>checksums-windows-x64.txt</code> from the release with <code>certutil -hashfile &lt;file&gt; SHA256</code>.</p></details>
-    <details><summary>macOS install notes</summary><p>Drag the app to Applications, then if Gatekeeper says it is damaged, remove the quarantine attribute:</p>
-<pre>xattr -cr "/Applications/MyTownCart Billing.app"</pre></details>
-    <details><summary>Linux install notes</summary><p>AppImage: <code>chmod +x MyTownCart-Billing-v0.1.2-linux-x64.AppImage</code> and run it. Debian/Ubuntu: <code>sudo dpkg -i MyTownCart-Billing-v0.1.2-linux-x64.deb</code>.</p></details>
+    <p class="note">Builds are unsigned, so your OS will warn you on first launch. Back up your shop data before upgrading.</p>
+
+    <h3 class="inst">Install on your device</h3>
+    <details id="inst-windows"><summary>Windows 10 / 11</summary>
+      <ol>
+        <li>Download the <strong>Windows</strong> installer above and run it.</li>
+        <li>If SmartScreen says <em>Windows protected your PC</em>, click <strong>More info → Run anyway</strong>.</li>
+        <li>Optional: check the download. In PowerShell run <code>Get-FileHash .\MyTownCart-Billing-windows-x64.exe -Algorithm SHA256</code> and compare with <code>checksums-windows-x64.txt</code> on the release page.</li>
+        <li>Open <strong>MyTownCart Billing</strong> from the Start menu and follow the setup wizard.</li>
+      </ol>
+      <p>Upgrading: just run the newer installer; your data is kept. Use the MSI if your IT team deploys software.</p></details>
+    <details id="inst-macos"><summary>macOS</summary>
+      <ol>
+        <li>Pick the right file: <strong> → About This Mac</strong>. A chip named <em>Apple M1/M2/M3…</em> means <strong>Apple Silicon</strong>; <em>Intel</em> means <strong>Intel</strong>.</li>
+        <li>Open the downloaded <code>.dmg</code> and drag the app to <strong>Applications</strong>.</li>
+        <li>Because the app is not notarized, macOS may say it is <em>damaged</em>. In Terminal run:</li>
+      </ol>
+<pre>xattr -cr "/Applications/MyTownCart Billing.app"</pre>
+      <p>Then open it again (or right-click → Open). Verify with <code>shasum -a 256 &lt;file&gt;</code> against the checksum file for your Mac.</p></details>
+    <details id="inst-linux"><summary>Linux</summary>
+      <p><strong>Debian / Ubuntu:</strong> <code>sudo apt install ./MyTownCart-Billing-linux-x64.deb</code></p>
+      <p><strong>Other distributions:</strong> <code>chmod +x MyTownCart-Billing-linux-x64.AppImage &amp;&amp; ./MyTownCart-Billing-linux-x64.AppImage</code> (needs WebKitGTK 4.1).</p>
+      <p>Verify with <code>sha256sum --check checksums-linux-x64.txt</code> in the download folder.</p></details>
+    <details id="inst-mobile"><summary>Phone or tablet (Android / iPhone / iPad)</summary>
+      <p>There is no phone or tablet app. A phone or tablet can use billing through a browser while the desktop app runs on a computer on the same shop Wi-Fi: on the computer open <strong>Settings → LAN server</strong>, start it, then open the shown address (or scan the QR code) on the phone and enter a PIN. See the <a href="https://github.com/guna81/mytowncart-billing/blob/main/docs/LAN.md">LAN guide</a>. This needs a build that includes the LAN server and a trusted network.</p></details>
   </section>
 
   <section id="start">
@@ -157,7 +199,7 @@ footer a{color:var(--muted)}
     <details><summary>Does it work offline?</summary><p>Yes. Everyday billing uses local storage. Publishing and syncing with MyTownCart need internet and a linked account.</p></details>
     <details><summary>Does it support GST and receipt printers?</summary><p>Yes: shop GST settings, item tax rates, CGST/SGST, A4 invoices, and 58 mm / 80 mm receipts via the system print dialog.</p></details>
     <details><summary>Does recording UPI or card process the payment?</summary><p>No. The POS records the payment mode on the bill; complete the payment with your usual UPI or card service.</p></details>
-    <details><summary>How do I get the new features?</summary><p>Check the <a href="https://github.com/guna81/mytowncart-billing/blob/main/docs/WHATS-NEW.md">source and release notes</a>. Download buttons point to the latest published installer; source changes need a new desktop build. Development release notifications open GitHub for manual download and installation.</p></details>
+    <details><summary>How do I get the new features?</summary><p>Check the <a href="https://github.com/guna81/mytowncart-billing/blob/main/docs/WHATS-NEW.md">source and release notes</a>. Download buttons point to the latest published installer and update on their own when a release is published; source changes need a new desktop build. Development release notifications open GitHub for manual download and installation.</p></details>
     <details><summary>Found a bug or want a feature?</summary><p>Open an issue on the <a href="https://github.com/guna81/mytowncart-billing/issues">GitHub issue tracker</a>.</p></details>
   </section>
 </div>
@@ -171,22 +213,64 @@ footer a{color:var(--muted)}
 </div></footer>
 <script>
 (function() {
-  fetch('https://api.github.com/repos/guna81/mytowncart-billing/releases/latest')
-    .then(function(res) { return res.ok ? res.json() : null; })
-    .then(function(data) {
-      if (!data || !data.tag_name) return;
-      var tag = data.tag_name;
-      var el = document.getElementById('release-version');
-      if (el) el.textContent = tag;
-      document.querySelectorAll('.dl a[data-platform]').forEach(function(a) {
-        var plat = a.getAttribute('data-platform');
-        var ext = a.getAttribute('data-ext');
-        if (plat && ext) {
-          a.href = 'https://github.com/guna81/mytowncart-billing/releases/download/' + tag + '/MyTownCart-Billing-' + tag + '-' + plat + ext;
-        }
-      });
+  var REPO = 'https://github.com/guna81/mytowncart-billing/releases/';
+  var links = Array.prototype.slice.call(document.querySelectorAll('.dl a[data-platform]'));
+
+  function apply(rel) {
+    var tag = rel.tag;
+    var el = document.getElementById('release-version');
+    if (el) el.textContent = tag;
+    var de = document.getElementById('release-date');
+    if (de && rel.published) de.textContent = '(' + rel.published.slice(0, 10) + ')';
+    var names = rel.assets || null;
+    links.forEach(function(a) {
+      var base = 'MyTownCart-Billing-' + a.dataset.platform + a.dataset.ext;
+      var versioned = 'MyTownCart-Billing-' + tag + '-' + a.dataset.platform + a.dataset.ext;
+      if (names && names.indexOf(versioned) < 0 && names.indexOf(base) < 0) { a.hidden = true; return; }
+      a.hidden = false;
+      a.href = REPO + 'download/' + tag + '/' + (!names || names.indexOf(versioned) >= 0 ? versioned : base);
+    });
+  }
+
+  // Which device is this? Highlight and expand the matching download and notes.
+  var ua = navigator.userAgent || '';
+  var platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+  var os = /android/i.test(ua) ? 'mobile' : /iPhone|iPad|iPod/i.test(ua) ? 'mobile'
+    : /Win/i.test(platform + ua) ? 'windows' : /Mac/i.test(platform + ua) ? 'macos'
+    : /Linux|X11/i.test(platform + ua) ? 'linux' : '';
+  var labels = {windows: 'Windows', macos: 'macOS', linux: 'Linux', mobile: 'a phone or tablet'};
+  if (os) {
+    var note = document.getElementById('detected');
+    note.hidden = false;
+    note.textContent = os === 'mobile'
+      ? 'You look to be on a phone or tablet. Install the app on a shop computer, then use this device through the browser (see the phone notes below).'
+      : 'You look to be on ' + labels[os] + (os === 'macos' ? '. Pick Apple Silicon or Intel (see the macOS notes below).' : '. The recommended download is highlighted.');
+    var open = document.getElementById('inst-' + os);
+    if (open) open.open = true;
+    links.forEach(function(a) {
+      var p = a.dataset.platform;
+      var match = (os === 'windows' && p.indexOf('windows') === 0 && a.dataset.ext === '.exe') ||
+        (os === 'macos' && p.indexOf('macos') === 0) ||
+        (os === 'linux' && p.indexOf('linux') === 0 && a.dataset.ext === '.deb');
+      if (match) a.classList.add('rec');
+    });
+  }
+
+  // Prefer release.json written at deploy time (no API limits); fall back to the API.
+  fetch('release.json', {cache: 'no-cache'})
+    .then(function(r) { return r.ok ? r.json() : Promise.reject(); })
+    .catch(function() {
+      return fetch('https://api.github.com/repos/guna81/mytowncart-billing/releases/latest')
+        .then(function(r) { return r.ok ? r.json() : Promise.reject(); })
+        .then(function(d) {
+          return {tag: d.tag_name, published: d.published_at, assets: (d.assets || []).map(function(x) { return x.name; })};
+        });
     })
-    .catch(function() {});
+    .then(function(rel) { if (rel && rel.tag) apply(rel); })
+    .catch(function() {
+      var el = document.getElementById('release-version');
+      if (el) el.textContent = 'see GitHub Releases';
+    });
 })();
 </script>
 </body>

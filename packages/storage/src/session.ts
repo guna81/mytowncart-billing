@@ -30,4 +30,5 @@ export const SESSION_GATED_COMMANDS: ReadonlySet<string> = new Set([
   "delete_supplier",
   "save_shop_profile",
   "list_audit_logs",
+  "set_app_setting",
 ]);

@@ -23,9 +23,10 @@ versus the published installer. LAN access is a development feature; follow
 5. **Users and PINs:** in *Users*, add yourself first as an **Owner** with a
    4–6 digit PIN, then add each cashier. Once the first PIN exists the terminal
    asks for a PIN; use *Lock* in the sidebar when stepping away. Cashiers cannot
-   void bills, adjust stock or open Settings. Keep the owner PIN private
-   and written down somewhere safe — there is no PIN reset yet, and a restored
-   backup brings the old PINs back with it.
+   void bills, adjust stock, or change shop, LAN and branding settings. Keep the
+   owner PIN private and written down somewhere safe. A restored backup brings
+   the old PINs back with it. Forgot the owner PIN? See
+   [Forgotten owner PIN](#forgotten-owner-pin).
 6. **Items:** add (or CSV-import) the catalog with prices, GST rates and
    opening stock. Take a stock-take first — opening stock is what the app
    trusts until the first count. Re-importing a CSV with existing barcodes
@@ -76,6 +77,21 @@ versus the published installer. LAN access is a development feature; follow
 4. If data looks wrong, stop billing on that machine: take a fresh backup
    and restore yesterday's backup on a spare machine only after talking to
    the maintainer.
+
+## Forgotten owner PIN
+
+Anyone with the owner PIN can set a new PIN for any user in *Users*. If the
+owner PIN itself is lost, someone with access to the computer can reset it:
+
+1. Close the app and take a copy of `mytowncart-billing.db` (see the README for
+   its folder; on Windows `%APPDATA%\com.mytowncart.billing`).
+2. With the SQLite shell (`sqlite3 mytowncart-billing.db`) run
+   `DELETE FROM user_pins;` and quit.
+3. Open the app. With no PINs, it is back in setup mode: open *Users*, give the
+   owner a new PIN first, then each cashier.
+
+Needing file access to the PC is deliberate: it proves the person is at the
+shop, and it never exposes bills. This does not work over the LAN.
 
 ## Privacy
 
