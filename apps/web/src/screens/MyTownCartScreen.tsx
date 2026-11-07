@@ -29,6 +29,7 @@ import {
   type UpsertResult,
 } from "@mytowncart-billing/connector-mytowncart";
 import type { Category, Item, PublishOutcome } from "@mytowncart-billing/storage";
+import { PageHeader } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
 import { clearConnection, loadConnection, saveConnection } from "../lib/connection";
 import { getConnector } from "../lib/marketplace";
@@ -582,8 +583,8 @@ export function MyTownCartScreen() {
   }
 
   return (
-    <div className="max-w-3xl space-y-4" data-testid="mtc-screen">
-      <h1 className="text-lg font-bold">{t("mtc.title")}</h1>
+    <div className="max-w-4xl mx-auto space-y-6 pb-24" data-testid="mtc-screen">
+      <PageHeader title={t("mtc.title")} />
 
       {phase !== "connected" ? (
         <ConnectPanel

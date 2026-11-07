@@ -9,7 +9,7 @@ import {
   type DenominationCounts,
 } from "@mytowncart-billing/core";
 import type { DayEndClosure, DayEndExpectedCash } from "@mytowncart-billing/storage";
-import { Button } from "../components/ui";
+import { Button, PageHeader } from "../components/ui";
 import { t } from "../i18n";
 import { getRepository } from "../lib/repository";
 import { useAppStore } from "../store/appStore";
@@ -161,32 +161,29 @@ export function DayEndScreen() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200 pb-4">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">Day-End Closing & Cash Drawer (Z-Report)</h1>
-          <p className="text-xs text-gray-600 mt-0.5">
-            Reconcile physical cash drawer notes, calculate variances, and close business day.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <input
-            type="date"
-            data-testid="day-end-date"
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
-          <Button
-            type="button"
-            variant="primary"
-            data-testid="day-end-print-btn"
-            onClick={() => handlePrintZReport()}
-          >
-            🖨️ Print Z-Report
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Day-End Closing & Cash Drawer (Z-Report)"
+        subtitle="Reconcile physical cash drawer notes, calculate variances, and close business day."
+        actions={
+          <div className="flex items-center gap-3">
+            <input
+              type="date"
+              data-testid="day-end-date"
+              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-2xs focus:border-blue-500 focus:outline-none"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+            <Button
+              type="button"
+              variant="primary"
+              data-testid="day-end-print-btn"
+              onClick={() => handlePrintZReport()}
+            >
+              🖨️ Print Z-Report
+            </Button>
+          </div>
+        }
+      />
 
       {message && (
         <div className={`p-3 rounded-lg text-sm ${message.startsWith("Error") ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>
@@ -361,7 +358,7 @@ export function DayEndScreen() {
       <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-xs">
         <h2 className="font-semibold text-gray-800 text-sm mb-3">Past Day-End Closures</h2>
         {pastClosures.length === 0 ? (
-          <p className="text-xs text-gray-400 py-3">No past day-end closures recorded.</p>
+          <p className="text-xs text-gray-600 py-3">No past day-end closures recorded.</p>
         ) : (
           <table className="w-full text-xs text-left">
             <thead>

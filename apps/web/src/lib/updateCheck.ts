@@ -3,6 +3,7 @@
 export const REPO_SLUG = "guna81/mytowncart-billing";
 export const LATEST_RELEASE_API = `https://api.github.com/repos/${REPO_SLUG}/releases/latest`;
 export const RELEASES_URL_PREFIX = `https://github.com/${REPO_SLUG}/releases/`;
+export const DOWNLOAD_PAGE_URL = "https://guna81.github.io/mytowncart-billing/#download";
 
 export const STORAGE_KEY_LAST_AT = "mtc.updateCheck.lastAt";
 export const STORAGE_KEY_LATEST = "mtc.updateCheck.latest";

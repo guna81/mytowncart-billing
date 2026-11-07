@@ -113,7 +113,7 @@ export function SetupWizard() {
               {logo ? (
                 <img src={logo} alt="Logo" className="h-full w-full object-contain p-0.5" data-testid="setup-logo-preview" />
               ) : (
-                <span className="text-xs font-bold text-gray-400">MTC</span>
+                <span className="text-xs font-bold text-gray-600">MTC</span>
               )}
             </div>
             <label className="cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 shadow-xs">
@@ -163,7 +163,7 @@ export function SetupWizard() {
               {t("common.no")}
             </label>
           </div>
-          <p className="text-xs text-gray-500 mt-1">{t("setup.gst_hint")}</p>
+          <p className="text-xs text-gray-600 mt-1">{t("setup.gst_hint")}</p>
           {gst ? (
             <label className="mt-2 flex items-center gap-2 text-sm">
               <input
@@ -185,7 +185,7 @@ export function SetupWizard() {
             value={prefix}
             onChange={(e) => setPrefix(e.target.value)}
           />
-          <span className="text-xs text-gray-500">{t("setup.prefix_hint")}</span>
+          <span className="text-xs text-gray-600">{t("setup.prefix_hint")}</span>
         </label>
 
         <div className="rounded border border-gray-200 bg-gray-50/50 p-3">

@@ -32,7 +32,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         ) : null}
         <div className="relative flex items-center rounded-lg border border-gray-300 bg-white shadow-sm focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all">
           {leftAddon ? (
-            <span className="pl-3 text-sm font-medium text-gray-400 select-none">{leftAddon}</span>
+            <span className="pl-3 text-sm font-medium text-gray-600 select-none">{leftAddon}</span>
           ) : null}
           <input
             ref={ref}
@@ -41,7 +41,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             {...props}
           />
           {rightAddon ? (
-            <span className="pr-3 text-sm text-gray-400 select-none">{rightAddon}</span>
+            <span className="pr-3 text-sm text-gray-600 select-none">{rightAddon}</span>
           ) : null}
         </div>
         {error ? <p className="mt-1 text-xs text-red-600 font-medium">{error}</p> : null}

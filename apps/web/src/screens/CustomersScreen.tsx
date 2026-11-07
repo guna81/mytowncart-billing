@@ -262,7 +262,7 @@ function CustomerLedgerDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+            className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
           >
             ✕
           </button>

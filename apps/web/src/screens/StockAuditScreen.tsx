@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatPaise, formatQty, isLowStock, parseQty, serializeCsv } from "@mytowncart-billing/core";
 import type { Item, StockDiscrepancyInput } from "@mytowncart-billing/storage";
-import { Badge, Button, Input } from "../components/ui";
+import { Badge, Button, Input, PageHeader } from "../components/ui";
 import { t } from "../i18n";
 import { getRepository } from "../lib/repository";
 import { effectiveLowStockThreshold } from "../lib/stockAlerts";
@@ -150,45 +150,43 @@ export function StockAuditScreen() {
   return (
     <div className="space-y-6">
       {/* Header & Tabs */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">{t("audit.title")}</h1>
-          <p className="text-xs text-gray-500 mt-1">{t("audit.intro")}</p>
-        </div>
-
-        {/* Tab switcher */}
-        <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
-          <button
-            type="button"
-            data-testid="audit-tab-physical"
-            onClick={() => setActiveTab("audit")}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
-              activeTab === "audit"
-                ? "bg-white text-blue-700 shadow-xs"
-                : "text-gray-600 hover:text-gray-900"
-            }`}
-          >
-            {t("audit.title")}
-          </button>
-          <button
-            type="button"
-            data-testid="audit-tab-reorder"
-            onClick={() => setActiveTab("reorder")}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5 ${
-              activeTab === "reorder"
-                ? "bg-white text-blue-700 shadow-xs"
-                : "text-gray-600 hover:text-gray-900"
-            }`}
-          >
-            <span>{t("audit.reorder_list")}</span>
-            {reorderItems.length > 0 && (
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
-                {reorderItems.length}
-              </span>
-            )}
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title={t("audit.title")}
+        subtitle={t("audit.intro")}
+        actions={
+          <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
+            <button
+              type="button"
+              data-testid="audit-tab-physical"
+              onClick={() => setActiveTab("audit")}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                activeTab === "audit"
+                  ? "bg-white text-blue-700 shadow-xs"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              {t("audit.title")}
+            </button>
+            <button
+              type="button"
+              data-testid="audit-tab-reorder"
+              onClick={() => setActiveTab("reorder")}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5 ${
+                activeTab === "reorder"
+                  ? "bg-white text-blue-700 shadow-xs"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              <span>{t("audit.reorder_list")}</span>
+              {reorderItems.length > 0 && (
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                  {reorderItems.length}
+                </span>
+              )}
+            </button>
+          </div>
+        }
+      />
 
       {error ? (
         <div className="rounded-lg bg-red-50 p-4 border border-red-200 text-sm text-red-700">

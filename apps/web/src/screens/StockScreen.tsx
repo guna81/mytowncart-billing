@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import { formatQty, isBatchExpired, isBatchNearExpiry, isLowStock, parseQty } from "@mytowncart-billing/core";
 import type { Item, ItemBatch, StockMovementRecord } from "@mytowncart-billing/storage";
+import { PageHeader } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
 import { getRepository } from "../lib/repository";
 import { effectiveLowStockThreshold } from "../lib/stockAlerts";
@@ -132,7 +133,7 @@ function MovementHistory({ item }: { item: Item }) {
       ) : (
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-gray-500">
+            <tr className="text-left text-gray-600 font-semibold">
               <th className="w-1/2 py-1 pr-4">{t("stock.when")}</th>
               <th className="w-1/4 py-1 pr-4 text-right">{t("stock.delta_col")}</th>
               <th className="w-1/4 py-1">{t("stock.reason_col")}</th>
@@ -188,54 +189,56 @@ export function StockScreen() {
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-bold">{t("stock.title")}</h1>
-          <div className="flex rounded-md bg-gray-200 p-0.5 text-xs font-medium">
-            <button
-              type="button"
-              data-testid="stock-tab-all"
-              onClick={() => setActiveTab("stock")}
-              className={`rounded px-3 py-1.5 transition-colors ${
-                activeTab === "stock"
-                  ? "bg-white text-gray-900 shadow-xs font-semibold"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              Current Stock
-            </button>
-            <button
-              type="button"
-              data-testid="stock-tab-expiring"
-              onClick={() => setActiveTab("expiring")}
-              className={`rounded px-3 py-1.5 transition-colors flex items-center gap-1.5 ${
-                activeTab === "expiring"
-                  ? "bg-white text-gray-900 shadow-xs font-semibold"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              <span>Expiring Batches</span>
-              {expiringBatches.length > 0 && (
-                <span className="rounded-full bg-amber-500 px-1.5 py-0.2 text-[10px] text-white font-bold">
-                  {expiringBatches.length}
-                </span>
-              )}
-            </button>
-          </div>
-        </div>
+      <PageHeader
+        title={t("stock.title")}
+        actions={
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex rounded-lg bg-gray-200/80 p-0.5 text-xs font-semibold">
+              <button
+                type="button"
+                data-testid="stock-tab-all"
+                onClick={() => setActiveTab("stock")}
+                className={`rounded-md px-3 py-1.5 transition-colors ${
+                  activeTab === "stock"
+                    ? "bg-white text-gray-900 shadow-xs"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                Current Stock
+              </button>
+              <button
+                type="button"
+                data-testid="stock-tab-expiring"
+                onClick={() => setActiveTab("expiring")}
+                className={`rounded-md px-3 py-1.5 transition-colors flex items-center gap-1.5 ${
+                  activeTab === "expiring"
+                    ? "bg-white text-gray-900 shadow-xs"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                <span>Expiring Batches</span>
+                {expiringBatches.length > 0 && (
+                  <span className="rounded-full bg-amber-500 px-1.5 py-0.2 text-[10px] text-white font-bold">
+                    {expiringBatches.length}
+                  </span>
+                )}
+              </button>
+            </div>
 
-        {activeTab === "stock" && (
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              data-testid="stock-low-only"
-              checked={lowOnly}
-              onChange={(e) => setLowOnly(e.target.checked)}
-            />
-            {t("stock.low_only")}
-          </label>
-        )}
-      </div>
+            {activeTab === "stock" && (
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  data-testid="stock-low-only"
+                  checked={lowOnly}
+                  onChange={(e) => setLowOnly(e.target.checked)}
+                />
+                {t("stock.low_only")}
+              </label>
+            )}
+          </div>
+        }
+      />
 
       {activeTab === "expiring" ? (
         <div data-testid="expiring-batches-table">
@@ -246,7 +249,7 @@ export function StockScreen() {
           ) : (
             <table className="w-full rounded border border-gray-200 bg-white text-sm">
               <thead>
-                <tr className="border-b border-gray-200 text-left text-gray-500">
+                <tr className="border-b border-gray-200 text-left text-gray-600 font-semibold">
                   <th className="px-3 py-2">{t("print.item")}</th>
                   <th className="px-3 py-2">Batch No</th>
                   <th className="px-3 py-2">Expiry Date</th>
@@ -291,7 +294,7 @@ export function StockScreen() {
       ) : (
         <table className="w-full rounded border border-gray-200 bg-white text-sm">
           <thead>
-            <tr className="border-b border-gray-200 text-left text-gray-500">
+            <tr className="border-b border-gray-200 text-left text-gray-600 font-semibold">
               <th className="px-3 py-2">{t("common.name")}</th>
               <th className="px-3 py-2">{t("items.barcode")}</th>
               <th className="px-3 py-2 text-right">{t("stock.current")}</th>

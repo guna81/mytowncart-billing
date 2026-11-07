@@ -1,23 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 import { t } from "../i18n";
-import { openReleasePage } from "../lib/tauri";
+import { DOWNLOAD_PAGE_URL, openReleasePage } from "../lib/tauri";
 import { useAppStore } from "../store/appStore";
 
 export interface UpdateAvailableButtonProps {
   collapsed?: boolean;
   className?: string;
   label?: string;
+  url?: string;
 }
 
 /**
  * Renders an accessible, styled update button when a newer release is available.
- * Clicking opens the release page in the system browser.
+ * Clicking opens the download page in the system browser.
  * Renders nothing if no update is available.
  */
 export function UpdateAvailableButton({
   collapsed = false,
   className = "",
   label,
+  url = DOWNLOAD_PAGE_URL,
 }: UpdateAvailableButtonProps) {
   const updateInfo = useAppStore((s) => s.updateInfo);
 
@@ -30,7 +32,7 @@ export function UpdateAvailableButton({
   const displayText = label ?? buttonAria;
 
   const handleClick = () => {
-    void openReleasePage(updateInfo.url);
+    void openReleasePage(url);
   };
 
   if (collapsed) {

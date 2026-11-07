@@ -16,6 +16,7 @@ import { BACKUP_SETTINGS_KEY, parseBackupSettings } from "@mytowncart-billing/ba
 import type { Item } from "@mytowncart-billing/storage";
 import { HourlyHeatmap } from "../components/charts/HourlyHeatmap";
 import { PaymentModePieChart } from "../components/charts/PaymentModePieChart";
+import { PageHeader } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
 import { getRepository } from "../lib/repository";
 import { effectiveLowStockThreshold } from "../lib/stockAlerts";
@@ -112,34 +113,32 @@ export function DashboardScreen() {
   return (
     <div className="space-y-6" data-testid="dashboard-screen">
       {/* Top Header & Shortcuts */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">{t("dashboard.title")}</h1>
-          <p className="text-xs text-gray-500">
-            {profile?.name} · {new Date().toLocaleDateString(undefined, { dateStyle: "full" })}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Link
-            to="/"
-            className="rounded bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow hover:bg-blue-700"
-          >
-            + {t("dashboard.quick_sale")}
-          </Link>
-          <Link
-            to="/items"
-            className="rounded border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-          >
-            {t("dashboard.quick_items")}
-          </Link>
-          <Link
-            to="/reports"
-            className="rounded border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-          >
-            {t("dashboard.quick_reports")}
-          </Link>
-        </div>
-      </div>
+      <PageHeader
+        title={t("dashboard.title")}
+        subtitle={`${profile?.name ? `${profile.name} · ` : ""}${new Date().toLocaleDateString(undefined, { dateStyle: "full" })}`}
+        actions={
+          <>
+            <Link
+              to="/"
+              className="rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-700 transition-colors"
+            >
+              + {t("dashboard.quick_sale")}
+            </Link>
+            <Link
+              to="/items"
+              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs"
+            >
+              {t("dashboard.quick_items")}
+            </Link>
+            <Link
+              to="/reports"
+              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs"
+            >
+              {t("dashboard.quick_reports")}
+            </Link>
+          </>
+        }
+      />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -221,11 +220,11 @@ export function DashboardScreen() {
         <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm" data-testid="dashboard-top-items">
           <h2 className="text-sm font-bold text-gray-800 mb-3">{t("dashboard.top_items")}</h2>
           {topItems.length === 0 ? (
-            <p className="py-6 text-center text-xs text-gray-400">{t("dashboard.top_items_empty")}</p>
+            <p className="py-6 text-center text-xs text-gray-600">{t("dashboard.top_items_empty")}</p>
           ) : (
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b text-gray-500">
+                <tr className="border-b text-gray-600 font-semibold">
                   <th className="pb-2 text-left font-medium">{t("print.item")}</th>
                   <th className="pb-2 text-right font-medium">{t("reports.qty_sold")}</th>
                   <th className="pb-2 text-right font-medium">{t("reports.amount")}</th>

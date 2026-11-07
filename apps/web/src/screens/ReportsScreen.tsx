@@ -22,7 +22,7 @@ import { paymentModeLabel } from "../lib/labels";
 import { getRepository } from "../lib/repository";
 import { formatDate } from "../lib/formatDate";
 import { useAppStore } from "../store/appStore";
-import { EmptyState } from "../components/ui";
+import { EmptyState, PageHeader } from "../components/ui";
 
 function downloadText(filename: string, text: string): void {
   const blob = new Blob([text], { type: "text/csv;charset=utf-8;" });
@@ -292,65 +292,68 @@ export function ReportsScreen() {
 
   return (
     <div>
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">{t("reports.title")}</h1>
-          <div className="mt-1 text-xs text-gray-600 font-medium">
-            {formatDate(range.from)} → {formatDate(range.to)}
+      <PageHeader
+        title={t("reports.title")}
+        subtitle={
+          <div>
+            <div className="text-xs text-gray-600 font-medium">
+              {formatDate(range.from)} → {formatDate(range.to)}
+            </div>
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              {presets.map((p) => {
+                const pRange = getPresetRange(p.id);
+                const isActive = range.from === pRange.from && range.to === pRange.to;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    aria-pressed={isActive}
+                    data-testid={`reports-preset-${p.id}`}
+                    className={`rounded-md border px-2.5 py-1 text-xs transition-colors ${
+                      isActive
+                        ? "border-blue-600 bg-blue-50 text-blue-700 font-semibold shadow-xs"
+                        : "border-gray-200 bg-white font-medium text-gray-700 hover:bg-gray-100"
+                    }`}
+                    onClick={() => setRange(pRange)}
+                  >
+                    {t(p.labelKey as I18nKey)}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {presets.map((p) => {
-              const pRange = getPresetRange(p.id);
-              const isActive = range.from === pRange.from && range.to === pRange.to;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  aria-pressed={isActive}
-                  data-testid={`reports-preset-${p.id}`}
-                  className={`rounded-md border px-2.5 py-1 text-xs transition-colors ${
-                    isActive
-                      ? "border-blue-600 bg-blue-50 text-blue-700 font-semibold shadow-xs"
-                      : "border-gray-200 bg-white font-medium text-gray-700 hover:bg-gray-100"
-                  }`}
-                  onClick={() => setRange(pRange)}
-                >
-                  {t(p.labelKey as I18nKey)}
-                </button>
-              );
-            })}
+        }
+        actions={
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700">
+              <span>{t("reports.from")}</span>
+              <input
+                type="date"
+                className="mt-1 block rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-normal"
+                value={range.from}
+                onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
+              />
+            </label>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700">
+              <span>{t("reports.to")}</span>
+              <input
+                type="date"
+                className="mt-1 block rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-normal"
+                value={range.to}
+                onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
+              />
+            </label>
+            <button
+              type="button"
+              data-testid="reports-export"
+              className="rounded-md border border-gray-300 bg-white px-3.5 py-1.5 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition-colors"
+              onClick={() => onExport("daily")}
+            >
+              {t("reports.export_csv")}
+            </button>
           </div>
-        </div>
-
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700">
-            <span>{t("reports.from")}</span>
-            <input
-              type="date"
-              className="mt-1 block rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-normal"
-              value={range.from}
-              onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
-            />
-          </label>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700">
-            <span>{t("reports.to")}</span>
-            <input
-              type="date"
-              className="mt-1 block rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-normal"
-              value={range.to}
-              onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
-            />
-          </label>
-          <button
-            type="button"
-            data-testid="reports-export"
-            className="rounded-md border border-gray-300 bg-white px-3.5 py-1.5 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition-colors"
-            onClick={() => onExport("daily")}
-          >
-            {t("reports.export_csv")}
-          </button>
-        </div>
-      </div>
+        }
+      />
 
       {loading ? (
         <p className="py-8 text-center text-sm text-gray-600">{t("common.loading")}</p>
@@ -370,12 +373,12 @@ export function ReportsScreen() {
         />
       ) : (
         <div className="space-y-6">
-          <p className="text-sm text-gray-600" data-testid="reports-summary">
+          <p className="text-sm text-gray-700" data-testid="reports-summary">
             {t("reports.bills")}:{" "}
-            <span className="font-semibold">{daily.reduce((s, r) => s + r.billCount, 0)}</span>
-            {voided > 0 ? <span className="text-gray-500"> (+{voided} {t("reports.voided")})</span> : null}
+            <span className="font-semibold text-gray-900">{daily.reduce((s, r) => s + r.billCount, 0)}</span>
+            {voided > 0 ? <span className="text-gray-600"> (+{voided} {t("reports.voided")})</span> : null}
             {" · "}
-            {t("common.total")}: <span className="font-semibold">₹{formatPaise(total)}</span>
+            {t("common.total")}: <span className="font-semibold text-gray-900">₹{formatPaise(total)}</span>
           </p>
 
           {/* Visual Sales Trend Curve */}
@@ -383,7 +386,7 @@ export function ReportsScreen() {
             <div className="mb-3 flex items-center justify-between">
               <div>
                 <h2 className="font-bold text-base text-gray-900">Revenue Trend (Daily)</h2>
-                <p className="text-xs text-gray-500">Sales curve across selected period</p>
+                <p className="text-xs text-gray-600">Sales curve across selected period</p>
               </div>
               <span className="font-mono text-xs font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
                 ₹{formatPaise(total)} total
@@ -404,7 +407,7 @@ export function ReportsScreen() {
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <h2 className="font-bold text-base text-gray-900">{t("reports.profit_margin")}</h2>
-                <p className="text-xs text-gray-500">Based on cost price recorded on items</p>
+                <p className="text-xs text-gray-600">Based on cost price recorded on items</p>
               </div>
               {exportButton("profit", "reports-export-profit")}
             </div>
@@ -412,7 +415,7 @@ export function ReportsScreen() {
             {/* KPI Summary Cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
               <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-                <p className="text-xs text-gray-500 font-medium">Net Revenue</p>
+                <p className="text-xs text-gray-600 font-medium">Net Revenue</p>
                 <p className="text-lg font-bold text-gray-900">₹{formatPaise(totalRevenuePaise)}</p>
               </div>
               <div className="p-3 bg-amber-50/50 rounded-lg border border-amber-100">
@@ -437,7 +440,7 @@ export function ReportsScreen() {
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm" data-testid="reports-profit-table">
                 <thead>
-                  <tr className="border-b border-gray-200 text-xs font-semibold text-gray-500">
+                  <tr className="border-b border-gray-200 text-xs font-semibold text-gray-600">
                     <th className="py-2 px-3">{t("print.item")}</th>
                     <th className="py-2 px-3 text-right">{t("reports.qty_sold")}</th>
                     <th className="py-2 px-3 text-right">Revenue</th>
@@ -453,7 +456,7 @@ export function ReportsScreen() {
                       <td className="py-2.5 px-3 font-medium text-gray-800">{r.name}</td>
                       <td className="py-2.5 px-3 text-right text-gray-600">{formatQty(r.qtyMilli)}</td>
                       <td className="py-2.5 px-3 text-right font-medium text-gray-700">₹{formatPaise(r.revenuePaise)}</td>
-                      <td className="py-2.5 px-3 text-right text-gray-500">₹{formatPaise(r.unitCostPaise)}</td>
+                      <td className="py-2.5 px-3 text-right text-gray-600">₹{formatPaise(r.unitCostPaise)}</td>
                       <td className="py-2.5 px-3 text-right text-amber-700">₹{formatPaise(r.cogsPaise)}</td>
                       <td className="py-2.5 px-3 text-right font-semibold text-green-700">₹{formatPaise(r.grossProfitPaise)}</td>
                       <td className="py-2.5 px-3 text-right font-semibold text-blue-700">{r.marginPct}%</td>
@@ -500,7 +503,7 @@ export function ReportsScreen() {
             </div>
             <table className="w-full rounded border border-gray-200 bg-white text-sm">
               <thead>
-                <tr className="border-b border-gray-200 text-left text-gray-500">
+                <tr className="border-b border-gray-200 text-left text-gray-600 font-semibold">
                   <th className="px-3 py-2">{t("print.item")}</th>
                   <th className="px-3 py-2 text-right">{t("reports.qty_sold")}</th>
                   <th className="px-3 py-2 text-right">{t("reports.amount")}</th>
@@ -525,7 +528,7 @@ export function ReportsScreen() {
             </div>
             <table className="w-full rounded border border-gray-200 bg-white text-sm">
               <thead>
-                <tr className="border-b border-gray-200 text-left text-gray-500">
+                <tr className="border-b border-gray-200 text-left text-gray-600 font-semibold">
                   <th className="px-3 py-2">{t("reports.mode")}</th>
                   <th className="px-3 py-2 text-right">{t("reports.amount")}</th>
                 </tr>

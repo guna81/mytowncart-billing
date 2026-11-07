@@ -15,58 +15,56 @@ export function HourlyHeatmap({
   height?: number;
 }) {
   const maxVal = Math.max(...buckets.map((b) => b.totalPaise), 100);
-  const chartHeight = height - 28;
-  const barWidth = 14;
-  const gap = 5;
-  const totalWidth = 24 * (barWidth + gap);
 
   return (
-    <div className="w-full overflow-x-auto" data-testid="hourly-heatmap-chart">
-      <svg
-        viewBox={`0 0 ${totalWidth} ${height}`}
-        className="w-full h-auto"
-        style={{ minWidth: "400px" }}
-      >
+    <div className="w-full" data-testid="hourly-heatmap-chart">
+      <div className="flex items-end gap-1 sm:gap-1.5 pt-2" style={{ height }}>
         {buckets.map((b) => {
-          const x = b.hour * (barWidth + gap);
-          const barH = (b.totalPaise / maxVal) * chartHeight;
-          const y = chartHeight - barH + 6;
-          const intensity = Math.min(1, b.totalPaise / maxVal);
-          const fillColor = b.totalPaise === 0 ? "#E5E7EB" : `rgba(37, 99, 235, ${Math.max(0.3, intensity)})`;
+          const pct = Math.round((b.totalPaise / maxVal) * 100);
+          const hasData = b.totalPaise > 0;
           const tooltip = `${String(b.hour).padStart(2, "0")}:00 - ${String(b.hour).padStart(2, "0")}:59: ₹${formatPaise(b.totalPaise)} (${b.count} bills)`;
+          const showLabel = b.hour % 3 === 0;
 
           return (
-            <g key={b.hour}>
-              <rect
-                x={x}
-                y={b.totalPaise === 0 ? chartHeight + 2 : y}
-                width={barWidth}
-                height={b.totalPaise === 0 ? 4 : Math.max(4, barH)}
-                rx="2"
-                fill={fillColor}
-                tabIndex={0}
-                role="graphics-symbol"
-                aria-label={tooltip}
-                className="transition-all hover:opacity-80 focus:outline-none focus:stroke-blue-600 focus:stroke-1 cursor-pointer"
-              >
-                <title>{tooltip}</title>
-              </rect>
+            <div
+              key={b.hour}
+              className="flex-1 flex flex-col items-center h-full group relative focus:outline-none"
+              tabIndex={0}
+              role="img"
+              aria-label={tooltip}
+            >
+              {/* Tooltip on hover/focus */}
+              <div className="pointer-events-none absolute bottom-full mb-2 hidden group-hover:flex group-focus:flex flex-col items-center z-30 whitespace-nowrap">
+                <div className="rounded bg-gray-900 px-2 py-1 text-[11px] font-medium text-white shadow-md">
+                  {tooltip}
+                </div>
+                <div className="h-1 w-2 border-x-4 border-t-4 border-x-transparent border-t-gray-900" />
+              </div>
 
-              {/* Hour marker */}
-              {(b.hour % 3 === 0 || b.hour === 23) && (
-                <text
-                  x={x + barWidth / 2}
-                  y={height - 4}
-                  textAnchor="middle"
-                  className="text-[7.5px] fill-gray-500 font-mono"
-                >
-                  {b.hour}h
-                </text>
-              )}
-            </g>
+              {/* Bar track and fill */}
+              <div className="w-full flex-1 flex items-end bg-gray-100 rounded-xs overflow-hidden">
+                {hasData && (
+                  <div
+                    style={{ height: `${Math.max(8, pct)}%` }}
+                    className="w-full bg-blue-600 rounded-xs transition-all hover:bg-blue-700"
+                  />
+                )}
+              </div>
+
+              {/* Axis Label every 3h */}
+              <div className="h-5 flex items-center justify-center">
+                {showLabel ? (
+                  <span className="text-xs text-gray-600 font-mono select-none">
+                    {b.hour}h
+                  </span>
+                ) : (
+                  <span className="text-xs text-transparent select-none">·</span>
+                )}
+              </div>
+            </div>
           );
         })}
-      </svg>
+      </div>
     </div>
   );
 }

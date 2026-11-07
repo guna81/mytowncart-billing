@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { formatPaise } from "@mytowncart-billing/core";
 import type { Item } from "@mytowncart-billing/storage";
-import { Button } from "../components/ui";
+import { Button, PageHeader } from "../components/ui";
 import { t } from "../i18n";
 import { getRepository } from "../lib/repository";
 import { useAppStore } from "../store/appStore";
@@ -91,35 +91,38 @@ export function BarcodeLabelsScreen() {
   return (
     <div className="space-y-6">
       {/* Screen Header (Hidden in Print) */}
-      <div className="print:hidden flex flex-wrap items-center justify-between gap-4 border-b border-gray-200 pb-4">
-        <div>
-          <div className="flex items-center gap-2 text-xs text-gray-500">
-            <Link to="/items" className="hover:underline">
-              {t("items.title")}
-            </Link>
-            <span>/</span>
-            <span>Barcode Sticker Generator</span>
-          </div>
-          <h1 className="text-xl font-bold text-gray-900 mt-1">Print Barcode Labels</h1>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <Button
-            type="button"
-            variant="primary"
-            data-testid="print-labels-action"
-            onClick={handlePrint}
-            disabled={!selectedItem}
-          >
-            🖨️ Print Labels
-          </Button>
-          <Link
-            to="/items"
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
-          >
-            Back
-          </Link>
-        </div>
+      <div className="print:hidden">
+        <PageHeader
+          title="Print Barcode Labels"
+          subtitle={
+            <div className="flex items-center gap-2 text-xs text-gray-600">
+              <Link to="/items" className="hover:underline">
+                {t("items.title")}
+              </Link>
+              <span>/</span>
+              <span>Barcode Sticker Generator</span>
+            </div>
+          }
+          actions={
+            <>
+              <Button
+                type="button"
+                variant="primary"
+                data-testid="print-labels-action"
+                onClick={handlePrint}
+                disabled={!selectedItem}
+              >
+                🖨️ Print Labels
+              </Button>
+              <Link
+                to="/items"
+                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs"
+              >
+                Back
+              </Link>
+            </>
+          }
+        />
       </div>
 
       {/* Configuration Controls (Hidden in Print) */}

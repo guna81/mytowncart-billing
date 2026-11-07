@@ -15,10 +15,28 @@ export function SalesTrendChart({
   points: SalesTrendPoint[];
   height?: number;
 }) {
-  if (points.length === 0) {
+  if (points.length < 2) {
     return (
-      <div className="flex h-44 items-center justify-center text-xs text-gray-500">
-        {t("reports.empty")}
+      <div
+        className="flex h-44 flex-col items-center justify-center text-xs text-gray-600 gap-2"
+        data-testid="sales-trend-chart"
+      >
+        <svg
+          className="h-8 w-8 text-gray-500"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"
+          />
+        </svg>
+        <span className="font-medium">
+          {points.length === 0 ? t("reports.empty") : t("reports.not_enough_data")}
+        </span>
       </div>
     );
   }
@@ -43,11 +61,6 @@ export function SalesTrendChart({
 
   return (
     <div className="w-full overflow-x-auto" data-testid="sales-trend-chart">
-      {points.length < 2 && (
-        <div className="text-xs text-gray-500 text-center mb-1 font-medium">
-          {t("reports.not_enough_data")}
-        </div>
-      )}
       <svg
         viewBox={`0 0 ${chartWidth} ${height}`}
         className="w-full h-auto"

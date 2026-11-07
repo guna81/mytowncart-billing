@@ -28,7 +28,7 @@ export function EmptyState({
           {icon}
         </div>
       ) : (
-        <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gray-50 text-gray-400">
+        <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gray-50 text-gray-500">
           <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"

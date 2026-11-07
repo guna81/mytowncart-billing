@@ -59,7 +59,7 @@ export function KeyboardShortcutsModal({
           </div>
           <button
             type="button"
-            className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+            className="rounded-lg p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
             data-testid="shortcuts-modal-close"
             onClick={onClose}
           >
@@ -67,7 +67,7 @@ export function KeyboardShortcutsModal({
           </button>
         </div>
 
-        <p className="mt-2 text-xs text-gray-500">
+        <p className="mt-2 text-xs text-gray-600">
           Fast-lane billing keys designed for high-speed cash counter operations:
         </p>
 
@@ -76,7 +76,7 @@ export function KeyboardShortcutsModal({
             <div key={idx} className="flex items-center justify-between p-3 text-xs">
               <div>
                 <span className="font-medium text-gray-800">{s.action}</span>
-                <span className="ml-2 text-[10px] uppercase font-bold text-gray-400">
+                <span className="ml-2 text-[11px] uppercase font-bold text-gray-600">
                   {s.scope}
                 </span>
               </div>

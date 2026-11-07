@@ -64,7 +64,7 @@ function ReceiptDoc({
             <tr key={l.id}>
               <td className="align-top pr-1">
                 {l.nameSnapshot}
-                {l.hsnCode ? <span className="text-gray-400"> (HSN: {l.hsnCode})</span> : null}
+                {l.hsnCode ? <span className="text-gray-600"> (HSN: {l.hsnCode})</span> : null}
                 <br />
                 <span className="text-gray-500">
                   {formatQty(l.qtyMilli)} × {formatPaise(l.unitPricePaise)}
@@ -195,7 +195,7 @@ function CreditNoteDoc({
         {amountInWords(creditNote.totalPaise)}
       </p>
       <div className="mt-8 pt-4 border-t border-gray-300 flex justify-between items-end">
-        <span className="text-[10px] text-gray-400">Computer-generated document</span>
+        <span className="text-xs text-gray-600">Computer-generated document</span>
         <div className="text-center">
           <div className="w-32 border-b border-gray-400 mb-1" />
           <span className="text-[10px] text-gray-600">{t("print.authorised_signatory")}</span>

@@ -124,19 +124,19 @@ export function SettingsScreen() {
                 />
               ) : (
                 <div
-                  className="flex flex-col items-center justify-center text-gray-400 p-2 text-center"
+                  className="flex flex-col items-center justify-center text-gray-500 p-2 text-center"
                   data-testid="settings-logo-placeholder"
                 >
-                  <svg className="h-6 w-6 text-gray-400 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="h-6 w-6 text-gray-500 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
-                  <span className="text-[10px] font-bold tracking-wider uppercase text-gray-400">MTC</span>
+                  <span className="text-[10px] font-bold tracking-wider uppercase text-gray-600">MTC</span>
                 </div>
               )}
             </div>
             <div className="flex-1 space-y-1">
               <span className="block text-sm font-medium text-gray-800">{t("settings.shop_logo")}</span>
-              <p className="text-xs text-gray-500">{t("settings.shop_logo_hint")}</p>
+              <p className="text-xs text-gray-600">{t("settings.shop_logo_hint")}</p>
               <div className="flex flex-wrap items-center gap-2 pt-1.5">
                 <label className="cursor-pointer inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-xs hover:bg-gray-50 hover:text-gray-900 transition-colors">
                   <input

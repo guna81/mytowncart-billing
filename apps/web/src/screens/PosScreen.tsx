@@ -721,37 +721,45 @@ export function PosScreen() {
         )}
 
         {heldError ? (
-          <p className="mt-3 rounded bg-amber-50 px-3 py-2 text-sm text-amber-900" data-testid="pos-held-error">
+          <p className="mt-2 rounded bg-amber-50 px-3 py-1.5 text-xs text-amber-900" data-testid="pos-held-error">
             {heldError}
           </p>
         ) : null}
-        <div className="mt-4 rounded border border-gray-200 bg-white p-3" data-testid="pos-held">
-          <p className="mb-2 text-sm font-semibold">{t("pos.resume")}</p>
+        <div className="mt-3" data-testid="pos-held">
           {held.length === 0 ? (
-            <p className="text-sm text-gray-500">{t("pos.resume_empty")}</p>
+            <div className="flex items-center gap-2 px-1 text-xs text-gray-500">
+              <span className="h-1.5 w-1.5 rounded-full bg-gray-300" />
+              <span>{t("pos.resume_empty")}</span>
+            </div>
           ) : (
-            <div className="flex flex-wrap gap-2">
-              {held.map((p) => (
-                <span key={p.id} className="inline-flex items-center rounded border border-gray-300">
-                  <button
-                    type="button"
-                    className="px-3 py-1 text-sm hover:bg-gray-50"
-                    data-testid={`pos-resume-${p.id}`}
-                    onClick={() => void resume(p.id)}
-                  >
-                    {p.label} · {new Date(p.createdAt).toLocaleTimeString()}
-                  </button>
-                  <button
-                    type="button"
-                    className="border-l border-gray-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                    aria-label={t("pos.discard")}
-                    data-testid={`pos-discard-${p.id}`}
-                    onClick={() => void discardHeld(p.id)}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
+            <div className="rounded-lg border border-gray-200 bg-white p-2.5 shadow-xs">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-gray-700">{t("pos.resume")}</p>
+                <span className="text-[11px] text-gray-500 font-medium">({held.length})</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {held.map((p) => (
+                  <span key={p.id} className="inline-flex items-center rounded-md border border-gray-300 bg-gray-50 text-xs">
+                    <button
+                      type="button"
+                      className="px-2.5 py-1 font-medium text-gray-800 hover:bg-gray-100"
+                      data-testid={`pos-resume-${p.id}`}
+                      onClick={() => void resume(p.id)}
+                    >
+                      {p.label} · {new Date(p.createdAt).toLocaleTimeString()}
+                    </button>
+                    <button
+                      type="button"
+                      className="border-l border-gray-300 px-2 py-1 text-red-600 hover:bg-red-50 font-bold"
+                      aria-label={t("pos.discard")}
+                      data-testid={`pos-discard-${p.id}`}
+                      onClick={() => void discardHeld(p.id)}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -759,307 +767,311 @@ export function PosScreen() {
 
       <aside className="flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)]">
         {/* Scrollable Configuration & Details Area */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* Section 1: Hero Total & Bill Breakdown */}
-          <div>
-            <div className="mb-3.5 rounded-xl bg-blue-50/80 p-3.5 border border-blue-100 text-center shadow-xs">
-              <span className="text-[11px] uppercase font-bold tracking-wider text-blue-700">Total Payable</span>
-              <div data-testid="pos-total" className="text-3xl font-black text-blue-900 tracking-tight mt-0.5">
-                ₹{formatPaise(bill.totalPaise)}
+        <div className="relative flex-1 min-h-0 flex flex-col">
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            {/* Section 1: Hero Total & Bill Breakdown */}
+            <div>
+              <div className="mb-2 rounded-lg bg-blue-50/80 p-2.5 border border-blue-100 text-center shadow-xs">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-blue-700">Total Payable</span>
+                <div data-testid="pos-total" className="text-2xl font-black text-blue-900 tracking-tight mt-0.5">
+                  ₹{formatPaise(bill.totalPaise)}
+                </div>
+                <p className="text-[11px] text-blue-600 mt-0.5 font-medium">
+                  {lines.length} items ({formatQty(lines.reduce((s, l) => s + l.qtyMilli, 0))} units)
+                </p>
               </div>
-              <p className="text-xs text-blue-600 mt-1 font-medium">
-                {lines.length} items ({formatQty(lines.reduce((s, l) => s + l.qtyMilli, 0))} units)
-              </p>
+
+              <dl className="space-y-1.5 text-xs">
+                <div className="flex justify-between">
+                  <dt className="text-gray-600">{t("pos.subtotal")}</dt>
+                  <dd className="font-mono font-medium text-gray-900">{formatPaise(bill.subtotalPaise)}</dd>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <dt className="text-gray-600">{t("pos.bill_discount")}</dt>
+                  <dd>
+                    <input
+                      className="w-20 rounded border border-gray-300 px-2 py-0.5 text-right text-xs text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none"
+                      placeholder="0"
+                      data-testid="pos-bill-discount"
+                      value={billDiscountStr}
+                      onChange={(e) => setBillDiscountStr(e.target.value)}
+                    />
+                  </dd>
+                </div>
+
+                <div className="flex justify-between">
+                  <dt className="text-gray-600">{t("pos.tax")}</dt>
+                  <dd className="font-mono font-medium text-gray-900">{formatPaise(bill.taxPaise)}</dd>
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-gray-600">
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      data-testid="pos-round-off-toggle"
+                      checked={roundOffEnabled}
+                      onChange={(e) => setRoundOffEnabled(e.target.checked)}
+                    />
+                    <span>{t("pos.round_off")}</span>
+                  </label>
+                  <span className="font-mono font-medium">
+                    {bill.roundOffPaise !== 0
+                      ? `${bill.roundOffPaise > 0 ? "+" : ""}₹${formatPaise(bill.roundOffPaise)}`
+                      : "—"}
+                  </span>
+                </div>
+              </dl>
             </div>
 
-            <dl className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <dt className="text-gray-600">{t("pos.subtotal")}</dt>
-                <dd className="font-mono font-medium text-gray-900">{formatPaise(bill.subtotalPaise)}</dd>
-              </div>
+            <div className="border-t border-gray-200" />
 
-              <div className="flex items-center justify-between">
-                <dt className="text-gray-600">{t("pos.bill_discount")}</dt>
-                <dd>
-                  <input
-                    className="w-20 rounded border border-gray-300 px-2 py-0.5 text-right text-xs text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none"
-                    placeholder="0"
-                    data-testid="pos-bill-discount"
-                    value={billDiscountStr}
-                    onChange={(e) => setBillDiscountStr(e.target.value)}
-                  />
-                </dd>
-              </div>
-
-              <div className="flex justify-between">
-                <dt className="text-gray-600">{t("pos.tax")}</dt>
-                <dd className="font-mono font-medium text-gray-900">{formatPaise(bill.taxPaise)}</dd>
-              </div>
-
-              <div className="flex items-center justify-between text-xs text-gray-600">
-                <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    data-testid="pos-round-off-toggle"
-                    checked={roundOffEnabled}
-                    onChange={(e) => setRoundOffEnabled(e.target.checked)}
-                  />
-                  <span>{t("pos.round_off")}</span>
-                </label>
-                <span className="font-mono font-medium">
-                  {bill.roundOffPaise !== 0
-                    ? `${bill.roundOffPaise > 0 ? "+" : ""}₹${formatPaise(bill.roundOffPaise)}`
-                    : "—"}
-                </span>
-              </div>
-            </dl>
-          </div>
-
-          <div className="border-t border-gray-200" />
-
-          {/* Section 2: Payment Mode & Tenders */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1.5">
-              {t("pos.payment_mode")}
-            </label>
-            <div className="grid grid-cols-2 gap-1.5">
-              {PAYMENT_MODES.map((m) => (
+            {/* Section 2: Payment Mode & Tenders */}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1">
+                {t("pos.payment_mode")}
+              </label>
+              <div className="grid grid-cols-2 gap-1">
+                {PAYMENT_MODES.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    data-testid={`pos-mode-${m}`}
+                    className={`rounded-md border px-2 py-1.5 text-xs transition-colors ${
+                      mode === m
+                        ? "border-blue-600 bg-blue-50 text-blue-700 font-bold ring-1 ring-blue-600 shadow-xs"
+                        : "border-gray-200 bg-white font-medium text-gray-700 hover:bg-gray-50"
+                    }`}
+                    onClick={() => {
+                      setMode(m);
+                      setTendered("");
+                    }}
+                  >
+                    {t(`pos.mode.${m}` as I18nKey)}
+                  </button>
+                ))}
                 <button
-                  key={m}
                   type="button"
-                  data-testid={`pos-mode-${m}`}
-                  className={`rounded-lg border px-2.5 py-2 text-xs transition-colors ${
-                    mode === m
+                  data-testid="pos-mode-split"
+                  className={`col-span-2 rounded-md border px-2 py-1.5 text-xs transition-colors ${
+                    mode === "split"
                       ? "border-blue-600 bg-blue-50 text-blue-700 font-bold ring-1 ring-blue-600 shadow-xs"
                       : "border-gray-200 bg-white font-medium text-gray-700 hover:bg-gray-50"
                   }`}
-                  onClick={() => {
-                    setMode(m);
-                    setTendered("");
-                  }}
+                  onClick={() => setMode("split")}
                 >
-                  {t(`pos.mode.${m}` as I18nKey)}
+                  {t("pos.split_payment")}
                 </button>
-              ))}
-              <button
-                type="button"
-                data-testid="pos-mode-split"
-                className={`col-span-2 rounded-lg border px-2.5 py-2 text-xs transition-colors ${
-                  mode === "split"
-                    ? "border-blue-600 bg-blue-50 text-blue-700 font-bold ring-1 ring-blue-600 shadow-xs"
-                    : "border-gray-200 bg-white font-medium text-gray-700 hover:bg-gray-50"
-                }`}
-                onClick={() => setMode("split")}
-              >
-                {t("pos.split_payment")}
-              </button>
+              </div>
+
+              {mode === "cash" ? (
+                <div className="mt-2.5 space-y-1.5">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700">
+                    {t("pos.tendered")}
+                    <input
+                      className="mt-1 w-full rounded-md border border-gray-300 px-2.5 py-1 text-sm font-mono shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      data-testid="pos-tendered"
+                      placeholder={formatPaise(bill.totalPaise)}
+                      value={tendered}
+                      onChange={(e) => setTendered(e.target.value)}
+                    />
+                  </label>
+
+                  {/* Quick cash tender buttons in fixed 5-column grid */}
+                  <div className="grid grid-cols-5 gap-1">
+                    <button
+                      type="button"
+                      data-testid="pos-quick-exact"
+                      className="rounded border border-gray-300 bg-gray-50 py-1 text-center text-xs font-semibold text-gray-700 hover:bg-gray-100 shadow-2xs"
+                      onClick={() => setTendered(formatPaise(bill.totalPaise))}
+                    >
+                      {t("pos.exact")}
+                    </button>
+                    {[100, 200, 500, 2000].map((val) => (
+                      <button
+                        key={val}
+                        type="button"
+                        data-testid={`pos-quick-${val}`}
+                        className="rounded border border-gray-300 bg-gray-50 py-1 text-center text-xs font-semibold text-gray-700 hover:bg-gray-100 shadow-2xs"
+                        onClick={() => setTendered(String(val))}
+                      >
+                        ₹{val}
+                      </button>
+                    ))}
+                  </div>
+
+                  {change > 0 ? (
+                    <div
+                      data-testid="pos-change-banner"
+                      className="rounded-lg bg-green-50 p-2 text-center border border-green-200"
+                    >
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-green-700">
+                        {t("pos.change_due")}
+                      </p>
+                      <p className="text-xl font-black text-green-800">₹{formatPaise(change)}</p>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {mode === "upi" ? (
+                <div className="mt-2.5 rounded-xl border border-blue-200 bg-blue-50/50 p-2.5 flex flex-col items-center">
+                  <UpiQrCode
+                    vpa={profile?.phone ? `${profile.phone.replace(/[^0-9]/g, "")}@upi` : "store@upi"}
+                    payeeName={profile?.name || "Store"}
+                    amountPaise={bill.totalPaise}
+                    size={130}
+                  />
+                </div>
+              ) : null}
+
+              {mode === "split" ? (
+                <div className="mt-2.5 rounded-lg border border-gray-200 bg-gray-50 p-2 shadow-xs" data-testid="pos-split-form">
+                  <p className="mb-1.5 text-xs font-semibold text-gray-700">{t("pos.split_hint")}</p>
+                  <div className="space-y-1 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-gray-700">{t("pos.mode.cash")}</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="w-24 rounded border border-gray-300 bg-white px-2 py-0.5 text-right text-xs"
+                        placeholder="0"
+                        data-testid="pos-split-cash"
+                        value={splitAmounts.cash}
+                        onChange={(e) => setSplitAmounts((s) => ({ ...s, cash: e.target.value }))}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-gray-700">{t("pos.mode.upi")}</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="w-24 rounded border border-gray-300 bg-white px-2 py-0.5 text-right text-xs"
+                        placeholder="0"
+                        data-testid="pos-split-upi"
+                        value={splitAmounts.upi}
+                        onChange={(e) => setSplitAmounts((s) => ({ ...s, upi: e.target.value }))}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-gray-700">{t("pos.mode.card")}</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="w-24 rounded border border-gray-300 bg-white px-2 py-0.5 text-right text-xs"
+                        placeholder="0"
+                        data-testid="pos-split-card"
+                        value={splitAmounts.card}
+                        onChange={(e) => setSplitAmounts((s) => ({ ...s, card: e.target.value }))}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-gray-700">{t("pos.mode.credit")}</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="w-24 rounded border border-gray-300 bg-white px-2 py-0.5 text-right text-xs"
+                        placeholder="0"
+                        data-testid="pos-split-credit"
+                        value={splitAmounts.credit}
+                        onChange={(e) => setSplitAmounts((s) => ({ ...s, credit: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-1.5 border-t border-gray-200 pt-1 flex justify-between text-xs font-semibold">
+                    <span className="text-gray-700">Paid:</span>
+                    <span
+                      className={
+                        payments.reduce((s, p) => s + p.amountPaise, 0) === bill.totalPaise
+                          ? "text-green-700"
+                          : "text-red-600"
+                      }
+                    >
+                      ₹{formatPaise(payments.reduce((s, p) => s + p.amountPaise, 0))} / ₹
+                      {formatPaise(bill.totalPaise)}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
-            {mode === "cash" ? (
-              <div className="mt-3 space-y-2">
-                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700">
-                  {t("pos.tendered")}
-                  <input
-                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-mono shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    data-testid="pos-tendered"
-                    placeholder={formatPaise(bill.totalPaise)}
-                    value={tendered}
-                    onChange={(e) => setTendered(e.target.value)}
-                  />
-                </label>
+            <div className="border-t border-gray-200" />
 
-                {/* Quick cash tender buttons */}
-                <div className="flex flex-wrap gap-1">
-                  <button
-                    type="button"
-                    data-testid="pos-quick-exact"
-                    className="rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100 shadow-xs"
-                    onClick={() => setTendered(formatPaise(bill.totalPaise))}
-                  >
-                    {t("pos.exact")}
-                  </button>
-                  {[100, 200, 500, 2000].map((val) => (
-                    <button
-                      key={val}
-                      type="button"
-                      data-testid={`pos-quick-${val}`}
-                      className="rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100 shadow-xs"
-                      onClick={() => setTendered(String(val))}
-                    >
-                      ₹{val}
-                    </button>
+            {/* Section 3: Customer & Loyalty */}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700">
+                {t("pos.customer")}
+                <select
+                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-normal"
+                  data-testid="pos-customer"
+                  value={customerId ?? ""}
+                  onChange={(e) => setCustomerId(e.target.value === "" ? null : Number(e.target.value))}
+                >
+                  <option value="">{t("common.none")}</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
                   ))}
-                </div>
+                </select>
+              </label>
 
-                {change > 0 ? (
-                  <div
-                    data-testid="pos-change-banner"
-                    className="rounded-lg bg-green-50 p-2.5 text-center border border-green-200"
-                  >
-                    <p className="text-xs font-semibold uppercase tracking-wider text-green-700">
-                      {t("pos.change_due")}
-                    </p>
-                    <p className="text-2xl font-black text-green-800">₹{formatPaise(change)}</p>
+              {customerId && customerLoyaltyBalance > 0 && (
+                <div className="mt-2 rounded-lg border border-purple-200 bg-purple-50 p-2 text-xs shadow-xs" data-testid="pos-loyalty-panel">
+                  <div className="flex items-center justify-between text-purple-900 font-medium">
+                    <span>Loyalty Points:</span>
+                    <span className="font-bold text-xs font-mono" data-testid="pos-loyalty-balance">{customerLoyaltyBalance} pts</span>
                   </div>
-                ) : null}
-              </div>
-            ) : null}
-
-            {mode === "upi" ? (
-              <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50/50 p-3 flex flex-col items-center">
-                <UpiQrCode
-                  vpa={profile?.phone ? `${profile.phone.replace(/[^0-9]/g, "")}@upi` : "store@upi"}
-                  payeeName={profile?.name || "Store"}
-                  amountPaise={bill.totalPaise}
-                  size={140}
-                />
-              </div>
-            ) : null}
-
-            {mode === "split" ? (
-              <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-2.5 shadow-xs" data-testid="pos-split-form">
-                <p className="mb-2 text-xs font-semibold text-gray-700">{t("pos.split_hint")}</p>
-                <div className="space-y-1.5 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-gray-700">{t("pos.mode.cash")}</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      className="w-24 rounded border border-gray-300 bg-white px-2 py-1 text-right text-xs"
-                      placeholder="0"
-                      data-testid="pos-split-cash"
-                      value={splitAmounts.cash}
-                      onChange={(e) => setSplitAmounts((s) => ({ ...s, cash: e.target.value }))}
-                    />
+                  <div className="mt-0.5 flex items-center justify-between text-[11px] text-purple-700">
+                    <span>Value: ₹{formatPaise(customerLoyaltyBalance * DEFAULT_LOYALTY_CONFIG.pointValuePaise)}</span>
+                    {redeemedPoints > 0 ? (
+                      <button
+                        type="button"
+                        data-testid="pos-loyalty-cancel"
+                        className="text-red-600 hover:underline font-semibold"
+                        onClick={() => setRedeemedPoints(0)}
+                      >
+                        Cancel
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        data-testid="pos-loyalty-redeem"
+                        className="rounded bg-purple-600 px-2 py-0.5 font-bold text-white hover:bg-purple-700 shadow-xs"
+                        onClick={() => {
+                          const maxRedeem = Math.min(
+                            customerLoyaltyBalance,
+                            Math.floor(bill.subtotalPaise / DEFAULT_LOYALTY_CONFIG.pointValuePaise),
+                          );
+                          setRedeemedPoints(maxRedeem);
+                        }}
+                      >
+                        Redeem
+                      </button>
+                    )}
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-gray-700">{t("pos.mode.upi")}</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      className="w-24 rounded border border-gray-300 bg-white px-2 py-1 text-right text-xs"
-                      placeholder="0"
-                      data-testid="pos-split-upi"
-                      value={splitAmounts.upi}
-                      onChange={(e) => setSplitAmounts((s) => ({ ...s, upi: e.target.value }))}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-gray-700">{t("pos.mode.card")}</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      className="w-24 rounded border border-gray-300 bg-white px-2 py-1 text-right text-xs"
-                      placeholder="0"
-                      data-testid="pos-split-card"
-                      value={splitAmounts.card}
-                      onChange={(e) => setSplitAmounts((s) => ({ ...s, card: e.target.value }))}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-gray-700">{t("pos.mode.credit")}</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      className="w-24 rounded border border-gray-300 bg-white px-2 py-1 text-right text-xs"
-                      placeholder="0"
-                      data-testid="pos-split-credit"
-                      value={splitAmounts.credit}
-                      onChange={(e) => setSplitAmounts((s) => ({ ...s, credit: e.target.value }))}
-                    />
-                  </div>
-                </div>
-                <div className="mt-2 border-t border-gray-200 pt-1.5 flex justify-between text-xs font-semibold">
-                  <span className="text-gray-700">Paid:</span>
-                  <span
-                    className={
-                      payments.reduce((s, p) => s + p.amountPaise, 0) === bill.totalPaise
-                        ? "text-green-700"
-                        : "text-red-600"
-                    }
-                  >
-                    ₹{formatPaise(payments.reduce((s, p) => s + p.amountPaise, 0))} / ₹
-                    {formatPaise(bill.totalPaise)}
-                  </span>
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="border-t border-gray-200" />
-
-          {/* Section 3: Customer & Loyalty */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700">
-              {t("pos.customer")}
-              <select
-                className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-normal"
-                data-testid="pos-customer"
-                value={customerId ?? ""}
-                onChange={(e) => setCustomerId(e.target.value === "" ? null : Number(e.target.value))}
-              >
-                <option value="">{t("common.none")}</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {customerId && customerLoyaltyBalance > 0 && (
-              <div className="mt-2.5 rounded-lg border border-purple-200 bg-purple-50 p-2.5 text-xs shadow-xs" data-testid="pos-loyalty-panel">
-                <div className="flex items-center justify-between text-purple-900 font-medium">
-                  <span>Loyalty Points:</span>
-                  <span className="font-bold text-sm font-mono" data-testid="pos-loyalty-balance">{customerLoyaltyBalance} pts</span>
-                </div>
-                <div className="mt-1 flex items-center justify-between text-[11px] text-purple-700">
-                  <span>Value: ₹{formatPaise(customerLoyaltyBalance * DEFAULT_LOYALTY_CONFIG.pointValuePaise)}</span>
-                  {redeemedPoints > 0 ? (
-                    <button
-                      type="button"
-                      data-testid="pos-loyalty-cancel"
-                      className="text-red-600 hover:underline font-semibold"
-                      onClick={() => setRedeemedPoints(0)}
-                    >
-                      Cancel
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      data-testid="pos-loyalty-redeem"
-                      className="rounded bg-purple-600 px-2 py-0.5 font-bold text-white hover:bg-purple-700 shadow-xs"
-                      onClick={() => {
-                        const maxRedeem = Math.min(
-                          customerLoyaltyBalance,
-                          Math.floor(bill.subtotalPaise / DEFAULT_LOYALTY_CONFIG.pointValuePaise),
-                        );
-                        setRedeemedPoints(maxRedeem);
-                      }}
-                    >
-                      Redeem
-                    </button>
+                  {redeemedPoints > 0 && (
+                    <div className="mt-0.5 font-semibold text-green-700 text-[11px]" data-testid="pos-loyalty-applied">
+                      Redeeming {redeemedPoints} pts (-₹{formatPaise(loyaltyDiscountPaise)})
+                    </div>
                   )}
                 </div>
-                {redeemedPoints > 0 && (
-                  <div className="mt-1 font-semibold text-green-700" data-testid="pos-loyalty-applied">
-                    Redeeming {redeemedPoints} pts (-₹{formatPaise(loyaltyDiscountPaise)})
-                  </div>
-                )}
-              </div>
-            )}
+              )}
+            </div>
           </div>
+          {/* Subtle scroll hint fade at bottom of details area */}
+          <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-4 bg-gradient-to-t from-gray-200/40 to-transparent" />
         </div>
 
         {/* Sticky Primary Footer */}
-        <div className="border-t border-gray-200 bg-gray-50/90 backdrop-blur-xs p-4 space-y-2 shrink-0">
+        <div className="border-t border-gray-200 bg-gray-50/90 backdrop-blur-xs p-3 space-y-1.5 shrink-0">
           <button
             type="button"
             data-testid="pos-save-print"
             disabled={busy || lines.length === 0}
             aria-disabled={busy || lines.length === 0}
             title={lines.length === 0 ? t("pos.cart_empty_tooltip") : "Save & print (F9)"}
-            className="w-full rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             onClick={() => void save(true)}
           >
             {t("pos.save_print")}

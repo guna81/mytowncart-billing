@@ -66,11 +66,16 @@ export function lanServerStop(): Promise<LanServerStatus> {
   return invokeCmd<LanServerStatus>("lan_server_stop");
 }
 
-export async function openReleasePage(url: string): Promise<void> {
+import { DOWNLOAD_PAGE_URL } from "./updateCheck";
+export { DOWNLOAD_PAGE_URL };
+
+export async function openReleasePage(url: string = DOWNLOAD_PAGE_URL): Promise<void> {
   if (isInTauri()) {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
     await openUrl(url);
-  } else {
+  } else if (typeof window !== "undefined") {
     window.open(url, "_blank", "noopener,noreferrer");
   }
 }
+
+export const openDownloadPage = openReleasePage;

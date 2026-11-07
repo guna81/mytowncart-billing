@@ -9,6 +9,12 @@
       "identifier": "opener:allow-open-url",
       "allow": [
         {
+          "url": "https://guna81.github.io/mytowncart-billing/*"
+        },
+        {
+          "url": "https://guna81.github.io/mytowncart-billing"
+        },
+        {
           "url": "https://github.com/guna81/mytowncart-billing/releases/*"
         }
       ]

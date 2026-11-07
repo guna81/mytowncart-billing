@@ -272,7 +272,7 @@ export function Layout({ children }: { children: ReactNode }) {
             <button
               type="button"
               onClick={() => setCollapsed(false)}
-              className="mt-0.5 flex items-center justify-center rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-blue-600 transition-colors"
+              className="mt-0.5 flex items-center justify-center rounded p-0.5 text-gray-500 hover:bg-gray-100 hover:text-blue-600 transition-colors"
               title="Expand sidebar"
               aria-label="Expand sidebar"
             >
@@ -315,7 +315,7 @@ export function Layout({ children }: { children: ReactNode }) {
             <button
               type="button"
               onClick={() => setCollapsed(true)}
-              className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors shrink-0"
+              className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors shrink-0"
               title="Collapse sidebar"
               aria-label="Collapse sidebar"
             >
@@ -327,41 +327,45 @@ export function Layout({ children }: { children: ReactNode }) {
         )}
 
         {/* Navigation Items */}
-        <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-3">
-          {NAV_GROUPS.map((group, gIdx) => (
-            <div key={gIdx} className="space-y-1">
-              {!collapsed && group.labelKey ? (
-                <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                  {t(group.labelKey)}
-                </div>
-              ) : collapsed && gIdx > 0 ? (
-                <div className="my-2 border-t border-gray-100" />
-              ) : null}
-              {group.items.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.to === "/"}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      isActive
-                        ? "bg-blue-50 text-blue-700 font-semibold shadow-xs"
-                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-                    }`
-                  }
-                  title={collapsed ? t(item.key) : undefined}
-                >
-                  {({ isActive }) => (
-                    <>
-                      <span className="shrink-0">{item.icon(isActive)}</span>
-                      {!collapsed ? <span className="truncate">{t(item.key)}</span> : null}
-                    </>
-                  )}
-                </NavLink>
-              ))}
-            </div>
-          ))}
-        </nav>
+        <div className="relative flex-1 min-h-0 flex flex-col">
+          <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-3">
+            {NAV_GROUPS.map((group, gIdx) => (
+              <div key={gIdx} className="space-y-1">
+                {!collapsed && group.labelKey ? (
+                  <div className="px-3 pt-2 pb-1 text-xs font-bold uppercase tracking-wider text-gray-600">
+                    {t(group.labelKey)}
+                  </div>
+                ) : collapsed && gIdx > 0 ? (
+                  <div className="my-2 border-t border-gray-100" />
+                ) : null}
+                {group.items.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.to === "/"}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        isActive
+                          ? "bg-blue-50 text-blue-700 font-semibold shadow-xs"
+                          : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                      }`
+                    }
+                    title={collapsed ? t(item.key) : undefined}
+                  >
+                    {({ isActive }) => (
+                      <>
+                        <span className="shrink-0">{item.icon(isActive)}</span>
+                        {!collapsed ? <span className="truncate">{t(item.key)}</span> : null}
+                      </>
+                    )}
+                  </NavLink>
+                ))}
+              </div>
+            ))}
+          </nav>
+          {/* Bottom scroll hint gradient */}
+          <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-white to-transparent" />
+        </div>
 
         {/* Quick Lock & User Status Bar */}
         <div className="p-3 border-t border-gray-100 bg-gray-50/50">
@@ -383,9 +387,12 @@ export function Layout({ children }: { children: ReactNode }) {
                     onClick={() => setShowShortcuts(true)}
                     title={t("nav.shortcuts_help")}
                     aria-label={t("nav.shortcuts_help")}
-                    className="p-1.5 rounded-md text-gray-500 hover:bg-gray-200 hover:text-gray-800 transition-colors text-xs font-mono font-bold"
+                    className="p-1.5 rounded-md text-gray-600 hover:bg-gray-200 hover:text-gray-900 transition-colors"
                   >
-                    ⌨?
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <rect x="2" y="4" width="20" height="16" rx="2" strokeWidth={1.8} />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M8 16h8" />
+                    </svg>
                   </button>
                   <button
                     type="button"
@@ -421,9 +428,12 @@ export function Layout({ children }: { children: ReactNode }) {
                 onClick={() => setShowShortcuts(true)}
                 title={t("nav.shortcuts_help")}
                 aria-label={t("nav.shortcuts_help")}
-                className="p-1.5 rounded text-gray-500 hover:bg-gray-200 hover:text-gray-800 text-xs font-mono font-bold"
+                className="p-1.5 rounded text-gray-600 hover:bg-gray-200 hover:text-gray-900"
               >
-                ⌨?
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <rect x="2" y="4" width="20" height="16" rx="2" strokeWidth={1.8} />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M8 16h8" />
+                </svg>
               </button>
               <button
                 type="button"

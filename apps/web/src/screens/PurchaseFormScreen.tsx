@@ -3,7 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { formatPaise, parsePaise } from "@mytowncart-billing/core";
 import type { Item, Supplier } from "@mytowncart-billing/storage";
-import { Button, Input, Money } from "../components/ui";
+import { Button, Input, Money, PageHeader } from "../components/ui";
 import { t } from "../i18n";
 import { getRepository } from "../lib/repository";
 import { useAppStore } from "../store/appStore";
@@ -168,13 +168,18 @@ export function PurchaseFormScreen() {
   };
 
   return (
-    <div className="max-w-4xl">
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-lg font-bold">{t("purchases.record")}</h1>
-        <Link to="/purchases" className="text-sm text-blue-600 hover:underline">
-          {t("common.back")}
-        </Link>
-      </div>
+    <div className="max-w-4xl mx-auto space-y-6 pb-24">
+      <PageHeader
+        title={t("purchases.record")}
+        actions={
+          <Link
+            to="/purchases"
+            className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs"
+          >
+            ← {t("common.back")}
+          </Link>
+        }
+      />
 
       <form onSubmit={(e) => void onSubmit(e)} className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 rounded-lg border border-gray-200 bg-white p-4">
