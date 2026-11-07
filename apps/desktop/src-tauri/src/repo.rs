@@ -1161,11 +1161,29 @@ pub fn create_bill(conn: &mut Connection, p: &NewBillPayload) -> RepoResult<Crea
         enqueue_movement(&tx, line.item_id, movement_id, -line.qty_milli, "sale", Some(&bill_ref))?;
     }
 
-    // 4. Payments.
-    for pay in &p.payments {
+    // 4. Payments. Record what the shop KEPT: cash handed over beyond the total
+    //    is returned as change, so it is taken off the cash rows. This keeps
+    //    payment-mode reports and the day-end cash count honest.
+    let paid: i64 = p.payments.iter().map(|x| x.amount_paise).sum();
+    if paid < p.total_paise {
+        return Err(format!("payments ({paid}) do not cover the bill total ({})", p.total_paise));
+    }
+    let mut kept: Vec<(String, i64)> = p.payments.iter().map(|x| (x.mode.clone(), x.amount_paise)).collect();
+    let mut change = paid - p.total_paise;
+    if change > 0 {
+        for row in kept.iter_mut().rev().filter(|(m, _)| m == "cash") {
+            let take = change.min(row.1);
+            row.1 -= take;
+            change -= take;
+        }
+        if change > 0 {
+            return Err("change cannot be more than the cash received".to_string());
+        }
+    }
+    for (mode, amount) in kept.iter().filter(|(_, a)| *a > 0) {
         tx.execute(
             "INSERT INTO payments (bill_id, mode, amount_paise) VALUES (?1, ?2, ?3)",
-            rusqlite::params![bill_id, pay.mode, pay.amount_paise],
+            rusqlite::params![bill_id, mode, amount],
         )
         .map_err(err)?;
     }
@@ -2649,20 +2667,65 @@ pub fn list_day_end_closures(conn: &Connection, from_date: Option<&str>, to_date
     Ok(list)
 }
 
+/// Cash that left the drawer for returns issued on the day. A credit note is
+/// settled first against what the customer still owes on that bill (no cash moves);
+/// the rest is refunded in proportion to what was actually paid in cash vs UPI/card.
+/// MUST match `packages/storage/src/ledger.ts::creditNoteCashRefunds`.
+fn cash_refunds_for_day(conn: &Connection, date_prefix: &str) -> RepoResult<i64> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT n.id, n.bill_id, n.total_paise, n.created_at, b.total_paise,
+                    COALESCE((SELECT SUM(amount_paise) FROM payments p WHERE p.bill_id = b.id AND p.mode = 'credit'), 0),
+                    COALESCE((SELECT SUM(amount_paise) FROM payments p WHERE p.bill_id = b.id AND p.mode = 'cash'), 0),
+                    COALESCE((SELECT SUM(amount_paise) FROM payments p WHERE p.bill_id = b.id), 0)
+             FROM credit_notes n JOIN bills b ON b.id = n.bill_id
+             ORDER BY n.bill_id, n.id",
+        )
+        .map_err(err)?;
+    let rows: Vec<(i64, i64, i64, String, i64, i64, i64, i64)> = stmt
+        .query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?))
+        })
+        .map_err(err)?
+        .collect::<Result<_, _>>()
+        .map_err(err)?;
+    let mut total = 0;
+    let mut credit_left: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    for (_id, bill_id, cn_total, created_at, bill_total, credit, cash, paid) in rows {
+        let left = credit_left.entry(bill_id).or_insert(credit);
+        let applied = (*left).min(cn_total).max(0);
+        *left -= applied;
+        if !created_at.starts_with(date_prefix) {
+            continue;
+        }
+        let change = (paid - bill_total).max(0);
+        let cash_kept = (cash - change).max(0);
+        let non_credit = paid - credit - change;
+        if non_credit > 0 {
+            let rest = cn_total - applied;
+            // round half away from zero, like the rest of the app
+            total += (rest * cash_kept * 2 + non_credit) / (2 * non_credit);
+        }
+    }
+    Ok(total)
+}
+
 pub fn get_day_end_expected_cash(conn: &Connection, date_prefix: &str) -> RepoResult<DayEndExpectedCashRow> {
     let trimmed = date_prefix.trim();
 
-    // Cash sales (payments on active bills)
+    // Cash sales: cash received minus any change handed back. Older bills stored the
+    // cash tendered, so the change is worked out from (all payments - bill total).
     let cash_sales_paise: i64 = conn.query_row(
-        "SELECT COALESCE(SUM(p.amount_paise), 0)
-         FROM payments p
-         JOIN bills b ON b.id = p.bill_id
-         WHERE b.status = 'active'
-           AND p.mode = 'cash'
-           AND b.created_at LIKE ?1 || '%'",
+        "SELECT COALESCE(SUM(MAX(0, cash - MAX(0, paid - total))), 0) FROM (
+           SELECT b.total_paise AS total,
+                  COALESCE((SELECT SUM(amount_paise) FROM payments p WHERE p.bill_id = b.id AND p.mode = 'cash'), 0) AS cash,
+                  COALESCE((SELECT SUM(amount_paise) FROM payments p WHERE p.bill_id = b.id), 0) AS paid
+           FROM bills b
+           WHERE b.status = 'active' AND b.created_at LIKE ?1 || '%'
+         )",
         rusqlite::params![trimmed],
         |r| r.get(0),
-    ).unwrap_or(0);
+    ).map_err(err)?;
 
     // Cash payments received from credit customers
     let credit_received_paise: i64 = conn.query_row(
@@ -2674,14 +2737,7 @@ pub fn get_day_end_expected_cash(conn: &Connection, date_prefix: &str) -> RepoRe
         |r| r.get(0),
     ).unwrap_or(0);
 
-    // Cash refunds (returns issued today)
-    let cash_refunds_paise: i64 = conn.query_row(
-        "SELECT COALESCE(SUM(total_paise), 0)
-         FROM credit_notes
-         WHERE created_at LIKE ?1 || '%'",
-        rusqlite::params![trimmed],
-        |r| r.get(0),
-    ).unwrap_or(0);
+    let cash_refunds_paise = cash_refunds_for_day(conn, trimmed)?;
 
     // Total bills and sales today
     let (total_bills_count, total_sales_paise): (i64, i64) = conn.query_row(
@@ -2994,6 +3050,79 @@ mod tests {
             assert!(crate::auth::login(&auth, &conn, "0000", None).unwrap().is_none());
         }
         assert!(crate::auth::login(&auth, &conn, "1111", None).is_err());
+    }
+
+    #[test]
+    fn day_end_counts_cash_kept_and_only_real_cash_refunds() {
+        let (_d, mut conn) = setup();
+        let id = item(&mut conn, "Soap", 100_000);
+        let cust = upsert_customer(
+            &conn,
+            &CustomerPayload { id: None, name: "A".into(), phone: "1".into(), gstin: String::new(), address: String::new(), now: "2026-11-04T09:00:00Z".into() },
+        )
+        .unwrap();
+        let sale = |conn: &mut Connection, total: i64, pays: Vec<(&str, i64)>, customer: Option<i64>| {
+            let mut p = bill_payload(id, 1000);
+            p.customer_id = customer;
+            p.subtotal_paise = total;
+            p.total_paise = total;
+            p.lines[0].total_paise = total;
+            p.lines[0].unit_price_paise = total;
+            p.payments = pays.into_iter().map(|(m, a)| PaymentPayload { mode: m.into(), amount_paise: a }).collect();
+            create_bill(conn, &p).unwrap()
+        };
+        let note = |conn: &mut Connection, bill: i64, total: i64| {
+            create_credit_note(
+                conn,
+                &NewCreditNotePayload {
+                    bill_id: bill,
+                    reason: "r".into(),
+                    created_at: "2026-11-04T11:00:00Z".into(),
+                    lines: vec![CreditNoteLinePayload {
+                        item_id: Some(id),
+                        name_snapshot: "Item".into(),
+                        qty_milli: 100,
+                        unit_price_paise: 0,
+                        tax_rate_bp: 0,
+                        tax_paise: 0,
+                        total_paise: total,
+                        hsn_code: String::new(),
+                    }],
+                },
+            )
+            .unwrap()
+        };
+
+        // Rs 380 paid with Rs 500 cash: only Rs 380 stays in the drawer, and the payment row says so.
+        let b1 = sale(&mut conn, 38_000, vec![("cash", 50_000)], None);
+        let stored: i64 = conn.query_row("SELECT amount_paise FROM payments WHERE bill_id = ?1", [b1.bill_id], |r| r.get(0)).unwrap();
+        assert_eq!(stored, 38_000);
+        // Payments that do not cover the total are refused.
+        let mut short = bill_payload(id, 1000);
+        short.payments[0].amount_paise = 500;
+        assert!(create_bill(&mut conn, &short).is_err());
+
+        // Older data stored the tendered amount: fix the row to mimic it and re-check.
+        conn.execute("UPDATE payments SET amount_paise = 50000 WHERE bill_id = ?1", [b1.bill_id]).unwrap();
+        let e = get_day_end_expected_cash(&conn, "2026-11-04").unwrap();
+        assert_eq!(e.cash_sales_paise, 38_000);
+
+        // Return on a UPI sale and on a credit sale: no cash leaves the drawer.
+        let b2 = sale(&mut conn, 20_000, vec![("upi", 20_000)], None);
+        let b3 = sale(&mut conn, 30_000, vec![("credit", 30_000)], Some(cust));
+        note(&mut conn, b2.bill_id, 5_000);
+        note(&mut conn, b3.bill_id, 10_000);
+        assert_eq!(get_day_end_expected_cash(&conn, "2026-11-04").unwrap().cash_refunds_paise, 0);
+
+        // Half cash / half UPI sale: a Rs 100 return refunds Rs 50 in cash.
+        let b4 = sale(&mut conn, 40_000, vec![("cash", 20_000), ("upi", 20_000)], None);
+        note(&mut conn, b4.bill_id, 10_000);
+        assert_eq!(get_day_end_expected_cash(&conn, "2026-11-04").unwrap().cash_refunds_paise, 5_000);
+
+        // Credit + cash sale: the return clears the debt first, only the excess is cash.
+        let b5 = sale(&mut conn, 30_000, vec![("cash", 10_000), ("credit", 20_000)], Some(cust));
+        note(&mut conn, b5.bill_id, 25_000);
+        assert_eq!(get_day_end_expected_cash(&conn, "2026-11-04").unwrap().cash_refunds_paise, 5_000 + 5_000);
     }
 
     #[test]

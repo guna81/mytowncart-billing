@@ -43,3 +43,5 @@ LAN. Run these on a **copy** of real shop data (Settings → Backup first).
 5. Try to void the bill that has a credit note. Expect: refused.
 6. Reopen the saved bill. Expect: discount, round-off and HSN codes are shown and printed.
 7. Redeem loyalty points on a bill, then check the balance. Expect: points changed once.
+8. Pay a ₹380 cash bill with ₹500. At Day end, expected cash should rise by ₹380, not ₹500.
+9. Return an item from a UPI sale or a credit sale. Day end should show no cash refund.

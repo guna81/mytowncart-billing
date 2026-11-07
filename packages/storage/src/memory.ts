@@ -9,7 +9,7 @@
 
 import { formatInvoiceNumber, localIsoTimestamp, sortBatchesFifo, type ReportBill } from "@mytowncart-billing/core";
 import { setSessionToken } from "./session";
-import { buildCustomerLedger, type LedgerBill } from "./ledger";
+import { buildCustomerLedger, creditNoteCashRefunds, type LedgerBill } from "./ledger";
 import type {
   BillingRepository,
   BillFilter,
@@ -428,7 +428,19 @@ export class MemoryRepository implements BillingRepository {
       discountPaise: l.discountPaise ?? 0,
       hsnCode: l.hsnCode ?? "",
     }));
-    const payments: PaymentRow[] = bill.payments.map((p) => ({
+    // Record what the shop kept: change handed back comes off the cash rows.
+    const paid = bill.payments.reduce((s, p) => s + p.amountPaise, 0);
+    if (paid < bill.totalPaise) throw new Error("payments do not cover the bill total");
+    let change = paid - bill.totalPaise;
+    const kept = bill.payments.map((p) => ({ ...p }));
+    for (let i = kept.length - 1; i >= 0 && change > 0; i -= 1) {
+      if (kept[i]!.mode !== "cash") continue;
+      const take = Math.min(change, kept[i]!.amountPaise);
+      kept[i]!.amountPaise -= take;
+      change -= take;
+    }
+    if (change > 0) throw new Error("change cannot be more than the cash received");
+    const payments: PaymentRow[] = kept.filter((p) => p.amountPaise > 0).map((p) => ({
       id: this.nextIds.payment++,
       billId: id,
       mode: p.mode,
@@ -1295,11 +1307,13 @@ export class MemoryRepository implements BillingRepository {
       }
     }
 
+    const refunds = creditNoteCashRefunds(
+      [...this.bills.values()],
+      [...this.creditNotes.values()],
+    );
     let cashRefundsPaise = 0;
     for (const cn of this.creditNotes.values()) {
-      if (cn.createdAt.startsWith(prefix)) {
-        cashRefundsPaise += cn.totalPaise;
-      }
+      if (cn.createdAt.startsWith(prefix)) cashRefundsPaise += refunds.get(cn.id) ?? 0;
     }
 
     return {

@@ -103,3 +103,46 @@ export function buildCustomerLedger(
     entries,
   };
 }
+
+export interface RefundBill {
+  id: number;
+  totalPaise: number;
+  /** Payments as stored. */
+  payments: { mode: string; amountPaise: number }[];
+}
+
+export interface RefundNote {
+  id: number;
+  billId: number;
+  createdAt: string;
+  totalPaise: number;
+}
+
+/**
+ * Cash that left the drawer for each credit note (by note id). A note is settled
+ * first against what the customer still owes on that bill (no cash moves); the
+ * rest goes back in proportion to what was paid in cash versus UPI/card.
+ * Mirrors `cash_refunds_for_day` in the desktop shell.
+ */
+export function creditNoteCashRefunds(bills: RefundBill[], notes: RefundNote[]): Map<number, number> {
+  const byId = new Map(bills.map((b) => [b.id, b]));
+  const creditLeft = new Map<number, number>();
+  const out = new Map<number, number>();
+  for (const n of [...notes].sort((a, b) => a.billId - b.billId || a.id - b.id)) {
+    const bill = byId.get(n.billId);
+    if (!bill) continue;
+    const sum = (pred: (m: string) => boolean) =>
+      bill.payments.filter((p) => pred(p.mode)).reduce((s, p) => s + p.amountPaise, 0);
+    const credit = sum((m) => m === "credit");
+    const left = creditLeft.get(n.billId) ?? credit;
+    const applied = Math.max(0, Math.min(left, n.totalPaise));
+    creditLeft.set(n.billId, left - applied);
+    const paid = sum(() => true);
+    const change = Math.max(0, paid - bill.totalPaise);
+    const cashKept = Math.max(0, sum((m) => m === "cash") - change);
+    const nonCredit = paid - credit - change;
+    const rest = n.totalPaise - applied;
+    out.set(n.id, nonCredit > 0 ? Math.floor((rest * cashKept * 2 + nonCredit) / (2 * nonCredit)) : 0);
+  }
+  return out;
+}
