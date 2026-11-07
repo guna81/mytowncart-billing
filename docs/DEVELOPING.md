@@ -19,6 +19,7 @@ All run from the repo root.
 | `pnpm typecheck` | `tsc --noEmit` in every package + `cargo check` for the shell |
 | `pnpm test` | Vitest in every package + `cargo test` (Vitest runs with `--passWithNoTests` where a package has no tests yet) |
 | `pnpm build` | typecheck the web app and build it to `apps/web/dist` |
+| `pnpm seed` | seed realistic demo/dummy data into the local SQLite database (`tooling/scripts/seed-sqlite.py`) |
 | `pnpm --filter @mytowncart-billing/web dev` | browser-only UI on <http://localhost:5173> (in-memory data) |
 | `pnpm desktop:dev` | the real desktop app (SQLite, keychain, files) |
 | `pnpm desktop:build` | installers for the current OS |
@@ -31,7 +32,7 @@ All run from the repo root.
 
 - no Tauri ⇒ marketplace sync is disabled, backups show a "desktop app"
   notice, and the integration token lives in module memory;
-- a reload resets all data (no seeding; use the setup wizard first);
+- a reload resets all data in memory; load realistic dummy data anytime via **Settings → Demo & Sample Data** or programmatically using `seedDemoData(repo)` from `@mytowncart-billing/storage`;
 - `VITE_MTC_WEB_URL` / `VITE_MTC_API_URL` point the connector at a local
   backend if one is running (dev only, never in a shipped build).
 

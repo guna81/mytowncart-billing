@@ -12,6 +12,7 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
     "build": "pnpm --filter @mytowncart-billing/web build",
+    "seed": "python3 tooling/scripts/seed-sqlite.py",
     "desktop:dev": "pnpm --filter @mytowncart-billing/desktop dev",
     "desktop:build": "pnpm --filter @mytowncart-billing/desktop build"
   },

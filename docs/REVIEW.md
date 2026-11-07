@@ -204,7 +204,7 @@ Priority: **P0** = blocks real-world use · **P1** = expected within the first m
 | Whole-count rule | A count item with `0.5` only fails at save time (`line.count_qty_not_whole`), and the message falls through as the raw code | Validate on entry. Map every error code to a message (only 3 are mapped). |
 | GST flag | `gst_enabled` is stored but not used to hide tax UI or to switch invoice type (bill of supply vs tax invoice) | Honour it throughout. |
 | Held bills | The label is derived from the quantity sum, which gives "3.5 item(s)" for weight items | Use the line count and customer name. |
-| Dev vs desktop parity | The browser dev mode resets data on reload | Offer a demo-data seed so reviewers and contributors see realistic screens. |
+| Dev vs desktop parity | The browser dev mode resets data on reload | Done: `seedDemoData` and Settings Demo Data panel provide realistic sample data across all adapters. |
 | i18n | Some strings are hard-coded (void dialog, "N items match") | Add an ESLint rule or test that flags literals in JSX. |
 
 ---

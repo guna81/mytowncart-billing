@@ -43,6 +43,11 @@ future application commit/build:
   the published release in a browser; installation remains manual.
 - Shared date formatting and stock-alert helpers, plus additional update and
   repository coverage.
+- **Demo and dummy data seeding:** added `pnpm seed` CLI (`tooling/scripts/seed-sqlite.py`),
+  reusable `seedDemoData` in `@mytowncart-billing/storage`, and an in-app
+  "Demo & Sample Data" panel in Settings (translated in English, Tamil, and Hindi).
+- Fixed `get_day_end_expected_cash` in `apps/desktop/src-tauri/src/repo.rs` to query
+  `customer_payments.mode = 'cash'`.
 
 ## Operator details
 

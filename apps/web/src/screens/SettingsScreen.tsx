@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { APP_VERSION, formatQty, parseQty } from "@mytowncart-billing/core";
 import type { ShopProfile } from "@mytowncart-billing/storage";
 import { BackupPanel } from "../components/BackupPanel";
+import { DemoDataPanel } from "../components/DemoDataPanel";
 import { DiagnosticsPanel } from "../components/DiagnosticsPanel";
 import { LanServerPanel } from "../components/LanServerPanel";
 import { UpdateAvailableButton } from "../components/UpdateAvailableButton";
@@ -250,6 +251,7 @@ export function SettingsScreen() {
         <BackupPanel />
         <LanServerPanel />
         <DiagnosticsPanel />
+        <DemoDataPanel />
 
         <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-xs text-sm text-gray-600">
           <h2 className="font-semibold mb-2 text-gray-800">{t("settings.printer")}</h2>

@@ -2464,7 +2464,7 @@ pub fn get_day_end_expected_cash(conn: &Connection, date_prefix: &str) -> RepoRe
     let credit_received_paise: i64 = conn.query_row(
         "SELECT COALESCE(SUM(amount_paise), 0)
          FROM customer_payments
-         WHERE payment_mode = 'cash'
+         WHERE mode = 'cash'
            AND created_at LIKE ?1 || '%'",
         rusqlite::params![trimmed],
         |r| r.get(0),

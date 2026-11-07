@@ -12,3 +12,4 @@ export * from "./repository";
 export { TauriRepository, type InvokeFn } from "./tauri";
 export { MemoryRepository } from "./memory";
 export { HttpRepository, createHttpInvoker } from "./http";
+export * from "./seed";

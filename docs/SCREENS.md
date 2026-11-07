@@ -154,6 +154,9 @@ open. The browser build disables the button with an explanation.
   screens visited (ids collapsed) and errors (message only). *Show and copy
   report* produces the environment summary plus events, with recovery keys
   and token-like strings redacted. Nothing is sent automatically.
+- **Demo data:** load realistic products, categories, customers, suppliers,
+  purchases, held bills, and multi-day sales history into the active shop for
+  testing, demonstration, or browser development.
 - **Printer:** printing uses the system dialog.
 - **Language:** choose English, Tamil or Hindi; some text remains English.
 - **Updates (development):** a launch check reads GitHub Releases at most once

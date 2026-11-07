@@ -112,6 +112,7 @@ pnpm lint          # ESLint incl. the packages/core boundary rule
 pnpm typecheck
 pnpm test          # Vitest (+ passWithNoTests placeholders)
 pnpm build         # web UI
+pnpm seed          # seed realistic demo/dummy data into local SQLite
 pnpm --filter @mytowncart-billing/desktop test   # cargo test (migrations runner)
 pnpm --filter @mytowncart-billing/web dev   # browser-only UI (in-memory data)
 pnpm desktop:dev   # run the full desktop app (SQLite + keychain)
