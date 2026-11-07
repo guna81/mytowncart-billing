@@ -28,7 +28,14 @@ not rebuild desktop installers.
 - **Users and security:** PIN login with owner and cashier roles enforced in the
   app core, hashed PINs, an audit log of sensitive actions, and an access key for
   the LAN browser. Credit notes are limited to what was sold, customer balances
-  include credit notes, and loyalty points are saved with the bill.
+  include credit notes, and loyalty points are saved with the bill. Reports and
+  the Dashboard are owner-only; cashiers can still close the day.
+- **Billing accuracy:** bill discounts lower the total by exactly the discount on
+  mixed-GST carts, saved cash is the cash kept (change removed, older bills are
+  corrected on upgrade), day-end counts only real cash refunds, and voiding a
+  bill reverses its loyalty points.
+- **Releases:** pushing a version tag builds, publishes and refreshes the
+  website download section on its own; see [RELEASING.md](RELEASING.md).
 - **Language:** English, Tamil and Hindi selection in Settings. Some operational
   text remains English.
 - **Backups:** encrypted folder backups and a startup check that attempts a

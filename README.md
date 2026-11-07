@@ -40,6 +40,11 @@ orders and stock when online. Visit the [MyTownCart platform](https://mytowncart
 
 **Version 0.1.2 is available:** [v0.1.2 release notes](https://github.com/guna81/mytowncart-billing/releases/tag/v0.1.2).
 macOS and Linux are community builds; a failed platform build may have no download.
+Releases are published automatically when a version tag is pushed; the
+[website download section](https://guna81.github.io/mytowncart-billing/#download)
+follows the latest release and has install notes for each device
+([how releases work](docs/RELEASING.md)).
+
 See [all releases](https://github.com/guna81/mytowncart-billing/releases) for available
 installers and `checksums-<platform>.txt` files. Builds are unsigned; read the
 [installation notes](#installing-a-release-build) before installing.
