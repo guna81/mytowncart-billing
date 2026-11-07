@@ -20,28 +20,20 @@ release page so users can download and upgrade manually. Drafts and
 prereleases do not notify. Back up shop data before upgrading.
 See the [installation notes](../README.md#installing-a-release-build).
 
-## Stable download links
+## Stable and versioned download links
 
-The README links use this prefix followed by the exact filename below:
+Release assets are published with both versioned filenames (e.g. `MyTownCart-Billing-v0.1.2-windows-x64.exe`) and stable unversioned filenames (`MyTownCart-Billing-windows-x64.exe`).
 
-```text
-https://github.com/guna81/mytowncart-billing/releases/latest/download/
-```
+| Computer / format | Versioned filename (`download/vX.Y.Z/`) | Stable unversioned filename (`latest/download/`) | Checksum file |
+| --- | --- | --- | --- |
+| Windows x64 EXE | `MyTownCart-Billing-vX.Y.Z-windows-x64.exe` | `MyTownCart-Billing-windows-x64.exe` | `checksums-windows-x64.txt` |
+| Windows x64 MSI | `MyTownCart-Billing-vX.Y.Z-windows-x64.msi` | `MyTownCart-Billing-windows-x64.msi` | `checksums-windows-x64.txt` |
+| macOS Apple Silicon (M1+) | `MyTownCart-Billing-vX.Y.Z-macos-arm64.dmg` | `MyTownCart-Billing-macos-arm64.dmg` | `checksums-macos-arm64.txt` |
+| macOS Intel | `MyTownCart-Billing-vX.Y.Z-macos-x64.dmg` | `MyTownCart-Billing-macos-x64.dmg` | `checksums-macos-x64.txt` |
+| Debian / Ubuntu x64 | `MyTownCart-Billing-vX.Y.Z-linux-x64.deb` | `MyTownCart-Billing-linux-x64.deb` | `checksums-linux-x64.txt` |
+| Linux x64 AppImage | `MyTownCart-Billing-vX.Y.Z-linux-x64.AppImage` | `MyTownCart-Billing-linux-x64.AppImage` | `checksums-linux-x64.txt` |
 
-| Computer / format | Filename | Checksum file |
-| --- | --- | --- |
-| Windows x64 EXE | `MyTownCart-Billing-windows-x64.exe` | `checksums-windows-x64.txt` |
-| Windows x64 MSI | `MyTownCart-Billing-windows-x64.msi` | `checksums-windows-x64.txt` |
-| macOS Apple Silicon (M1 and newer) | `MyTownCart-Billing-macos-arm64.dmg` | `checksums-macos-arm64.txt` |
-| macOS Intel | `MyTownCart-Billing-macos-x64.dmg` | `checksums-macos-x64.txt` |
-| Debian / Ubuntu x64 | `MyTownCart-Billing-linux-x64.deb` | `checksums-linux-x64.txt` |
-| Linux x64 AppImage | `MyTownCart-Billing-linux-x64.AppImage` | `checksums-linux-x64.txt` |
-
-Keep these filenames unchanged so README and website buttons continue working.
-For a version-specific link, replace `latest/download/` with
-`download/v0.1.0/` (or the desired tag). Draft release assets are not public.
-If a community build fails, its installer may be absent from the latest release;
-the latest link does not fall back to an older version.
+Versioned filenames ensure downloaded files clearly display their version and platform name. The unversioned names are retained so permanent download links and automated scripts continue working.
 
 Download the installer and its matching checksum file from the same release.
 Compare the SHA-256 output with the entry for that filename:

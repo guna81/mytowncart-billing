@@ -22,13 +22,13 @@ orders and stock when online. Visit the [MyTownCart platform](https://mytowncart
 
 ## Download MyTownCart Billing
 
-- [Windows (64-bit)](https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-windows-x64.exe)
-- [macOS — Apple Silicon (M1 and newer)](https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-macos-arm64.dmg)
-- [macOS — Intel](https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-macos-x64.dmg)
-- [Linux — Debian / Ubuntu (64-bit)](https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-linux-x64.deb)
-- [Linux — AppImage (64-bit)](https://github.com/guna81/mytowncart-billing/releases/latest/download/MyTownCart-Billing-linux-x64.AppImage)
+- [Windows (64-bit EXE)](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-windows-x64.exe) · [MSI](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-windows-x64.msi)
+- [macOS — Apple Silicon (M1 and newer)](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-macos-arm64.dmg)
+- [macOS — Intel](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-macos-x64.dmg)
+- [Linux — Debian / Ubuntu (64-bit)](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-linux-x64.deb)
+- [Linux — AppImage (64-bit)](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-linux-x64.AppImage)
 
-**Version 0.1.0 is available:** [first public release](https://github.com/guna81/mytowncart-billing/releases/tag/v0.1.0).
+**Version 0.1.2 is available:** [v0.1.2 release notes](https://github.com/guna81/mytowncart-billing/releases/tag/v0.1.2).
 macOS and Linux are community builds; a failed platform build may have no download.
 See [all releases](https://github.com/guna81/mytowncart-billing/releases) for available
 installers and `checksums-<platform>.txt` files. Builds are unsigned; read the
@@ -36,16 +36,9 @@ installers and `checksums-<platform>.txt` files. Builds are unsigned; read the
 
 ## Recent improvements
 
-The current source adds a sales dashboard and charts, discounts and split
-payments, customer balances and payment collection, returns and credit notes,
-suppliers and purchase receiving, stock audits, barcode labels, day-end cash
-reconciliation, user/PIN records, loyalty balances, and English, Tamil and Hindi.
-Reports include profit summaries and GSTR-1 CSV datasets.
+The current release adds a restructured Add Item form with sticky footer, POS quick cash tender chips (Exact, ₹100, ₹200, ₹500, ₹2000), single-line collapsed held bills, always-visible Save & Print action, responsive hourly sales heatmaps, contrast improvements, sales dashboard and charts, discounts and split payments, customer balances and payment collection, returns and credit notes, suppliers and purchase receiving, stock audits, barcode labels, day-end cash reconciliation, user/PIN records, loyalty balances, and English, Tamil and Hindi. Reports include profit summaries and GSTR-1 CSV datasets.
 
-The latest published installer is **v0.1.0**. Features in newer source commits
-and local development changes are not automatically included in that installer.
-See [what changed](docs/WHATS-NEW.md) for the source/release distinction and
-[screen workflows](docs/SCREENS.md) for instructions.
+The latest published installer is **v0.1.2**. See [what changed](docs/WHATS-NEW.md) and [screen workflows](docs/SCREENS.md) for instructions.
 
 ## Billing and inventory features
 

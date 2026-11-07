@@ -11,10 +11,20 @@ def prepare(root: Path, output: Path, platform: str) -> list[Path]:
                   "macos-x64": [".dmg"], "linux-x64": [".deb", ".AppImage"]}[platform]
     output.mkdir(parents=True, exist_ok=True)
     assets = []
+    tag = os.environ.get("RELEASE_TAG", "").strip()
+    tag_prefix = f"-{tag}" if tag else ""
     for extension in extensions:
         matches = sorted(p for p in root.rglob(f"*{extension}") if "bundle" in p.parts)
         if len(matches) != 1:
             raise RuntimeError(f"Expected one {extension} installer, found {matches}")
+
+        # Versioned installer filename: MyTownCart-Billing-vX.Y.Z-platform.ext
+        if tag_prefix:
+            dest_versioned = output / f"MyTownCart-Billing{tag_prefix}-{platform}{extension}"
+            shutil.copy2(matches[0], dest_versioned)
+            assets.append(dest_versioned)
+
+        # Stable unversioned filename: MyTownCart-Billing-platform.ext
         destination = output / f"MyTownCart-Billing-{platform}{extension}"
         shutil.copy2(matches[0], destination)
         assets.append(destination)
