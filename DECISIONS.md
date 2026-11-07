@@ -153,8 +153,10 @@ need the owner; other keys (backup/sync status, caches) are written by backgroun
 jobs, even while the terminal is locked, so they are open. `/api/photos` needs the access key like every other
 LAN data request, and no response carries CORS headers.
 
-Deliberately not gated: reads through `query_rows`. Reports and the day-end
-count are what a cashier closes the till with, so they stay readable; hiding
-revenue from cashiers would need a separate "till-only" report set first. The
-sync/backup commands are not reachable from the LAN server. A forgotten owner
+Reports and the Dashboard read `get_bills_report_data`, which is owner-only, so
+cashiers no longer see revenue or profit. The day-end count uses its own
+command (`get_day_end_expected_cash`) and stays open, so a cashier can still
+close the till. Other lists a cashier needs to sell (items, customers, bills)
+are readable. The sync/backup commands are not reachable from the LAN server.
+A forgotten owner
 PIN is reset offline by clearing `user_pins` (see PILOT.md).

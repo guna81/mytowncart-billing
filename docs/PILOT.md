@@ -43,7 +43,7 @@ versus the published installer. LAN access is a development feature; follow
 ## Every day
 
 - Bill with the scanner; use *Hold (F4)* for a customer who steps away.
-- At close: review **Reports** and **Day end**. Enter opening cash and
+- At close: the owner reviews **Reports**; whoever closes the till uses **Day end**. Enter opening cash and
   denomination counts, compare expected cash with counted cash, save the
   closure and print the Z-report. Reconcile UPI/card totals with those services.
 - Run *Sync now* (MyTownCart → Sync) before closing, and read the problems

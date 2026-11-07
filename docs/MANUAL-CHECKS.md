@@ -46,3 +46,6 @@ LAN. Run these on a **copy** of real shop data (Settings → Backup first).
 8. Pay a ₹380 cash bill with ₹500. At Day end, expected cash should rise by ₹380, not ₹500.
 9. Return an item from a UPI sale or a credit sale. Day end should show no cash refund.
 10. Give a customer loyalty points, make a bill that earns and redeems points, then void it as the owner. Expect: the customer's balance returns to what it was before the bill, and the history shows a "Reversed: bill voided" row.
+11. Upgrade a copy of a real database that has older bills paid with a larger note than the bill total. Expect: the sales-by-payment-mode report shows cash kept (change removed), and a pre-migration copy exists in `backups-local/`.
+12. Log in as a cashier. Expect: no Reports or Dashboard in the sidebar, `#/reports` shows the owner-only message, and Day end still opens.
+13. Make a bill with a discount on items with different GST rates. Expect: the total is exactly the undiscounted total minus the discount.

@@ -69,6 +69,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "user_pins",
         sql: include_str!("../migrations/0009_user_pins.sql"),
     },
+    Migration {
+        version: 10,
+        name: "payments_cash_kept",
+        sql: include_str!("../migrations/0010_payments_cash_kept.sql"),
+    },
 ];
 
 #[derive(Debug, Error)]
@@ -233,6 +238,52 @@ mod tests {
         )
         .unwrap()
             > 0
+    }
+
+    #[test]
+    fn migration_10_takes_change_back_off_legacy_cash_payments() {
+        let dir = TempDir::new().unwrap();
+        let path = db_path(&dir);
+        migrate_with(&path, &MIGRATIONS[..9]).unwrap();
+        {
+            let c = Connection::open(&path).unwrap();
+            for (n, total) in [("A", 38_000), ("B", 38_000), ("C", 38_000)] {
+                c.execute(
+                    "INSERT INTO bills (number, fy, subtotal_paise, tax_paise, total_paise, created_at)
+                     VALUES (?1, '2026-27', ?2, 0, ?2, '2026-11-01T10:00:00')",
+                    rusqlite::params![n, total],
+                )
+                .unwrap();
+            }
+            // A: Rs 500 note for a Rs 380 bill. B: UPI 300 + cash 200 for 380 (change 120).
+            // C: paid exactly.
+            for (bill, mode, amt) in [
+                (1, "cash", 50_000),
+                (2, "upi", 30_000),
+                (2, "cash", 20_000),
+                (3, "cash", 38_000),
+            ] {
+                c.execute(
+                    "INSERT INTO payments (bill_id, mode, amount_paise) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![bill, mode, amt],
+                )
+                .unwrap();
+            }
+        }
+        migrate_with(&path, MIGRATIONS).unwrap();
+        let c = Connection::open(&path).unwrap();
+        let sum = |bill: i64, mode: &str| -> i64 {
+            c.query_row(
+                "SELECT COALESCE(SUM(amount_paise), 0) FROM payments WHERE bill_id = ?1 AND mode = ?2",
+                rusqlite::params![bill, mode],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(sum(1, "cash"), 38_000);
+        assert_eq!(sum(2, "upi"), 30_000);
+        assert_eq!(sum(2, "cash"), 8_000);
+        assert_eq!(sum(3, "cash"), 38_000);
     }
 
     #[test]

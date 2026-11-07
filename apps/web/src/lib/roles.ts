@@ -10,6 +10,8 @@ import { getRepository } from "./repository";
 /** Routes only an owner may open (the matching commands are owner-only in Rust). */
 export const OWNER_ONLY_ROUTES: readonly string[] = [
   "/users",
+  "/reports",
+  "/dashboard",
   "/settings",
   "/suppliers",
   "/purchases",

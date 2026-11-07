@@ -197,7 +197,8 @@ Z-report. Earlier closures remain available for review.
 - **Cashier** can bill, hold bills, look things up, receive customer payments
   and close the day. Cashiers cannot void bills, adjust stock, run stock audits,
   issue credit notes, record purchases, edit suppliers or items, delete
-  customers, change Settings, or manage users. Those screens and buttons are
+  customers, change Settings, manage users, or open Reports and the
+  Dashboard (sales and profit figures). Those screens and buttons are
   hidden, and the app refuses the action even if it is reached another way.
 
 PINs are 4–6 digits and stored hashed. The first user you add must be an owner;

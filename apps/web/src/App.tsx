@@ -83,7 +83,7 @@ export function App() {
         <ErrorBoundary>
           <Routes>
             <Route path="/" element={<PosScreen />} />
-            <Route path="/dashboard" element={<DashboardScreen />} />
+            <Route path="/dashboard" element={<OwnerOnly><DashboardScreen /></OwnerOnly>} />
             <Route path="/items" element={<ItemsScreen />} />
             <Route path="/items/labels" element={<BarcodeLabelsScreen />} />
             <Route path="/items/new" element={<OwnerOnly><ItemFormScreen /></OwnerOnly>} />
@@ -98,7 +98,7 @@ export function App() {
             <Route path="/stock-audit" element={<OwnerOnly><StockAuditScreen /></OwnerOnly>} />
             <Route path="/day-end" element={<DayEndScreen />} />
             <Route path="/users" element={<OwnerOnly><UsersScreen /></OwnerOnly>} />
-            <Route path="/reports" element={<ReportsScreen />} />
+            <Route path="/reports" element={<OwnerOnly><ReportsScreen /></OwnerOnly>} />
             <Route path="/mytowncart" element={<OwnerOnly><MyTownCartScreen /></OwnerOnly>} />
             <Route path="/settings" element={<OwnerOnly><SettingsScreen /></OwnerOnly>} />
             <Route path="*" element={<Navigate to="/" replace />} />

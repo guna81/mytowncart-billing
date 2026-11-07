@@ -121,7 +121,29 @@ describe("computeBill", () => {
       ],
       { pricesIncludeTax: false, billDiscountPaise: 10_000 },
     );
-    expect(Math.abs(mixed.totalPaise - (59_000 + 52_500 - 10_000))).toBeLessThanOrEqual(2);
+    expect(mixed.totalPaise).toBe(59_000 + 52_500 - 10_000);
+  });
+
+  it("bill discount is exact on awkward mixed-rate carts", () => {
+    for (const discount of [1, 7, 333, 1_234, 9_999]) {
+      const bill = computeBill(
+        [
+          line({ itemId: 1, unitPricePaise: 3_337, taxRateBp: 1800, qtyMilli: 3000 }),
+          line({ itemId: 2, unitPricePaise: 1_999, taxRateBp: 500, qtyMilli: 7000 }),
+          line({ itemId: 3, unitPricePaise: 4_501, taxRateBp: 1200, qtyMilli: 1000 }),
+        ],
+        { pricesIncludeTax: false },
+      );
+      const discounted = computeBill(
+        [
+          line({ itemId: 1, unitPricePaise: 3_337, taxRateBp: 1800, qtyMilli: 3000 }),
+          line({ itemId: 2, unitPricePaise: 1_999, taxRateBp: 500, qtyMilli: 7000 }),
+          line({ itemId: 3, unitPricePaise: 4_501, taxRateBp: 1200, qtyMilli: 1000 }),
+        ],
+        { pricesIncludeTax: false, billDiscountPaise: discount },
+      );
+      expect(discounted.totalPaise).toBe(bill.totalPaise - discount);
+    }
   });
 
   it("bill discount is exact on tax-inclusive prices", () => {

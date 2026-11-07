@@ -187,8 +187,10 @@ fn get_bills_report_data(
     state: tauri::State<'_, AppState>,
     from: Option<String>,
     to: Option<String>,
+    session: Option<String>,
 ) -> Result<Vec<repo::ReportBillData>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    state.auth.authorize(&conn, "get_bills_report_data", session.as_deref())?;
     repo::get_bills_report_data(&conn, from.as_deref(), to.as_deref())
 }
 

@@ -3070,6 +3070,8 @@ mod tests {
         assert!(auth.authorize(&conn, "create_bill", Some(&cashier)).is_ok());
         assert!(auth.authorize(&conn, "void_bill", Some(&cashier)).is_err());
         assert!(auth.authorize(&conn, "upsert_user", Some(&cashier)).is_err());
+        assert!(auth.authorize(&conn, "get_bills_report_data", Some(&cashier)).is_err());
+        assert!(auth.authorize(&conn, "get_day_end_expected_cash", Some(&cashier)).is_ok());
         // Settings: routine keys stay open to background jobs, exposure/branding keys need the owner.
         assert!(auth.authorize_setting(&conn, "backup.local", None).is_ok());
         assert!(auth.authorize_setting(&conn, "lan.autostart", None).is_err());

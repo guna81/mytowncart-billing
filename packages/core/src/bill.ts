@@ -109,6 +109,40 @@ export function computeBill(
         const netShare = opts.pricesIncludeTax || bp === 0 ? share : roundDiv(share * 10_000, 10_000 + bp);
         return d + netShare;
       });
+
+      // Per-line rounding can leave the total a paise or two away from
+      // "before-discount total minus the discount". Nudge single lines (largest
+      // first) by one paisa at a time until the payable total is exact.
+      const wanted = weightSum - Math.min(billDiscount, weightSum);
+      const lineTotal = (i: number, d: number) =>
+        computeLineAmounts({
+          qtyMilli: lines[i]!.qtyMilli,
+          unitPricePaise: lines[i]!.unitPricePaise,
+          taxRateBp: lines[i]!.taxRateBp,
+          pricesIncludeTax: opts.pricesIncludeTax,
+          discountPaise: d,
+        }).totalPaise;
+      const totals = finalDiscounts.map((d, i) => lineTotal(i, d));
+      let off = totals.reduce((a, b) => a + b, 0) - wanted;
+      const order = weights.map((_, i) => i).sort((a, b) => weights[b]! - weights[a]!);
+      for (let guard = 0; off !== 0 && guard < 50; guard++) {
+        let moved = false;
+        for (const i of order) {
+          const step = off > 0 ? 1 : -1; // more discount lowers the total
+          const d = finalDiscounts[i]! + step;
+          if (d < (lines[i]!.discountPaise ?? 0)) continue;
+          const t = lineTotal(i, d);
+          const next = off - totals[i]! + t;
+          if (t >= 0 && Math.abs(next) < Math.abs(off)) {
+            finalDiscounts[i] = d;
+            totals[i] = t;
+            off = next;
+            moved = true;
+            break;
+          }
+        }
+        if (!moved) break;
+      }
     }
   }
 

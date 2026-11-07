@@ -31,4 +31,5 @@ export const SESSION_GATED_COMMANDS: ReadonlySet<string> = new Set([
   "save_shop_profile",
   "list_audit_logs",
   "set_app_setting",
+  "get_bills_report_data",
 ]);
