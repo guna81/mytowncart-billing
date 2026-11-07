@@ -3,75 +3,125 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MyTownCart Billing — Free, Open-Source Billing Software for Local Shops</title>
-<meta name="description" content="Free, open-source desktop billing software for local shops: POS billing, GST invoices, barcode scanning, receipt printing, inventory, and sales reports.">
+<title>MyTownCart Billing — Free GST Billing Software &amp; POS for Local Shops</title>
+<meta name="description" content="Free, open-source billing software for kirana and retail shops in India: GST invoices, barcode POS, 58/80 mm receipt printing, inventory and sales reports. Works offline on Windows.">
+<meta name="keywords" content="free billing software, GST billing software, POS software for shop, kirana billing software, open source POS, barcode billing, inventory management, offline billing software">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta name="author" content="MyTownCart">
+<meta name="theme-color" content="#1d4ed8">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://guna81.github.io/mytowncart-billing/">
-<meta property="og:title" content="MyTownCart Billing — Free billing software for local shops">
-<meta property="og:description" content="Free, open-source POS, GST invoicing and inventory for small retail shops. Works offline.">
+<link rel="sitemap" type="application/xml" href="sitemap.xml">
+<link rel="preload" as="image" href="screenshots/billing.png" fetchpriority="high">
+<meta property="og:site_name" content="MyTownCart Billing">
+<meta property="og:title" content="MyTownCart Billing — Free GST billing software for local shops">
+<meta property="og:description" content="Open-source POS, GST invoicing, barcode scanning and inventory for small retail shops. Works offline.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://guna81.github.io/mytowncart-billing/">
+<meta property="og:locale" content="en_IN">
+<meta property="og:image" content="https://guna81.github.io/mytowncart-billing/screenshots/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="MyTownCart Billing dashboard with daily sales, payment mix and top items">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="MyTownCart Billing — Free GST billing software for local shops">
+<meta name="twitter:description" content="Open-source POS, GST invoicing, barcode scanning and inventory. Works offline.">
+<meta name="twitter:image" content="https://guna81.github.io/mytowncart-billing/screenshots/og.png">
 <style>
-:root{--bg:#fff;--fg:#0f172a;--muted:#475569;--card:#f8fafc;--line:#e2e8f0;--brand:#1d4ed8;--brand-fg:#fff;--accent:#10b981}
-@media (prefers-color-scheme:dark){:root{--bg:#0b1220;--fg:#e5e7eb;--muted:#94a3b8;--card:#111a2e;--line:#1e293b;--brand:#3b82f6;--accent:#34d399}}
+:root{--bg:#fff;--fg:#0f172a;--muted:#475569;--card:#f8fafc;--line:#e2e8f0;--brand:#1d4ed8;--brand-2:#0ea5e9;--brand-fg:#fff;--accent:#10b981;--glow:rgba(29,78,216,.10);--shadow:0 10px 30px rgba(15,23,42,.10);--hdr:rgba(255,255,255,.82)}
+@media (prefers-color-scheme:dark){:root{--bg:#0b1220;--fg:#e5e7eb;--muted:#9fb0c7;--card:#111a2e;--line:#1e293b;--brand:#3b82f6;--brand-2:#38bdf8;--accent:#34d399;--glow:rgba(59,130,246,.16);--shadow:0 10px 30px rgba(0,0,0,.45);--hdr:rgba(11,18,32,.82)}}
 *{box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+html{scroll-behavior:smooth;scroll-padding-top:84px}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
 a{color:var(--brand)}
-.wrap{max-width:1040px;margin:0 auto;padding:0 20px}
-header{border-bottom:1px solid var(--line)}
-header .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-top:14px;padding-bottom:14px;flex-wrap:wrap}
-header img{height:44px;display:block}
+a:focus-visible,summary:focus-visible,.btn:focus-visible{outline:3px solid var(--brand-2);outline-offset:2px;border-radius:8px}
+.skip{position:absolute;left:-999px;top:8px;background:var(--brand);color:#fff;padding:8px 14px;border-radius:8px;z-index:100}
+.skip:focus{left:8px}
+.wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+header{position:sticky;top:0;z-index:50;background:var(--hdr);backdrop-filter:saturate(1.4) blur(12px);-webkit-backdrop-filter:saturate(1.4) blur(12px);border-bottom:1px solid var(--line)}
+header .wrap{display:flex;align-items:center;justify-content:space-between;gap:12px 16px;padding-top:10px;padding-bottom:10px;flex-wrap:wrap}
+header img{height:40px;width:auto;display:block}
 .light-logo{display:none}
 @media (prefers-color-scheme:dark){.dark-logo{display:none}.light-logo{display:block}}
-nav a{margin-left:18px;text-decoration:none;color:var(--muted);font-size:15px}
+nav{display:flex;align-items:center;gap:4px 18px;flex-wrap:wrap}
+nav a{text-decoration:none;color:var(--muted);font-size:15px;font-weight:500}
 nav a:hover{color:var(--fg)}
-.hero{padding:72px 0 56px;text-align:center}
-.hero h1{font-size:clamp(2rem,5vw,3.25rem);line-height:1.15;margin:0 0 16px;letter-spacing:-.02em}
-.hero p{max-width:640px;margin:0 auto 28px;color:var(--muted);font-size:1.125rem}
-.btn{display:inline-block;padding:12px 22px;border-radius:10px;background:var(--brand);color:var(--brand-fg);text-decoration:none;font-weight:600;margin:4px}
-.btn.alt{background:transparent;color:var(--fg);border:1px solid var(--line)}
+nav a.cta{background:var(--brand);color:var(--brand-fg);padding:7px 16px;border-radius:999px;font-weight:600}
+nav a.cta:hover{color:var(--brand-fg);filter:brightness(1.1)}
+.hero{padding:64px 0 24px;text-align:center;background:radial-gradient(60% 50% at 50% 0,var(--glow),transparent 70%)}
+.eyebrow{display:inline-block;font-size:13px;font-weight:600;color:var(--brand);background:var(--glow);border:1px solid var(--line);padding:4px 12px;border-radius:999px;margin-bottom:18px}
+.hero h1{font-size:clamp(2.1rem,5.4vw,3.6rem);line-height:1.1;margin:0 0 18px;letter-spacing:-.03em}
+.hero h1 span{background:linear-gradient(90deg,var(--brand),var(--brand-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p.lead{max-width:680px;margin:0 auto 28px;color:var(--muted);font-size:1.15rem}
+.btn{display:inline-block;padding:13px 26px;border-radius:12px;background:var(--brand);color:var(--brand-fg);text-decoration:none;font-weight:600;margin:4px;box-shadow:0 6px 16px var(--glow);transition:transform .15s,filter .15s}
+.btn:hover{transform:translateY(-1px);filter:brightness(1.08)}
+.btn.alt{background:transparent;color:var(--fg);border:1px solid var(--line);box-shadow:none}
 .note{font-size:14px;color:var(--muted);margin-top:14px}
-section{padding:48px 0}
-h2{font-size:1.75rem;margin:0 0 8px;letter-spacing:-.01em}
-.sub{color:var(--muted);margin:0 0 28px}
+.badges{list-style:none;display:flex;flex-wrap:wrap;justify-content:center;gap:8px 10px;padding:0;margin:22px 0 0}
+.badges li{font-size:13px;font-weight:500;color:var(--muted);border:1px solid var(--line);background:var(--card);border-radius:999px;padding:4px 12px;margin:0}
+.badges li::before{content:"✓ ";color:var(--accent);font-weight:700}
+.frame{max-width:960px;margin:44px auto 0;border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:var(--shadow);background:var(--card)}
+.frame .bar{display:flex;gap:6px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.frame .bar i{width:10px;height:10px;border-radius:50%;background:var(--line);display:block}
+.frame img{display:block;width:100%;height:auto}
+section{padding:56px 0}
+section.alt{background:var(--card);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.kicker{font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--brand);margin:0 0 6px}
+h2{font-size:clamp(1.55rem,3.4vw,2.1rem);line-height:1.2;margin:0 0 8px;letter-spacing:-.02em}
+.sub{color:var(--muted);margin:0 0 30px;max-width:680px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;transition:transform .15s,box-shadow .15s,border-color .15s}
+section.alt .card{background:var(--bg)}
+.card:hover{transform:translateY(-2px);box-shadow:var(--shadow);border-color:var(--brand)}
+.card .ic{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:var(--glow);color:var(--brand);margin-bottom:12px}
+.card .ic svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .card h3{margin:0 0 6px;font-size:1.05rem}
 .card p{margin:0;color:var(--muted);font-size:15px}
-.dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
-.dl a{display:block;padding:14px 16px;border:1px solid var(--line);border-radius:12px;text-decoration:none;color:var(--fg);background:var(--card)}
+.dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.dl a{display:block;padding:16px 18px;border:1px solid var(--line);border-radius:14px;text-decoration:none;color:var(--fg);background:var(--card);transition:border-color .15s,transform .15s}
 .dl a small{display:block;color:var(--muted)}
-.dl a:hover{border-color:var(--brand)}
+.dl a:hover{border-color:var(--brand);transform:translateY(-1px)}
 .dl a.rec{border-color:var(--brand);box-shadow:0 0 0 2px var(--brand) inset}
 .dl a[hidden]{display:none}
 .detected{padding:10px 14px;border-radius:10px;background:var(--card);border:1px solid var(--brand)}
-h3.inst{margin:28px 0 10px}
+h3.inst{margin:32px 0 10px}
 ol{padding-left:20px}
 ol li{margin-bottom:8px}
 details{border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:10px;background:var(--card)}
+details[open]{border-color:var(--brand)}
+section.alt details{background:var(--bg)}
 summary{cursor:pointer;font-weight:600}
 details p{color:var(--muted);margin:8px 0 0}
 code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px}
+code{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:1px 6px}
 pre{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto}
-.shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
+.shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px}
 .shots figure{margin:0}
-.shots img{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(15,23,42,.12)}
-.shots figcaption{margin-top:8px;color:var(--muted);font-size:14px;text-align:center}
-footer{border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:14px}
+.shots img{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);transition:transform .2s}
+.shots a:hover img{transform:scale(1.015)}
+.shots figcaption{margin-top:10px;color:var(--muted);font-size:14px;text-align:center}
+.steps{counter-reset:s;list-style:none;padding:0;display:grid;gap:12px}
+.steps li{counter-increment:s;position:relative;padding:14px 16px 14px 56px;border:1px solid var(--line);border-radius:14px;background:var(--card);margin:0}
+.steps li::before{content:counter(s);position:absolute;left:14px;top:50%;transform:translateY(-50%);width:30px;height:30px;border-radius:50%;background:var(--brand);color:#fff;font-weight:700;display:grid;place-items:center;font-size:14px}
+footer{border-top:1px solid var(--line);padding:32px 0;color:var(--muted);font-size:14px}
 footer a{color:var(--muted)}
+footer .wrap{display:flex;flex-wrap:wrap;gap:8px 18px;justify-content:space-between}
+@media (max-width:640px){header img{height:34px}nav a:not(.cta){display:none}.hero{padding-top:40px}section{padding:40px 0}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 </style>
+
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"SoftwareApplication","name":"MyTownCart Billing","applicationCategory":"BusinessApplication","operatingSystem":"Windows, macOS, Linux","offers":{"@type":"Offer","price":"0","priceCurrency":"INR"},"license":"https://www.apache.org/licenses/LICENSE-2.0","url":"https://guna81.github.io/mytowncart-billing/","codeRepository":"https://github.com/guna81/mytowncart-billing"}
+{"@context": "https://schema.org", "@graph": [{"@type": "WebSite", "@id": "https://guna81.github.io/mytowncart-billing/#website", "url": "https://guna81.github.io/mytowncart-billing/", "name": "MyTownCart Billing", "inLanguage": "en-IN"}, {"@type": "SoftwareApplication", "@id": "https://guna81.github.io/mytowncart-billing/#app", "name": "MyTownCart Billing", "description": "Free, open-source desktop billing software and POS for local shops: GST invoices, barcode scanning, receipt printing, inventory and sales reports.", "applicationCategory": "BusinessApplication", "applicationSubCategory": "Point of Sale", "operatingSystem": "Windows, macOS, Linux", "softwareVersion": "0.1.0", "isAccessibleForFree": true, "offers": {"@type": "Offer", "price": "0", "priceCurrency": "INR"}, "license": "https://www.apache.org/licenses/LICENSE-2.0", "url": "https://guna81.github.io/mytowncart-billing/", "downloadUrl": "https://github.com/guna81/mytowncart-billing/releases", "codeRepository": "https://github.com/guna81/mytowncart-billing", "image": "https://guna81.github.io/mytowncart-billing/screenshots/og.png", "screenshot": ["https://guna81.github.io/mytowncart-billing/screenshots/billing.png", "https://guna81.github.io/mytowncart-billing/screenshots/dashboard.png", "https://guna81.github.io/mytowncart-billing/screenshots/items.png"], "featureList": ["Retail POS billing with barcode scanning", "GST invoices with CGST/SGST", "58 mm and 80 mm receipts and A4 invoices", "Cash, UPI, card and customer credit recording", "Inventory with low-stock alerts", "Sales reports with CSV export", "Encrypted backups", "Works offline"]}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Is it really free and open source?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, under the Apache License 2.0. The MyTownCart name and logo are covered by a trademark policy, so forks must use a different name."}}, {"@type": "Question", "name": "Does it work offline?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Everyday billing uses local storage. Publishing and syncing with MyTownCart need internet and a linked account."}}, {"@type": "Question", "name": "Does it support GST and receipt printers?", "acceptedAnswer": {"@type": "Answer", "text": "Yes: shop GST settings, item tax rates, CGST/SGST, A4 invoices, and 58 mm / 80 mm receipts via the system print dialog."}}, {"@type": "Question", "name": "Does recording UPI or card process the payment?", "acceptedAnswer": {"@type": "Answer", "text": "No. The POS records the payment mode on the bill; complete the payment with your usual UPI or card service."}}]}]}
 </script>
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 <header><div class="wrap">
   <a href="./" aria-label="MyTownCart Billing home">
     <img class="dark-logo" src="brand/logo-full.svg" alt="MyTownCart Billing">
     <img class="light-logo" src="brand/logo-full-light.svg" alt="MyTownCart Billing">
   </a>
-  <nav>
+  <nav aria-label="Main">
     <a href="#features">Features</a>
     <a href="#screenshots">Screenshots</a>
     <a href="#improvements">What’s new</a>
@@ -79,37 +129,48 @@ footer a{color:var(--muted)}
     <a href="#start">Get started</a>
     <a href="#faq">FAQ</a>
     <a href="https://github.com/guna81/mytowncart-billing">GitHub</a>
+    <a class="cta" href="#download">Download</a>
   </nav>
 </div></header>
 
-<main>
+<main id="main">
 <div class="wrap">
   <div class="hero">
-    <h1>Free billing software for your local shop</h1>
-    <p>Open-source desktop POS with GST invoices, barcode scanning, receipt printing, inventory and sales reports. Works offline on your own computer.</p>
+    <span class="eyebrow">Free &amp; open source · Apache 2.0</span>
+    <h1>Free GST billing software<br><span>for your local shop</span></h1>
+    <p class="lead">Open-source desktop POS with GST invoices, barcode scanning, receipt printing, inventory and sales reports. Works offline on your own computer.</p>
     <a class="btn" href="#download">Download free</a>
     <a class="btn alt" href="https://github.com/guna81/mytowncart-billing">View on GitHub</a>
-    <p class="note">Version 0.1.0 · Apache 2.0 licensed · Windows is the supported platform</p>
+    <p class="note">Version 0.1.0 · Windows is the supported platform</p>
+    <ul class="badges">
+      <li>Works offline</li><li>No subscription</li><li>GST ready</li><li>Data stays on your PC</li>
+    </ul>
+    <div class="frame" aria-hidden="false">
+      <div class="bar"><i></i><i></i><i></i></div>
+      <img src="screenshots/billing.png" width="1366" height="800" fetchpriority="high" alt="MyTownCart Billing counter screen with five items in the bill, payment options and a total of ₹412.00">
+    </div>
   </div>
 
   <section id="features">
+    <p class="kicker">Features</p>
     <h2>Everything a small shop needs</h2>
     <p class="sub">Bill fast at the counter and keep stock under control.</p>
     <div class="grid">
-      <div class="card"><h3>Retail POS billing</h3><p>Add products by barcode or name, change quantities, and hold and resume bills.</p></div>
-      <div class="card"><h3>GST invoices</h3><p>GST registration, tax-inclusive or exclusive prices, and CGST/SGST calculations.</p></div>
-      <div class="card"><h3>Receipts &amp; invoices</h3><p>Preview and print 58 mm or 80 mm receipts and A4 invoices.</p></div>
-      <div class="card"><h3>Payment recording</h3><p>Record cash, UPI, card and customer credit sales, with change calculation.</p></div>
-      <div class="card"><h3>Product catalog</h3><p>Prices, MRP, barcodes, categories, units, photos, and CSV import/export.</p></div>
-      <div class="card"><h3>Inventory</h3><p>Stock levels, low-stock indicators, adjustments, and movement history.</p></div>
-      <div class="card"><h3>Customer records</h3><p>Names and phone numbers linked to bills and credit sales.</p></div>
-      <div class="card"><h3>Sales reports</h3><p>Daily sales, item sales, and payment-mode totals with CSV downloads.</p></div>
-      <div class="card"><h3>Encrypted backups</h3><p>Back up and restore to a folder you choose, protected by a recovery key.</p></div>
-      <div class="card"><h3>MyTownCart integration</h3><p>Optionally publish products and sync marketplace orders and stock when online.</p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l2.4 10.2a1 1 0 0 0 1 .8h8.2a1 1 0 0 0 1-.8L19 8H6"/><circle cx="9" cy="19" r="1.2"/><circle cx="17" cy="19" r="1.2"/></svg></div><h3>Retail POS billing</h3><p>Add products by barcode or name, change quantities, and hold and resume bills.</p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l3 3v15H6z"/><path d="M9 11h6M9 15h6"/></svg></div><h3>GST invoices</h3><p>GST registration, tax-inclusive or exclusive prices, and CGST/SGST calculations.</p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 9V3h10v6"/><rect x="4" y="9" width="16" height="8" rx="2"/><path d="M7 14h10v7H7z"/></svg></div><h3>Receipts &amp; invoices</h3><p>Preview and print 58 mm or 80 mm receipts and A4 invoices.</p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg></div><h3>Payment recording</h3><p>Record cash, UPI, card and customer credit sales, with change calculation.</p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg></div><h3>Product catalog</h3><p>Prices, MRP, barcodes, categories, units, photos, and CSV import/export.</p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></div><h3>Inventory</h3><p>Stock levels, low-stock indicators, adjustments, and movement history.</p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/></svg></div><h3>Customer records</h3><p>Names and phone numbers linked to bills and credit sales.</p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16h16"/><path d="m8 15 3-4 3 2 4-6"/></svg></div><h3>Sales reports</h3><p>Daily sales, item sales, and payment-mode totals with CSV downloads.</p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div><h3>Encrypted backups</h3><p>Back up and restore to a folder you choose, protected by a recovery key.</p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 18.700l1-1"/></svg></div><h3>MyTownCart integration</h3><p>Optionally publish products and sync marketplace orders and stock when online.</p></div>
     </div>
   </section>
 
   <section id="improvements">
+    <p class="kicker">What’s new</p>
     <h2>More ways to run your shop</h2>
     <p class="sub">Recent source improvements · November 6, 2026</p>
     <p>The latest published installer is <strong>v0.1.0</strong>. The improvements below describe current source development and may require a newer build. Publishing this website does not update the installer.</p>
@@ -125,17 +186,19 @@ footer a{color:var(--muted)}
   </section>
 
   <section id="screenshots">
+    <p class="kicker">Screenshots</p>
     <h2>See it in action</h2>
     <p class="sub">Billing, dashboard and item catalog, shown with sample shop data.</p>
     <div class="shots">
-      <figure><a href="screenshots/billing.png"><img src="screenshots/billing.png" width="1366" height="800" loading="lazy" alt="MyTownCart Billing counter screen with five items in the bill, payment options and a total of ₹412.00"></a><figcaption>Billing counter: scan items, take payment, save &amp; print</figcaption></figure>
-      <figure><a href="screenshots/dashboard.png"><img src="screenshots/dashboard.png" width="1366" height="800" loading="lazy" alt="MyTownCart Billing dashboard showing today's sales, payment breakdown chart and top selling items"></a><figcaption>Dashboard: daily sales, payment mix and top sellers</figcaption></figure>
-      <figure><a href="screenshots/items.png"><img src="screenshots/items.png" width="1366" height="800" loading="lazy" alt="MyTownCart Billing item catalog listing products with barcode, price and stock"></a><figcaption>Item catalog with barcodes, prices and stock</figcaption></figure>
+      <figure><a href="screenshots/billing.png"><img src="screenshots/billing.png" width="1366" height="800" loading="lazy" decoding="async" alt="MyTownCart Billing counter screen with five items in the bill, payment options and a total of ₹412.00"></a><figcaption>Billing counter: scan items, take payment, save &amp; print</figcaption></figure>
+      <figure><a href="screenshots/dashboard.png"><img src="screenshots/dashboard.png" width="1366" height="800" loading="lazy" decoding="async" alt="MyTownCart Billing dashboard showing today's sales, payment breakdown chart and top selling items"></a><figcaption>Dashboard: daily sales, payment mix and top sellers</figcaption></figure>
+      <figure><a href="screenshots/items.png"><img src="screenshots/items.png" width="1366" height="800" loading="lazy" decoding="async" alt="MyTownCart Billing item catalog listing products with barcode, price and stock"></a><figcaption>Item catalog with barcodes, prices and stock</figcaption></figure>
     </div>
     <p class="note">Screenshots are from the current source build and may differ slightly from the latest published installer.</p>
   </section>
 
   <section id="download">
+    <p class="kicker">Download</p>
     <h2>Download</h2>
     <p class="sub">Latest release: <strong id="release-version">loading…</strong> <span id="release-date"></span> — published automatically from GitHub Releases.</p>
     <p id="detected" class="detected" hidden></p>
@@ -176,8 +239,9 @@ footer a{color:var(--muted)}
   </section>
 
   <section id="start">
+    <p class="kicker">Get started</p>
     <h2>Get started in five steps</h2>
-    <ol>
+    <ol class="steps">
       <li>Install the app from the download section above.</li>
       <li>Enter your shop name, GST settings, and invoice prefix.</li>
       <li>Add products with prices, barcodes and opening stock, or import a CSV.</li>
@@ -194,6 +258,7 @@ footer a{color:var(--muted)}
   </section>
 
   <section id="faq">
+    <p class="kicker">FAQ</p>
     <h2>FAQ</h2>
     <details><summary>Is it really free and open source?</summary><p>Yes, under the Apache License 2.0. The MyTownCart name and logo are covered by a trademark policy, so forks must use a different name.</p></details>
     <details><summary>Does it work offline?</summary><p>Yes. Everyday billing uses local storage. Publishing and syncing with MyTownCart need internet and a linked account.</p></details>
@@ -206,10 +271,10 @@ footer a{color:var(--muted)}
 </main>
 
 <footer><div class="wrap">
-  © MyTownCart · Licensed under <a href="https://github.com/guna81/mytowncart-billing/blob/main/LICENSE">Apache 2.0</a> ·
+  <span>© MyTownCart · Licensed under <a href="https://github.com/guna81/mytowncart-billing/blob/main/LICENSE">Apache 2.0</a> ·
   <a href="https://github.com/guna81/mytowncart-billing/blob/main/TRADEMARK.md">Trademark policy</a> ·
   <a href="https://mytowncart.com">MyTownCart platform</a> ·
-  <a href="https://github.com/guna81/mytowncart-billing">Source</a>
+  <a href="https://github.com/guna81/mytowncart-billing">Source</a></span>
 </div></footer>
 <script>
 (function() {

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://guna81.github.io/mytowncart-billing/sitemap.xml

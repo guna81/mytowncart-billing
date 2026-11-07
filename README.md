@@ -20,6 +20,16 @@ orders and stock when online. Visit the [MyTownCart platform](https://mytowncart
 [Documentation](docs/README.md) ·
 [Releases](https://github.com/guna81/mytowncart-billing/releases)
 
+## Screenshots
+
+![Billing counter with items, payment options and total](site/screenshots/billing.png)
+
+| Dashboard | Item catalog |
+| --- | --- |
+| ![Dashboard with daily sales, payment mix and top items](site/screenshots/dashboard.png) | ![Item catalog with barcodes, prices and stock](site/screenshots/items.png) |
+
+*Shown with sample shop data from the current source build; the latest published installer may differ slightly.*
+
 ## Download MyTownCart Billing
 
 - [Windows (64-bit EXE)](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-windows-x64.exe) · [MSI](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-windows-x64.msi)
