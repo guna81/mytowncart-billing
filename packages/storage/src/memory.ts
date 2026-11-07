@@ -8,6 +8,8 @@
  */
 
 import { formatInvoiceNumber, localIsoTimestamp, sortBatchesFifo, type ReportBill } from "@mytowncart-billing/core";
+import { setSessionToken } from "./session";
+import { buildCustomerLedger, type LedgerBill } from "./ledger";
 import type {
   BillingRepository,
   BillFilter,
@@ -28,7 +30,6 @@ import type {
   CreditNoteLine,
   Customer,
   CustomerInput,
-  CustomerLedgerEntry,
   CustomerLedgerSummary,
   CustomerPayment,
   CustomerPaymentInput,
@@ -81,6 +82,8 @@ export class MemoryRepository implements BillingRepository {
   private suppliers = new Map<number, Supplier>();
   private purchases = new Map<number, Purchase>();
   private users = new Map<number, User>();
+  /** PINs by user id — kept apart from `User`, which only exposes `hasPin`. */
+  private pins = new Map<number, string>();
   private auditLogs: AuditLog[] = [];
   private batches = new Map<number, ItemBatch>();
   private loyaltyTransactions: LoyaltyTransaction[] = [];
@@ -312,6 +315,8 @@ export class MemoryRepository implements BillingRepository {
     if (input.amountPaise <= 0) throw new Error("payment amount must be positive");
     const customer = this.customers.get(input.customerId);
     if (!customer) throw new Error(`no customer with id ${input.customerId}`);
+    const owed = (await this.getCustomerLedger(input.customerId)).outstandingBalancePaise;
+    if (input.amountPaise > owed) throw new Error("payment is more than the customer owes");
     const id = this.nextIds.customerPayment++;
     const payment: CustomerPayment = {
       id,
@@ -334,64 +339,17 @@ export class MemoryRepository implements BillingRepository {
   async getCustomerLedger(customerId: number): Promise<CustomerLedgerSummary> {
     const customer = this.customers.get(customerId);
     if (!customer) throw new Error(`no customer with id ${customerId}`);
-
-    const customerBills = [...this.bills.values()].filter(
-      (b) => b.customerId === customerId && b.status === "active",
-    );
-    const payments = await this.listCustomerPayments(customerId);
-
-    const entries: CustomerLedgerEntry[] = [];
-    let totalCreditBilled = 0;
-
-    for (const b of customerBills) {
-      const creditPaid = b.payments
-        .filter((p) => p.mode === "credit")
-        .reduce((sum, p) => sum + p.amountPaise, 0);
-      if (creditPaid > 0) {
-        totalCreditBilled += creditPaid;
-        entries.push({
-          id: `bill-${b.id}`,
-          type: "credit_bill",
-          date: b.createdAt,
-          refNumber: b.number,
-          description: `Credit bill ${b.number}`,
-          debitPaise: creditPaid,
-          creditPaise: 0,
-          balancePaise: 0,
-        });
-      }
-    }
-
-    let totalPaid = 0;
-    for (const p of payments) {
-      totalPaid += p.amountPaise;
-      entries.push({
-        id: `pay-${p.id}`,
-        type: "payment",
-        date: p.createdAt,
-        refNumber: `REC-${p.id}`,
-        description: `Payment received (${p.mode.toUpperCase()})${p.notes ? ` - ${p.notes}` : ""}`,
-        debitPaise: 0,
-        creditPaise: p.amountPaise,
-        balancePaise: 0,
-      });
-    }
-
-    entries.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
-
-    let runningBalance = 0;
-    for (const entry of entries) {
-      runningBalance += entry.debitPaise - entry.creditPaise;
-      entry.balancePaise = runningBalance;
-    }
-
-    return {
-      customer,
-      totalCreditBilledPaise: totalCreditBilled,
-      totalPaidPaise: totalPaid,
-      outstandingBalancePaise: totalCreditBilled - totalPaid,
-      entries,
-    };
+    const bills: LedgerBill[] = [...this.bills.values()]
+      .filter((b) => b.customerId === customerId && b.status === "active")
+      .map((b) => ({
+        id: b.id,
+        number: b.number,
+        createdAt: b.createdAt,
+        creditPaise: b.payments.filter((p) => p.mode === "credit").reduce((s, p) => s + p.amountPaise, 0),
+      }));
+    const billIds = new Set(bills.map((b) => b.id));
+    const notes = [...this.creditNotes.values()].filter((n) => billIds.has(n.billId));
+    return buildCustomerLedger(customer, bills, await this.listCustomerPayments(customerId), notes);
   }
 
   private recordMovement(
@@ -443,6 +401,14 @@ export class MemoryRepository implements BillingRepository {
   async createBill(bill: NewBillPayload): Promise<CreatedBill> {
     if (bill.lines.length === 0) throw new Error("a bill needs at least one line");
     if (bill.payments.length === 0) throw new Error("a bill needs at least one payment");
+    const earned = bill.loyaltyEarned ?? 0;
+    const redeemed = bill.loyaltyRedeemed ?? 0;
+    if (earned < 0 || redeemed < 0) throw new Error("loyalty points must not be negative");
+    const loyaltyCustomer =
+      bill.customerId !== null && (earned > 0 || redeemed > 0) ? this.customers.get(bill.customerId) : undefined;
+    if (loyaltyCustomer && redeemed > (loyaltyCustomer.loyaltyPoints ?? 0)) {
+      throw new Error("cannot redeem more loyalty points than the customer has");
+    }
     const key = `${bill.fy}${bill.prefix}`;
     const seq = this.invoiceCounters.get(key) ?? 1;
     this.invoiceCounters.set(key, seq + 1);
@@ -491,6 +457,10 @@ export class MemoryRepository implements BillingRepository {
     for (const l of bill.lines) {
       this.recordMovement(l.itemId, -l.qtyMilli, "sale", "bill", String(id));
     }
+    if (loyaltyCustomer && bill.customerId !== null) {
+      if (earned > 0) await this.updateCustomerLoyalty(bill.customerId, earned, id, `Earned on ${number}`);
+      if (redeemed > 0) await this.updateCustomerLoyalty(bill.customerId, -redeemed, id, `Redeemed on ${number}`);
+    }
     return { billId: id, number, seq };
   }
 
@@ -499,6 +469,9 @@ export class MemoryRepository implements BillingRepository {
     const bill = this.bills.get(billId);
     if (!bill) throw new Error(`no bill with id ${billId}`);
     if (bill.status !== "active") throw new Error(`bill ${billId} is already void`);
+    if ([...this.creditNotes.values()].some((n) => n.billId === billId)) {
+      throw new Error(`bill ${billId} has credit notes and cannot be voided`);
+    }
     bill.status = "void";
     bill.voidedAt = localIsoTimestamp(new Date());
     bill.voidReason = reason;
@@ -769,6 +742,23 @@ export class MemoryRepository implements BillingRepository {
     if (!payload.reason.trim()) throw new Error("credit note reason is required");
     const bill = this.bills.get(payload.billId);
     if (!bill) throw new Error(`no bill with id ${payload.billId}`);
+    if (bill.status !== "active") throw new Error(`bill ${payload.billId} is void; it cannot be returned against`);
+    const requested = new Map<number, number>();
+    for (const l of payload.lines) {
+      if (l.qtyMilli <= 0) throw new Error("returned quantity must be positive");
+      if (l.itemId === null) throw new Error("credit note lines must reference an item");
+      requested.set(l.itemId, (requested.get(l.itemId) ?? 0) + l.qtyMilli);
+    }
+    for (const [itemId, qty] of requested) {
+      const sold = bill.lines.filter((l) => l.itemId === itemId).reduce((s, l) => s + l.qtyMilli, 0);
+      if (sold === 0) throw new Error(`item ${itemId} is not on bill ${payload.billId}`);
+      const returned = [...this.creditNotes.values()]
+        .filter((n) => n.billId === payload.billId)
+        .flatMap((n) => n.lines)
+        .filter((l) => l.itemId === itemId)
+        .reduce((s, l) => s + l.qtyMilli, 0);
+      if (returned + qty > sold) throw new Error(`cannot return more than was sold for item ${itemId}`);
+    }
 
     const fy = bill.fy;
     const key = `${fy}CN-`;
@@ -970,39 +960,66 @@ export class MemoryRepository implements BillingRepository {
   async upsertUser(input: UserInput): Promise<number> {
     if (!input.name.trim()) throw new Error("user name is required");
     if (input.role !== "owner" && input.role !== "cashier") throw new Error("role must be 'owner' or 'cashier'");
+    const pin = input.pin.trim();
+    if ((input.id === undefined || pin !== "") && !/^\d{4,6}$/.test(pin)) {
+      throw new Error("PIN must be 4 to 6 digits");
+    }
+    let saved: User;
+    let previous: User | undefined;
     if (input.id !== undefined) {
       const existing = this.users.get(input.id);
       if (!existing) throw new Error(`no user with id ${input.id}`);
+      previous = { ...existing };
       existing.name = input.name.trim();
       existing.role = input.role;
-      existing.pin = input.pin.trim();
       if (input.isActive !== undefined) existing.isActive = input.isActive;
-      return existing.id;
+      saved = existing;
+    } else {
+      saved = {
+        id: this.nextIds.user,
+        name: input.name.trim(),
+        role: input.role,
+        hasPin: false,
+        isActive: input.isActive ?? true,
+        createdAt: localIsoTimestamp(new Date()),
+      };
+      this.users.set(saved.id, saved);
     }
-    const id = this.nextIds.user++;
-    const u: User = {
-      id,
-      name: input.name.trim(),
-      role: input.role,
-      pin: input.pin.trim(),
-      isActive: input.isActive ?? true,
-      createdAt: localIsoTimestamp(new Date()),
-    };
-    this.users.set(id, u);
-    return id;
+    const previousPin = this.pins.get(saved.id);
+    if (pin !== "") {
+      this.pins.set(saved.id, pin);
+      saved.hasPin = true;
+    }
+    // Same rule as the desktop shell: once PINs exist, an active owner must remain.
+    const anyPin = this.pins.size > 0;
+    const owner = [...this.users.values()].some((u) => u.isActive && u.role === "owner" && this.pins.has(u.id));
+    if (anyPin && !owner) {
+      // roll back
+      if (previous) Object.assign(saved, previous);
+      else this.users.delete(saved.id);
+      if (previousPin === undefined) this.pins.delete(saved.id);
+      else this.pins.set(saved.id, previousPin);
+      throw new Error("at least one active owner with a PIN is required");
+    }
+    if (input.id === undefined) this.nextIds.user += 1;
+    return saved.id;
   }
 
   async verifyPin(pin: string, requiredRole?: UserRole): Promise<User | null> {
     const trimmed = pin.trim();
     if (!trimmed) return null;
     for (const u of this.users.values()) {
-      if (u.isActive && u.pin === trimmed) {
+      if (u.isActive && this.pins.get(u.id) === trimmed) {
         if (!requiredRole || u.role === requiredRole) {
-          return u;
+          return { ...u };
         }
       }
     }
     return null;
+  }
+
+  async logout(): Promise<void> {
+    setSessionToken(null);
   }
 
   async recordAuditLog(input: AuditLogInput): Promise<number> {

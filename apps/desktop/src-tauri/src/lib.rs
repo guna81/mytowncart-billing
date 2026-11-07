@@ -7,6 +7,7 @@
 //! multi-table write is a dedicated typed command running in ONE
 //! transaction (see `repo.rs`).
 
+pub(crate) mod auth;
 pub(crate) mod backup;
 pub(crate) mod db;
 pub(crate) mod keychain;
@@ -37,6 +38,8 @@ pub struct AppState {
     /// Set while a restore swaps the database file; every other command
     /// refuses to run so no write lands in the discarded file.
     pub restoring: Arc<AtomicBool>,
+    /// PIN login sessions and brute-force throttle (see `auth.rs`).
+    pub auth: Arc<auth::Auth>,
 }
 
 #[derive(Serialize)]
@@ -123,8 +126,10 @@ fn query_rows(
 fn save_shop_profile(
     state: tauri::State<'_, AppState>,
     profile: repo::ShopProfilePayload,
+    session: Option<String>,
 ) -> Result<(), String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    state.auth.authorize(&conn, "save_shop_profile", session.as_deref())?;
     repo::save_shop_profile(&conn, &profile)
 }
 
@@ -150,9 +155,13 @@ fn upsert_customer(
 fn delete_customer(
     state: tauri::State<'_, AppState>,
     customer_id: i64,
+    session: Option<String>,
 ) -> Result<bool, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::delete_customer(&conn, customer_id)
+    let actor = state.auth.authorize(&conn, "delete_customer", session.as_deref())?;
+    let out = repo::delete_customer(&conn, customer_id)?;
+    auth::audit(&conn, actor, "delete_customer", format!("customer {customer_id}"));
+    Ok(out)
 }
 
 #[tauri::command]
@@ -184,8 +193,11 @@ fn get_bills_report_data(
 }
 
 #[tauri::command]
-fn upsert_item(state: tauri::State<'_, AppState>, item: repo::ItemPayload) -> Result<i64, String> {
+fn upsert_item(state: tauri::State<'_, AppState>, item: repo::ItemPayload,
+    session: Option<String>,
+) -> Result<i64, String> {
     let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    state.auth.authorize(&conn, "upsert_item", session.as_deref())?;
     repo::upsert_item(&mut conn, &item)
 }
 
@@ -193,8 +205,10 @@ fn upsert_item(state: tauri::State<'_, AppState>, item: repo::ItemPayload) -> Re
 fn import_items(
     state: tauri::State<'_, AppState>,
     items: Vec<repo::ItemPayload>,
+    session: Option<String>,
 ) -> Result<Vec<repo::ImportRowResult>, String> {
     let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    state.auth.authorize(&conn, "import_items", session.as_deref())?;
     repo::import_items(&mut conn, &items)
 }
 
@@ -205,9 +219,13 @@ fn adjust_stock(
     delta_milli: i64,
     reason: String,
     created_at: String,
+    session: Option<String>,
 ) -> Result<i64, String> {
     let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::adjust_stock(&mut conn, item_id, delta_milli, &reason, &created_at)
+    let actor = state.auth.authorize(&conn, "adjust_stock", session.as_deref())?;
+    let out = repo::adjust_stock(&mut conn, item_id, delta_milli, &reason, &created_at)?;
+    auth::audit(&conn, actor, "adjust_stock", format!("item {item_id}, {delta_milli} milli-units, {reason}"));
+    Ok(out)
 }
 
 #[tauri::command]
@@ -225,18 +243,26 @@ fn void_bill(
     bill_id: i64,
     reason: String,
     voided_at: String,
+    session: Option<String>,
 ) -> Result<(), String> {
     let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::void_bill(&mut conn, bill_id, &reason, &voided_at)
+    let actor = state.auth.authorize(&conn, "void_bill", session.as_deref())?;
+    let out = repo::void_bill(&mut conn, bill_id, &reason, &voided_at)?;
+    auth::audit(&conn, actor, "void_bill", format!("bill {bill_id}: {reason}"));
+    Ok(out)
 }
 
 #[tauri::command]
 fn create_credit_note(
     state: tauri::State<'_, AppState>,
     credit_note: repo::NewCreditNotePayload,
+    session: Option<String>,
 ) -> Result<repo::CreatedCreditNote, String> {
     let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::create_credit_note(&mut conn, &credit_note)
+    let actor = state.auth.authorize(&conn, "create_credit_note", session.as_deref())?;
+    let out = repo::create_credit_note(&mut conn, &credit_note)?;
+    auth::audit(&conn, actor, "create_credit_note", format!("bill {}: {}", credit_note.bill_id, credit_note.reason));
+    Ok(out)
 }
 
 #[tauri::command]
@@ -261,8 +287,10 @@ fn get_credit_note(
 fn upsert_supplier(
     state: tauri::State<'_, AppState>,
     supplier: repo::SupplierPayload,
+    session: Option<String>,
 ) -> Result<i64, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    state.auth.authorize(&conn, "upsert_supplier", session.as_deref())?;
     repo::upsert_supplier(&conn, &supplier)
 }
 
@@ -279,18 +307,26 @@ fn list_suppliers(
 fn delete_supplier(
     state: tauri::State<'_, AppState>,
     supplier_id: i64,
+    session: Option<String>,
 ) -> Result<bool, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::delete_supplier(&conn, supplier_id)
+    let actor = state.auth.authorize(&conn, "delete_supplier", session.as_deref())?;
+    let out = repo::delete_supplier(&conn, supplier_id)?;
+    auth::audit(&conn, actor, "delete_supplier", format!("supplier {supplier_id}"));
+    Ok(out)
 }
 
 #[tauri::command]
 fn create_purchase(
     state: tauri::State<'_, AppState>,
     purchase: repo::NewPurchasePayload,
+    session: Option<String>,
 ) -> Result<i64, String> {
     let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::create_purchase(&mut conn, &purchase)
+    let actor = state.auth.authorize(&conn, "create_purchase", session.as_deref())?;
+    let out = repo::create_purchase(&mut conn, &purchase)?;
+    auth::audit(&conn, actor, "create_purchase", format!("purchase from supplier {}", purchase.supplier_id));
+    Ok(out)
 }
 
 #[tauri::command]
@@ -315,9 +351,13 @@ fn get_purchase(
 fn upsert_user(
     state: tauri::State<'_, AppState>,
     user: repo::UserPayload,
+    session: Option<String>,
 ) -> Result<i64, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::upsert_user(&conn, &user)
+    let actor = state.auth.authorize(&conn, "upsert_user", session.as_deref())?;
+    let out = repo::upsert_user(&conn, &user)?;
+    auth::audit(&conn, actor, "upsert_user", format!("user {} ({}, {})", user.name, user.role, if user.id.is_some() { "edited" } else { "added" }));
+    Ok(out)
 }
 
 #[tauri::command]
@@ -333,9 +373,16 @@ fn verify_pin(
     state: tauri::State<'_, AppState>,
     pin: String,
     required_role: Option<String>,
-) -> Result<Option<repo::UserRow>, String> {
+) -> Result<Option<serde_json::Value>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::verify_pin(&conn, &pin, required_role.as_deref())
+    auth::login(&state.auth, &conn, &pin, required_role.as_deref())
+}
+
+#[tauri::command]
+fn logout(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    // The window has a single operator at a time, so locking ends every desktop session.
+    state.auth.clear_sessions();
+    Ok(())
 }
 
 #[tauri::command]
@@ -351,8 +398,10 @@ fn record_audit_log(
 fn list_audit_logs(
     state: tauri::State<'_, AppState>,
     limit: Option<i64>,
+    session: Option<String>,
 ) -> Result<Vec<repo::AuditLogRow>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    state.auth.authorize(&conn, "list_audit_logs", session.as_deref())?;
     repo::list_audit_logs(&conn, limit)
 }
 
@@ -360,9 +409,13 @@ fn list_audit_logs(
 fn apply_stock_audit(
     state: tauri::State<'_, AppState>,
     discrepancies: Vec<repo::StockDiscrepancyPayload>,
+    session: Option<String>,
 ) -> Result<i64, String> {
     let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
-    repo::apply_stock_audit(&mut conn, &discrepancies)
+    let actor = state.auth.authorize(&conn, "apply_stock_audit", session.as_deref())?;
+    let out = repo::apply_stock_audit(&mut conn, &discrepancies)?;
+    auth::audit(&conn, actor, "apply_stock_audit", format!("{} items counted", discrepancies.len()));
+    Ok(out)
 }
 
 #[tauri::command]
@@ -862,7 +915,13 @@ pub fn run(driver_script: Option<String>) {
                 db_path,
                 conn: Arc::new(Mutex::new(conn)),
                 restoring: Arc::new(AtomicBool::new(false)),
+                auth: Arc::new(auth::Auth::default()),
             };
+            if let Ok(c) = app_state.conn.lock() {
+                if let Err(e) = auth::upgrade_legacy_pins(&c) {
+                    eprintln!("[auth] could not hash legacy PINs: {e}");
+                }
+            }
             app.manage(app_state.clone());
 
             let server_mgr = server::LanServerManager::new();
@@ -921,6 +980,7 @@ pub fn run(driver_script: Option<String>) {
             upsert_user,
             list_users,
             verify_pin,
+            logout,
             record_audit_log,
             list_audit_logs,
             apply_stock_audit,

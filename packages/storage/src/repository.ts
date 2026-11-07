@@ -69,6 +69,9 @@ export interface NewBillPayload {
   discountPaise?: number;
   roundOffPaise?: number;
   notes?: string;
+  /** Loyalty points earned / redeemed by this sale; applied in the same transaction as the bill. */
+  loyaltyEarned?: number;
+  loyaltyRedeemed?: number;
   createdAt: string;
   lines: {
     itemId: number;
@@ -214,7 +217,10 @@ export interface BillingRepository {
   // --- Phase 2: Users & Roles & Audit ---------------------------------------
   listUsers(): Promise<User[]>;
   upsertUser(input: UserInput): Promise<number>;
+  /** Checks a PIN. A plain login (no `requiredRole`) also starts the session used to authorise sensitive commands. */
   verifyPin(pin: string, requiredRole?: UserRole): Promise<User | null>;
+  /** Ends the current login session (locks the terminal). */
+  logout(): Promise<void>;
   recordAuditLog(input: AuditLogInput): Promise<number>;
   listAuditLogs(limit?: number): Promise<AuditLog[]>;
 

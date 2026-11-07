@@ -129,3 +129,25 @@ the system browser; the user downloads and installs manually exactly as today
 - **Upgrade path:** the real one-click updater (Tauri updater plugin + signed
   `latest.json`) can replace the click action later; the check, banner and
   button UI stay.
+
+## B6-1 — Roles are enforced in Rust; PINs are hashed
+**Date:** 2026-11-08
+
+Two roles, `cashier` < `owner`. `auth.rs` holds the policy (`required_role`),
+login sessions (random 192-bit tokens, in memory, 12 h) and a throttle (8 wrong
+PINs → 30 s lockout). Owner-only commands: void bills, stock adjustments and
+audits, credit notes, purchases, suppliers (write/delete), item create/edit/
+import, customer delete, shop profile, users, audit log. Everything else needs
+a cashier login. Desktop commands take a `session` argument; the LAN server
+reads `X-MTC-Session`. Until some active user has a PIN the shop is in setup
+mode and nothing is gated.
+
+PINs live in `user_pins` as `h1$salt$iterated-SHA-256` (migration 0009); the old
+`users.pin` is blanked at start-up after hashing. `query_rows` refuses
+`user_pins`. PINs are 4–6 digits; the first user must be an owner, and the last
+active owner cannot be demoted or deactivated. The UI hides owner-only screens
+and buttons, but only mirrors this policy.
+
+Not gated: reads through `query_rows` (reports, lists), `set_app_setting`
+(background jobs write settings), and the sync/backup commands, which are not
+reachable from the LAN server.

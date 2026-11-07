@@ -42,3 +42,19 @@ If a device cannot connect, confirm that the server is running, both devices
 are on the same LAN, and the host firewall permits the selected port. Guest
 Wi-Fi client isolation can prevent access. In development, missing UI assets
 require rebuilding `apps/web/dist`.
+
+## Access key
+
+Each time the LAN server starts it creates a random access key. The addresses
+and QR code shown in Settings include it (`?key=...`). The browser keeps the key
+for that tab and sends it as `X-MTC-Key` on every request; `/api/invoke` returns
+401 without it. Stopping and restarting the server issues a new key. Cross-origin
+(CORS) access to `/api/invoke` is not allowed, and `query_rows` accepts only
+read-only statements.
+
+## Logging in from the browser
+
+When users have PINs, the browser shows the PIN screen first. Owner-only actions
+(void, stock changes, credit notes, purchases, settings, users) are refused for a
+cashier session. The login lasts until the terminal is locked, the server
+restarts, or 12 hours pass.

@@ -15,10 +15,12 @@ import { Money, PageHeader, Badge } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
 import { paymentModeLabel } from "../lib/labels";
 import { getRepository } from "../lib/repository";
+import { useIsOwner } from "../lib/roles";
 import { formatDateTime } from "../lib/formatDate";
 import { useAppStore } from "../store/appStore";
 
 export function BillDetailScreen() {
+  const isOwner = useIsOwner();
   const { id } = useParams();
   const billId = Number(id);
   const profile = useAppStore((s) => s.profile);
@@ -275,7 +277,7 @@ export function BillDetailScreen() {
           ) : null}
         </div>
 
-        {bill.status === "active" ? (
+        {bill.status === "active" && isOwner ? (
           <div>
             <button
               type="button"

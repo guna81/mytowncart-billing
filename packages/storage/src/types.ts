@@ -205,7 +205,7 @@ export interface CustomerPaymentInput {
 
 export interface CustomerLedgerEntry {
   id: string;
-  type: "credit_bill" | "payment";
+  type: "credit_bill" | "payment" | "credit_note";
   date: string;
   refNumber: string;
   description: string;
@@ -393,7 +393,8 @@ export interface User {
   id: number;
   name: string;
   role: UserRole;
-  pin: string;
+  /** Whether a PIN is set. The PIN itself is never readable. */
+  hasPin: boolean;
   isActive: boolean;
   createdAt: string;
 }
@@ -402,6 +403,7 @@ export interface UserInput {
   id?: number;
   name: string;
   role: UserRole;
+  /** 4–6 digits. Leave blank when editing an existing user to keep their current PIN. */
   pin: string;
   isActive?: boolean;
 }

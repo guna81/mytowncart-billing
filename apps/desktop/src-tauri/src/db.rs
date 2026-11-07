@@ -64,6 +64,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "phase3_growth",
         sql: include_str!("../migrations/0008_phase3_growth.sql"),
     },
+    Migration {
+        version: 9,
+        name: "user_pins",
+        sql: include_str!("../migrations/0009_user_pins.sql"),
+    },
 ];
 
 #[derive(Debug, Error)]

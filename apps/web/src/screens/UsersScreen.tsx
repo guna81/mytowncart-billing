@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useState, type FormEvent } from "react";
-import type { User, UserRole } from "@mytowncart-billing/storage";
+import type { AuditLog, User, UserRole } from "@mytowncart-billing/storage";
 import { Badge, Button, Input, Modal, EmptyState, PageHeader } from "../components/ui";
 import { t } from "../i18n";
 import { getRepository } from "../lib/repository";
+import { refreshLoginState } from "../lib/roles";
 
 function UserDialog({
   initial,
@@ -16,7 +17,7 @@ function UserDialog({
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [role, setRole] = useState<UserRole>(initial?.role ?? "cashier");
-  const [pin, setPin] = useState(initial?.pin ?? "");
+  const [pin, setPin] = useState("");
   const [isActive, setIsActive] = useState(initial?.isActive ?? true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -27,8 +28,10 @@ function UserDialog({
       setError("User name is required");
       return;
     }
-    if (!pin.trim() || pin.trim().length < 4) {
-      setError("PIN must be at least 4 digits");
+    // Editing: a blank PIN keeps the current one. New users need a 4–6 digit PIN.
+    const pinText = pin.trim();
+    if ((!initial || pinText !== "") && !/^\d{4,6}$/.test(pinText)) {
+      setError("PIN must be 4 to 6 digits");
       return;
     }
 
@@ -42,6 +45,7 @@ function UserDialog({
         pin: pin.trim(),
         isActive,
       });
+      await refreshLoginState();
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -80,11 +84,11 @@ function UserDialog({
         </div>
 
         <Input
-          label={`${t("users.pin")} *`}
+          label={initial ? t("users.pin") : `${t("users.pin")} *`}
           type="password"
           maxLength={6}
           data-testid="user-pin"
-          placeholder={t("users.pin_ph")}
+          placeholder={initial ? t("users.pin_keep_ph") : t("users.pin_ph")}
           value={pin}
           onChange={(e) => setPin(e.target.value)}
         />
@@ -121,9 +125,12 @@ function UserDialog({
 export function UsersScreen() {
   const [users, setUsers] = useState<User[]>([]);
   const [editing, setEditing] = useState<User | null | undefined>(undefined);
+  const [logs, setLogs] = useState<AuditLog[]>([]);
 
   const load = () => {
     void getRepository().listUsers().then(setUsers);
+    // Owner-only; a cashier never reaches this screen, and a failure just leaves the list empty.
+    void getRepository().listAuditLogs(50).then(setLogs).catch(() => setLogs([]));
   };
 
   useEffect(() => {
@@ -194,6 +201,28 @@ export function UsersScreen() {
           </table>
         </div>
       )}
+
+      <h2 className="mt-8 mb-2 text-sm font-semibold text-gray-800">{t("users.audit_title")}</h2>
+      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm" data-testid="audit-log">
+        {logs.length === 0 ? (
+          <p className="p-3 text-sm text-gray-500">{t("users.audit_empty")}</p>
+        ) : (
+          <table className="w-full text-sm">
+            <tbody className="divide-y divide-gray-100">
+              {logs.map((l) => (
+                <tr key={l.id}>
+                  <td className="px-3 py-2 font-mono text-xs text-gray-500 whitespace-nowrap">
+                    {l.createdAt.slice(0, 16).replace("T", " ")}
+                  </td>
+                  <td className="px-3 py-2 font-medium text-gray-900">{l.userName ?? "—"}</td>
+                  <td className="px-3 py-2 text-gray-700">{l.action}</td>
+                  <td className="px-3 py-2 text-gray-600">{l.details}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
 
       {editing !== undefined ? (
         <UserDialog

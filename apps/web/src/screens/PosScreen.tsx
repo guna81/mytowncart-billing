@@ -357,7 +357,9 @@ export function PosScreen() {
           ? t("pos.error.insufficient")
           : first === "payment.overpay_requires_cash"
             ? t("pos.error.overpay_requires_cash")
-            : first === "bill.no_lines"
+            : first === "payment.change_exceeds_cash"
+              ? t("pos.error.change_exceeds_cash")
+              : first === "bill.no_lines"
               ? t("pos.error.no_lines")
               : first === "payment.credit_requires_customer"
                 ? t("pos.error.credit_requires_customer")
@@ -377,6 +379,11 @@ export function PosScreen() {
         totalPaise: bill.totalPaise,
         discountPaise: bill.discountPaise,
         roundOffPaise: bill.roundOffPaise,
+        // Saved in the same transaction as the bill, so points can never drift from sales.
+        loyaltyEarned: customerId
+          ? computeLoyaltyPointsEarned(bill.totalPaise, DEFAULT_LOYALTY_CONFIG.earnRatePaise)
+          : 0,
+        loyaltyRedeemed: customerId ? redeemedPoints : 0,
         createdAt: localIsoTimestamp(now),
         lines: bill.lines.map((l) => ({
           itemId: l.itemId,
@@ -391,27 +398,6 @@ export function PosScreen() {
         })),
         payments,
       });
-
-      // Update loyalty points
-      if (customerId) {
-        const earned = computeLoyaltyPointsEarned(bill.totalPaise, DEFAULT_LOYALTY_CONFIG.earnRatePaise);
-        if (earned > 0) {
-          await getRepository().updateCustomerLoyalty(
-            customerId,
-            earned,
-            created.billId,
-            `Earned on ${created.number}`,
-          );
-        }
-        if (redeemedPoints > 0) {
-          await getRepository().updateCustomerLoyalty(
-            customerId,
-            -redeemedPoints,
-            created.billId,
-            `Redeemed on ${created.number}`,
-          );
-        }
-      }
 
       setNotice({ kind: "ok", text: t("pos.saved", { number: created.number }) });
       // The bill that was resumed (if any) is now a real bill; drop the hold.

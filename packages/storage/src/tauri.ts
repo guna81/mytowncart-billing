@@ -6,6 +6,8 @@
  */
 
 import { isUnitKind, localIsoTimestamp, type ReportBill, type UnitKind } from "@mytowncart-billing/core";
+import { SESSION_GATED_COMMANDS, getSessionToken, setSessionToken } from "./session";
+import { buildCustomerLedger, type LedgerBill } from "./ledger";
 import type { BillingRepository, BillFilter, CreatedBill, ItemFilter, NewBillPayload } from "./repository";
 import type {
   AuditLog,
@@ -19,7 +21,6 @@ import type {
   CreditNote,
   Customer,
   CustomerInput,
-  CustomerLedgerEntry,
   CustomerLedgerSummary,
   CustomerPayment,
   CustomerPaymentInput,
@@ -163,7 +164,14 @@ export class TauriRepository implements BillingRepository {
   }
 
   protected async getInvoke(): Promise<InvokeFn> {
-    return this.customInvoker ?? defaultTauriInvoker();
+    const base = this.customInvoker ?? (await defaultTauriInvoker());
+    // Sensitive commands carry the login session so Rust can check the user's role.
+    return async <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
+      if (SESSION_GATED_COMMANDS.has(cmd)) {
+        return base<T>(cmd, { ...(args ?? {}), session: getSessionToken() });
+      }
+      return base<T>(cmd, args);
+    };
   }
 
   protected async query(sql: string, params: unknown[] = []): Promise<Row[]> {
@@ -349,66 +357,23 @@ export class TauriRepository implements BillingRepository {
   async getCustomerLedger(customerId: number): Promise<CustomerLedgerSummary> {
     const customer = (await this.listCustomers()).find((c) => c.id === customerId);
     if (!customer) throw new Error(`no customer with id ${customerId}`);
-
     const customerBills = (await this.listBills()).filter(
       (b) => b.customerId === customerId && b.status === "active",
     );
-    const payments = await this.listCustomerPayments(customerId);
-
-    const entries: CustomerLedgerEntry[] = [];
-    let totalCreditBilled = 0;
-
+    const bills: LedgerBill[] = [];
     for (const b of customerBills) {
       const detail = await this.getBill(b.id);
       if (!detail) continue;
-      const creditPaid = detail.payments
-        .filter((p) => p.mode === "credit")
-        .reduce((sum, p) => sum + p.amountPaise, 0);
-      if (creditPaid > 0) {
-        totalCreditBilled += creditPaid;
-        entries.push({
-          id: `bill-${b.id}`,
-          type: "credit_bill",
-          date: b.createdAt,
-          refNumber: b.number,
-          description: `Credit bill ${b.number}`,
-          debitPaise: creditPaid,
-          creditPaise: 0,
-          balancePaise: 0,
-        });
-      }
-    }
-
-    let totalPaid = 0;
-    for (const p of payments) {
-      totalPaid += p.amountPaise;
-      entries.push({
-        id: `pay-${p.id}`,
-        type: "payment",
-        date: p.createdAt,
-        refNumber: `REC-${p.id}`,
-        description: `Payment received (${p.mode.toUpperCase()})${p.notes ? ` - ${p.notes}` : ""}`,
-        debitPaise: 0,
-        creditPaise: p.amountPaise,
-        balancePaise: 0,
+      bills.push({
+        id: b.id,
+        number: b.number,
+        createdAt: b.createdAt,
+        creditPaise: detail.payments.filter((p) => p.mode === "credit").reduce((s, p) => s + p.amountPaise, 0),
       });
     }
-
-    entries.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
-
-    let runningBalance = 0;
-    for (const entry of entries) {
-      runningBalance += entry.debitPaise - entry.creditPaise;
-      entry.balancePaise = runningBalance;
-    }
-
-    return {
-      customer,
-      totalCreditBilledPaise: totalCreditBilled,
-      totalPaidPaise: totalPaid,
-      outstandingBalancePaise: totalCreditBilled - totalPaid,
-      entries,
-    };
+    const billIds = new Set(bills.map((b) => b.id));
+    const notes = (await this.listCreditNotes()).filter((n) => billIds.has(n.billId));
+    return buildCustomerLedger(customer, bills, await this.listCustomerPayments(customerId), notes);
   }
 
   async createBill(bill: NewBillPayload): Promise<CreatedBill> {
@@ -831,10 +796,24 @@ export class TauriRepository implements BillingRepository {
 
   async verifyPin(pin: string, requiredRole?: UserRole): Promise<User | null> {
     const invoke = await this.getInvoke();
-    return invoke<User | null>("verify_pin", {
+    const res = await invoke<(User & { sessionToken?: string }) | null>("verify_pin", {
       pin,
       requiredRole: requiredRole ?? null,
     });
+    if (!res) return null;
+    const { sessionToken, ...user } = res;
+    // A plain login starts a session; a role check ("is this the owner's PIN?") does not.
+    if (sessionToken) setSessionToken(sessionToken);
+    return user;
+  }
+
+  async logout(): Promise<void> {
+    const invoke = await this.getInvoke();
+    try {
+      await invoke("logout", {});
+    } finally {
+      setSessionToken(null);
+    }
   }
 
   async recordAuditLog(input: AuditLogInput): Promise<number> {

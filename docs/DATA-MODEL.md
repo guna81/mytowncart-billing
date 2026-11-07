@@ -194,8 +194,12 @@ snapshot lines. Purchases reference suppliers and retain cost/tax snapshots.
 Day-end closures store opening cash, sales, credit received, refunds,
 expected/actual cash, variance, bill/sales totals, notes and optional user id.
 
-`users` stores name, role, PIN, active flag and creation time. PINs are currently
-stored as text; these records are not authentication for the LAN HTTP API.
+`users` stores name, role, active flag and creation time. PINs are stored in
+`user_pins` (migration 0009) as salted, iterated SHA-256 hashes, and `query_rows`
+refuses to read that table. The legacy `users.pin` column is emptied at start-up.
+Roles are enforced in the Rust shell for both the desktop window and the LAN
+browser (see DECISIONS.md B6-1). `audit_logs` receives an entry for each
+sensitive action, with the acting user.
 The existence of batch and alternate-barcode tables does not mean every
 workflow has a dedicated management screen.
 

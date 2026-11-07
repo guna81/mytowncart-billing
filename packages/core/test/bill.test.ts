@@ -20,6 +20,25 @@ const line = (over: Partial<BillLineInput> = {}): BillLineInput => ({
   ...over,
 });
 
+describe("validateBill change", () => {
+  it("rejects change larger than the cash tendered", () => {
+    const bill = computeBill([line({ unitPricePaise: 10_000, taxRateBp: 0 })], { pricesIncludeTax: false });
+    expect(
+      validateBill(bill, [
+        { mode: "upi", amountPaise: 12_000 },
+        { mode: "cash", amountPaise: 1_000 },
+      ]),
+    ).toContain("payment.change_exceeds_cash");
+    expect(validateBill(bill, [{ mode: "cash", amountPaise: 12_000 }])).toEqual([]);
+    expect(
+      validateBill(bill, [
+        { mode: "upi", amountPaise: 6_000 },
+        { mode: "cash", amountPaise: 5_000 },
+      ]),
+    ).toEqual([]);
+  });
+});
+
 describe("computeBill", () => {
   it("sums line amounts into bill totals (tax-exclusive)", () => {
     const bill = computeBill(
@@ -85,6 +104,32 @@ describe("computeBill", () => {
     expect(bill.lines[0]!.discountPaise).toBe(190);
     expect(bill.lines[1]!.discountPaise).toBe(200);
     expect(bill.totalPaise).toBe(2610);
+  });
+
+  it("bill discount lowers the payable total by exactly that amount on tax-exclusive prices", () => {
+    // Rs 1000 + 18% GST = Rs 1180. A Rs 100 bill discount must give Rs 1080, not Rs 1062.
+    const bill = computeBill([line({ unitPricePaise: 100_000, taxRateBp: 1800 })], {
+      pricesIncludeTax: false,
+      billDiscountPaise: 10_000,
+    });
+    expect(bill.totalPaise).toBe(108_000);
+    // mixed rates: reduction is within 1 paise per line
+    const mixed = computeBill(
+      [
+        line({ itemId: 1, unitPricePaise: 50_000, taxRateBp: 1800 }),
+        line({ itemId: 2, unitPricePaise: 50_000, taxRateBp: 500 }),
+      ],
+      { pricesIncludeTax: false, billDiscountPaise: 10_000 },
+    );
+    expect(Math.abs(mixed.totalPaise - (59_000 + 52_500 - 10_000))).toBeLessThanOrEqual(2);
+  });
+
+  it("bill discount is exact on tax-inclusive prices", () => {
+    const bill = computeBill([line({ unitPricePaise: 118_000, taxRateBp: 1800 })], {
+      pricesIncludeTax: true,
+      billDiscountPaise: 10_000,
+    });
+    expect(bill.totalPaise).toBe(108_000);
   });
 
   it("applies round-off to nearest rupee when enabled", () => {

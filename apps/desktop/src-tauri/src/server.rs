@@ -26,6 +26,8 @@ pub struct LanServerManager {
     running: Arc<AtomicBool>,
     port: Arc<Mutex<u16>>,
     thread_handle: Mutex<Option<JoinHandle<()>>>,
+    /// Per-start secret required on /api/invoke (sent as `X-MTC-Key`).
+    token: Arc<Mutex<String>>,
 }
 
 impl Default for LanServerManager {
@@ -40,14 +42,16 @@ impl LanServerManager {
             running: Arc::new(AtomicBool::new(false)),
             port: Arc::new(Mutex::new(8080)),
             thread_handle: Mutex::new(None),
+            token: Arc::new(Mutex::new(String::new())),
         }
     }
 
     pub fn status(&self) -> LanServerStatus {
         let running = self.running.load(Ordering::Relaxed);
         let port = *self.port.lock().unwrap_or_else(|e| e.into_inner());
+        let token = self.token.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let urls = if running {
-            compute_server_urls(port)
+            compute_server_urls(port, &token)
         } else {
             Vec::new()
         };
@@ -82,6 +86,10 @@ impl LanServerManager {
         if let Ok(mut p) = self.port.lock() {
             *p = port;
         }
+        let token = generate_token()?;
+        if let Ok(mut t) = self.token.lock() {
+            *t = token.clone();
+        }
         self.running.store(true, Ordering::Relaxed);
 
         let running_clone = Arc::clone(&self.running);
@@ -89,7 +97,7 @@ impl LanServerManager {
         let app_state_clone = state.clone();
 
         let handle = thread::spawn(move || {
-            run_server_loop(server, running_clone, app_handle_clone, app_state_clone);
+            run_server_loop(server, running_clone, app_handle_clone, app_state_clone, token);
         });
 
         if let Ok(mut handle_guard) = self.thread_handle.lock() {
@@ -100,13 +108,31 @@ impl LanServerManager {
     }
 }
 
-fn compute_server_urls(port: u16) -> Vec<String> {
+fn compute_server_urls(port: u16, token: &str) -> Vec<String> {
     let mut urls = Vec::new();
     if let Some(ip) = get_local_ip() {
-        urls.push(format!("http://{ip}:{port}"));
+        urls.push(format!("http://{ip}:{port}/?key={token}"));
     }
-    urls.push(format!("http://localhost:{port}"));
+    urls.push(format!("http://localhost:{port}/?key={token}"));
     urls
+}
+
+/// 128-bit random access key, hex-encoded. A fresh key is issued on every start.
+fn generate_token() -> Result<String, String> {
+    let mut buf = [0u8; 16];
+    getrandom::fill(&mut buf).map_err(|e| format!("cannot generate LAN access key: {e}"))?;
+    Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+fn token_matches(provided: &str, expected: &str) -> bool {
+    if expected.is_empty() || provided.len() != expected.len() {
+        return false;
+    }
+    provided
+        .bytes()
+        .zip(expected.bytes())
+        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+        == 0
 }
 
 fn get_local_ip() -> Option<String> {
@@ -120,11 +146,12 @@ fn run_server_loop(
     running: Arc<AtomicBool>,
     app_handle: tauri::AppHandle,
     state: AppState,
+    token: String,
 ) {
     while running.load(Ordering::Relaxed) {
         match server.recv_timeout(Duration::from_millis(200)) {
             Ok(Some(request)) => {
-                handle_http_request(request, &app_handle, &state);
+                handle_http_request(request, &app_handle, &state, &token);
             }
             Ok(None) => {}
             Err(e) => {
@@ -139,21 +166,16 @@ fn handle_http_request(
     mut request: Request,
     app_handle: &tauri::AppHandle,
     state: &AppState,
+    token: &str,
 ) {
     let url_str = request.url().to_string();
     let path = url_str.split('?').next().unwrap_or("").trim_start_matches('/');
 
     // Handle CORS preflight
     if request.method() == &Method::Options {
-        let resp = Response::empty(200)
-            .with_header(Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap())
-            .with_header(
-                Header::from_bytes("Access-Control-Allow-Methods", "GET, POST, OPTIONS").unwrap(),
-            )
-            .with_header(
-                Header::from_bytes("Access-Control-Allow-Headers", "Content-Type, Authorization")
-                    .unwrap(),
-            );
+        // The UI is served from this same origin, so cross-origin access is never
+        // granted: no Access-Control-* headers.
+        let resp = Response::empty(403);
         let _ = request.respond(resp);
         return;
     }
@@ -197,17 +219,26 @@ fn handle_http_request(
     if path == "api/invoke" {
         if request.method() != &Method::Post {
             let resp = Response::from_string("Method Not Allowed")
-                .with_status_code(405)
-                .with_header(Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap());
+                .with_status_code(405);
             let _ = request.respond(resp);
+            return;
+        }
+
+        let provided = request
+            .headers()
+            .iter()
+            .find(|h| h.field.equiv("X-MTC-Key"))
+            .map(|h| h.value.as_str().to_string())
+            .unwrap_or_default();
+        if !token_matches(&provided, token) {
+            let _ = request.respond(Response::from_string("Unauthorized").with_status_code(401));
             return;
         }
 
         let mut body_str = String::new();
         if let Err(e) = request.as_reader().read_to_string(&mut body_str) {
             let resp = Response::from_string(format!("Failed to read body: {e}"))
-                .with_status_code(400)
-                .with_header(Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap());
+                .with_status_code(400);
             let _ = request.respond(resp);
             return;
         }
@@ -222,15 +253,17 @@ fn handle_http_request(
                     .to_string();
                 let args = json.get("args").cloned().unwrap_or(serde_json::Value::Null);
 
-                match dispatch_invoke(state, &cmd, args) {
+                let session = request
+                    .headers()
+                    .iter()
+                    .find(|h| h.field.equiv("X-MTC-Session"))
+                    .map(|h| h.value.as_str().to_string());
+                match dispatch_invoke(state, &cmd, args, session.as_deref()) {
                     Ok(res) => {
                         let resp_body = serde_json::to_string(&res).unwrap_or_default();
                         let resp = Response::from_string(resp_body)
                             .with_header(
                                 Header::from_bytes("Content-Type", "application/json").unwrap(),
-                            )
-                            .with_header(
-                                Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap(),
                             );
                         let _ = request.respond(resp);
                     }
@@ -239,9 +272,6 @@ fn handle_http_request(
                             .with_status_code(400)
                             .with_header(
                                 Header::from_bytes("Content-Type", "text/plain").unwrap(),
-                            )
-                            .with_header(
-                                Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap(),
                             );
                         let _ = request.respond(resp);
                     }
@@ -249,8 +279,7 @@ fn handle_http_request(
             }
             Err(e) => {
                 let resp = Response::from_string(format!("Invalid JSON: {e}"))
-                    .with_status_code(400)
-                    .with_header(Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap());
+                    .with_status_code(400);
                 let _ = request.respond(resp);
             }
         }
@@ -423,8 +452,20 @@ pub fn dispatch_invoke(
     state: &AppState,
     cmd: &str,
     args: serde_json::Value,
+    session: Option<&str>,
 ) -> Result<serde_json::Value, String> {
+    // Role check first: nothing below runs for a caller who is not allowed to run it.
+    let actor = {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        state.auth.authorize(&conn, cmd, session)?
+    };
     match cmd {
+        "logout" => {
+            if let Some(t) = session {
+                state.auth.end_session(t);
+            }
+            Ok(serde_json::Value::Null)
+        }
         "query_rows" => {
             let sql: String = get_arg(&args, "sql", "sql")?;
             let params: Vec<serde_json::Value> =
@@ -455,6 +496,7 @@ pub fn dispatch_invoke(
             let id: i64 = get_arg(&args, "customerId", "customer_id")?;
             let conn = state.conn.lock().map_err(|e| e.to_string())?;
             let res = repo::delete_customer(&conn, id)?;
+            crate::auth::audit(&conn, actor, "delete_customer", format!("customer {id}"));
             serde_json::to_value(res).map_err(|e| e.to_string())
         }
         "record_customer_payment" => {
@@ -496,6 +538,7 @@ pub fn dispatch_invoke(
             let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
             let mov_id =
                 repo::adjust_stock(&mut conn, item_id, delta_milli, &reason, &created_at)?;
+            crate::auth::audit(&conn, actor, "adjust_stock", format!("item {item_id}, {delta_milli} milli-units, {reason}"));
             serde_json::to_value(mov_id).map_err(|e| e.to_string())
         }
         "create_bill" => {
@@ -510,6 +553,7 @@ pub fn dispatch_invoke(
             let voided_at: String = get_arg(&args, "voidedAt", "voided_at")?;
             let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
             repo::void_bill(&mut conn, bill_id, &reason, &voided_at)?;
+            crate::auth::audit(&conn, actor, "void_bill", format!("bill {bill_id}: {reason}"));
             Ok(serde_json::Value::Null)
         }
         "create_credit_note" => {
@@ -517,6 +561,7 @@ pub fn dispatch_invoke(
                 get_arg(&args, "creditNote", "credit_note")?;
             let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
             let res = repo::create_credit_note(&mut conn, &credit_note)?;
+            crate::auth::audit(&conn, actor, "create_credit_note", format!("bill {}: {}", credit_note.bill_id, credit_note.reason));
             serde_json::to_value(res).map_err(|e| e.to_string())
         }
         "list_credit_notes" => {
@@ -547,12 +592,14 @@ pub fn dispatch_invoke(
             let supplier_id: i64 = get_arg(&args, "supplierId", "supplier_id")?;
             let conn = state.conn.lock().map_err(|e| e.to_string())?;
             let res = repo::delete_supplier(&conn, supplier_id)?;
+            crate::auth::audit(&conn, actor, "delete_supplier", format!("supplier {supplier_id}"));
             serde_json::to_value(res).map_err(|e| e.to_string())
         }
         "create_purchase" => {
             let purchase: repo::NewPurchasePayload = get_arg(&args, "purchase", "purchase")?;
             let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
             let id = repo::create_purchase(&mut conn, &purchase)?;
+            crate::auth::audit(&conn, actor, "create_purchase", format!("purchase from supplier {}", purchase.supplier_id));
             serde_json::to_value(id).map_err(|e| e.to_string())
         }
         "list_purchases" => {
@@ -576,17 +623,18 @@ pub fn dispatch_invoke(
             let user: repo::UserPayload = get_arg(&args, "user", "user")?;
             let conn = state.conn.lock().map_err(|e| e.to_string())?;
             let id = repo::upsert_user(&conn, &user)?;
+            crate::auth::audit(&conn, actor, "upsert_user", format!("user {} ({}, {})", user.name, user.role, if user.id.is_some() { "edited" } else { "added" }));
             serde_json::to_value(id).map_err(|e| e.to_string())
         }
         "verify_pin" => {
             let pin: String = get_arg(&args, "pin", "pin")?;
             let required_role: Option<String> = get_opt_arg(&args, "requiredRole", "required_role")?;
             let conn = state.conn.lock().map_err(|e| e.to_string())?;
-            let user = repo::verify_pin(&conn, &pin, required_role.as_deref())?;
+            let user = crate::auth::login(&state.auth, &conn, &pin, required_role.as_deref())?;
             serde_json::to_value(user).map_err(|e| e.to_string())
         }
         "record_audit_log" => {
-            let log: repo::AuditLogPayload = get_arg(&args, "log", "log")?;
+            let log: repo::AuditLogPayload = get_arg(&args, "auditLog", "audit_log")?;
             let conn = state.conn.lock().map_err(|e| e.to_string())?;
             let id = repo::record_audit_log(&conn, &log)?;
             serde_json::to_value(id).map_err(|e| e.to_string())
@@ -602,6 +650,7 @@ pub fn dispatch_invoke(
                 get_arg(&args, "discrepancies", "discrepancies")?;
             let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
             let count = repo::apply_stock_audit(&mut conn, &discrepancies)?;
+            crate::auth::audit(&conn, actor, "apply_stock_audit", format!("{} items counted", discrepancies.len()));
             serde_json::to_value(count).map_err(|e| e.to_string())
         }
         "set_item_photo" => {
@@ -663,7 +712,7 @@ pub fn dispatch_invoke(
             serde_json::to_value(list).map_err(|e| e.to_string())
         }
         "list_expiring_batches" => {
-            let days_ahead: i64 = get_arg(&args, "daysAhead", "days_ahead")?;
+            let days_ahead: i64 = get_arg(&args, "daysThreshold", "days_threshold")?;
             let now_iso: String = get_arg(&args, "nowIso", "now_iso").unwrap_or_default();
             let conn = state.conn.lock().map_err(|e| e.to_string())?;
             let list = repo::list_expiring_batches(&conn, days_ahead, &now_iso)?;
@@ -755,8 +804,74 @@ mod tests {
 
     #[test]
     fn test_compute_server_urls() {
-        let urls = compute_server_urls(9090);
+        let urls = compute_server_urls(9090, "abc");
         assert!(!urls.is_empty());
-        assert!(urls.iter().any(|u| u == "http://localhost:9090"));
+        assert!(urls.iter().any(|u| u == "http://localhost:9090/?key=abc"));
+    }
+
+    #[test]
+    fn access_key_is_random_hex_and_compared_exactly() {
+        let a = generate_token().unwrap();
+        let b = generate_token().unwrap();
+        assert_eq!(a.len(), 32);
+        assert_ne!(a, b);
+        assert!(token_matches(&a, &a));
+        assert!(!token_matches(&a, &b));
+        assert!(!token_matches("", ""));
+    }
+
+    /// The browser client sends exactly the argument names the desktop commands use.
+    #[test]
+    fn lan_commands_accept_the_arguments_the_client_sends() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("t.db");
+        crate::db::migrate(&db).unwrap();
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        let state = AppState {
+            data_dir: dir.path().to_path_buf(),
+            db_path: db,
+            conn: Arc::new(Mutex::new(conn)),
+            restoring: Arc::new(AtomicBool::new(false)),
+            auth: Arc::new(crate::auth::Auth::default()),
+        };
+        let audit = serde_json::json!({"auditLog": {"userId": null, "action": "x", "details": "", "createdAt": "2026-11-08T10:00:00Z"}});
+        assert!(dispatch_invoke(&state, "record_audit_log", audit, None).is_ok());
+        let exp = serde_json::json!({"daysThreshold": 30, "nowIso": "2026-11-08"});
+        assert!(dispatch_invoke(&state, "list_expiring_batches", exp, None).is_ok());
+    }
+
+    #[test]
+    fn sensitive_actions_are_audited_with_the_acting_user() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("t.db");
+        crate::db::migrate(&db).unwrap();
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        let owner = repo::upsert_user(
+            &conn,
+            &repo::UserPayload { id: None, name: "Owner".into(), role: "owner".into(), pin: "1111".into(), is_active: true, created_at: "x".into() },
+        )
+        .unwrap();
+        let state = AppState {
+            data_dir: dir.path().to_path_buf(),
+            db_path: db,
+            conn: Arc::new(Mutex::new(conn)),
+            restoring: Arc::new(AtomicBool::new(false)),
+            auth: Arc::new(crate::auth::Auth::default()),
+        };
+        let login = {
+            let c = state.conn.lock().unwrap();
+            crate::auth::login(&state.auth, &c, "1111", None).unwrap().unwrap()
+        };
+        let token = login["sessionToken"].as_str().unwrap().to_string();
+        let user = serde_json::json!({"user": {"id": null, "name": "Priya", "role": "cashier", "pin": "2222", "isActive": true, "createdAt": "x"}});
+        dispatch_invoke(&state, "upsert_user", user, Some(&token)).unwrap();
+        let c = state.conn.lock().unwrap();
+        let (uid, action, details): (i64, String, String) = c
+            .query_row("SELECT user_id, action, details FROM audit_logs ORDER BY id DESC LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap();
+        assert_eq!((uid, action.as_str()), (owner, "upsert_user"));
+        assert!(details.contains("Priya") && !details.contains("2222"));
     }
 }

@@ -6,6 +6,7 @@ import type { Item, ItemBatch, StockMovementRecord } from "@mytowncart-billing/s
 import { PageHeader } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
 import { getRepository } from "../lib/repository";
+import { useIsOwner } from "../lib/roles";
 import { effectiveLowStockThreshold } from "../lib/stockAlerts";
 import { useAppStore } from "../store/appStore";
 
@@ -158,6 +159,7 @@ function MovementHistory({ item }: { item: Item }) {
 }
 
 export function StockScreen() {
+  const isOwner = useIsOwner();
   const profile = useAppStore((s) => s.profile);
   const dataVersion = useAppStore((s) => s.dataVersion);
   const bumpDataVersion = useAppStore((s) => s.bumpDataVersion);
@@ -324,13 +326,15 @@ export function StockScreen() {
                   {formatQty(item.stockMilli)}
                 </td>
                 <td className="px-3 py-2">
-                  <button
-                    type="button"
-                    className="text-sm text-blue-600 hover:underline"
-                    onClick={() => setAdjusting(item)}
-                  >
-                    {t("stock.adjust")}
-                  </button>
+                  {isOwner ? (
+                    <button
+                      type="button"
+                      className="text-sm text-blue-600 hover:underline"
+                      onClick={() => setAdjusting(item)}
+                    >
+                      {t("stock.adjust")}
+                    </button>
+                  ) : null}
                 </td>
               </tr>
             ))}

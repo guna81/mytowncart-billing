@@ -24,6 +24,10 @@ not rebuild desktop installers.
   and day-end cash counting with expected-versus-counted variance and Z-report.
 - **Reports:** date-range sales, item and payment summaries, profit, sales
   trend/payment charts, and B2B/B2CS/CDNR/HSN GSTR-1 CSV datasets for review.
+- **Users and security:** PIN login with owner and cashier roles enforced in the
+  app core, hashed PINs, an audit log of sensitive actions, and an access key for
+  the LAN browser. Credit notes are limited to what was sold, customer balances
+  include credit notes, and loyalty points are saved with the bill.
 - **Language:** English, Tamil and Hindi selection in Settings. Some operational
   text remains English.
 - **Backups:** encrypted folder backups and a startup check that attempts a

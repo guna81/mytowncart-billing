@@ -99,7 +99,16 @@ export function computeBill(
     const weightSum = weights.reduce((s, w) => s + w, 0);
     if (weightSum > 0) {
       const billDiscountShares = allocatePaise(Math.min(billDiscount, weightSum), weights);
-      finalDiscounts = finalDiscounts.map((d, i) => d + (billDiscountShares[i] ?? 0));
+      // Shares are amounts off what the customer pays (tax-inclusive). When prices
+      // exclude tax the line discount is taken off the net, so scale the share
+      // back by (1 + rate) — otherwise a Rs 100 discount at 18% GST would take
+      // Rs 118 off the total.
+      finalDiscounts = finalDiscounts.map((d, i) => {
+        const share = billDiscountShares[i] ?? 0;
+        const bp = initialLines[i]!.line.taxRateBp;
+        const netShare = opts.pricesIncludeTax || bp === 0 ? share : roundDiv(share * 10_000, 10_000 + bp);
+        return d + netShare;
+      });
     }
   }
 
@@ -196,8 +205,11 @@ export function validateBill(
     return s + p.amountPaise;
   }, 0);
   if (paid < bill.totalPaise) errors.push("payment.insufficient");
-  if (paid > bill.totalPaise && !payments.some((p) => p.mode === "cash")) {
-    errors.push("payment.overpay_requires_cash");
+  if (paid > bill.totalPaise) {
+    // Change is handed back in cash, so it can never exceed the cash tendered.
+    const cash = payments.filter((p) => p.mode === "cash").reduce((s, p) => s + p.amountPaise, 0);
+    if (cash === 0) errors.push("payment.overpay_requires_cash");
+    else if (paid - bill.totalPaise > cash) errors.push("payment.change_exceeds_cash");
   }
   if (hasCredit && (opts?.customerId === undefined || opts?.customerId === null)) {
     errors.push("payment.credit_requires_customer");

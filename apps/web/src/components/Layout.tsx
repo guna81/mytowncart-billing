@@ -11,6 +11,7 @@ import { KeyboardShortcutsModal } from "./KeyboardShortcutsModal";
 import { UpdateAvailableButton } from "./UpdateAvailableButton";
 import { Button, Modal } from "./ui";
 import { getRepository } from "../lib/repository";
+import { isOwnerOnlyPath, refreshLoginState, useIsOwner } from "../lib/roles";
 
 interface NavItem {
   to: string;
@@ -183,17 +184,26 @@ export function Layout({ children }: { children: ReactNode }) {
     }
     return false;
   });
+  const isOwner = useIsOwner();
   const [showShortcuts, setShowShortcuts] = useState(false);
+
+  // On start-up (and after users change) lock the terminal if a PIN login is needed.
+  useEffect(() => {
+    void refreshLoginState();
+  }, []);
   const [showNoUsersModal, setShowNoUsersModal] = useState(false);
 
   const handleQuickLockClick = async () => {
     try {
       const users = await getRepository().listUsers();
-      const activeUsers = users.filter((u) => u.isActive && u.pin.trim().length >= 4);
+      const activeUsers = users.filter((u) => u.isActive && u.hasPin);
       if (activeUsers.length === 0) {
         setShowNoUsersModal(true);
         return;
       }
+      // Locking ends the login session, so the next person must enter their own PIN.
+      setCurrentUser(null);
+      await getRepository().logout();
       setIsLocked(true);
     } catch {
       setIsLocked(true);
@@ -338,7 +348,7 @@ export function Layout({ children }: { children: ReactNode }) {
                 ) : collapsed && gIdx > 0 ? (
                   <div className="my-2 border-t border-gray-100" />
                 ) : null}
-                {group.items.map((item) => (
+                {group.items.filter((item) => isOwner || !isOwnerOnlyPath(item.to)).map((item) => (
                   <NavLink
                     key={item.to}
                     to={item.to}

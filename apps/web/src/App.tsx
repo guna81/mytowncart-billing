@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { OwnerOnly } from "./components/OwnerOnly";
 import { useEffect } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 
@@ -85,21 +86,21 @@ export function App() {
             <Route path="/dashboard" element={<DashboardScreen />} />
             <Route path="/items" element={<ItemsScreen />} />
             <Route path="/items/labels" element={<BarcodeLabelsScreen />} />
-            <Route path="/items/new" element={<ItemFormScreen />} />
-            <Route path="/items/:id/edit" element={<ItemFormScreen />} />
+            <Route path="/items/new" element={<OwnerOnly><ItemFormScreen /></OwnerOnly>} />
+            <Route path="/items/:id/edit" element={<OwnerOnly><ItemFormScreen /></OwnerOnly>} />
             <Route path="/bills" element={<BillsScreen />} />
             <Route path="/bills/:id" element={<BillDetailScreen />} />
             <Route path="/customers" element={<CustomersScreen />} />
-            <Route path="/suppliers" element={<SuppliersScreen />} />
-            <Route path="/purchases" element={<PurchasesScreen />} />
-            <Route path="/purchases/new" element={<PurchaseFormScreen />} />
+            <Route path="/suppliers" element={<OwnerOnly><SuppliersScreen /></OwnerOnly>} />
+            <Route path="/purchases" element={<OwnerOnly><PurchasesScreen /></OwnerOnly>} />
+            <Route path="/purchases/new" element={<OwnerOnly><PurchaseFormScreen /></OwnerOnly>} />
             <Route path="/stock" element={<StockScreen />} />
-            <Route path="/stock-audit" element={<StockAuditScreen />} />
+            <Route path="/stock-audit" element={<OwnerOnly><StockAuditScreen /></OwnerOnly>} />
             <Route path="/day-end" element={<DayEndScreen />} />
-            <Route path="/users" element={<UsersScreen />} />
+            <Route path="/users" element={<OwnerOnly><UsersScreen /></OwnerOnly>} />
             <Route path="/reports" element={<ReportsScreen />} />
-            <Route path="/mytowncart" element={<MyTownCartScreen />} />
-            <Route path="/settings" element={<SettingsScreen />} />
+            <Route path="/mytowncart" element={<OwnerOnly><MyTownCartScreen /></OwnerOnly>} />
+            <Route path="/settings" element={<OwnerOnly><SettingsScreen /></OwnerOnly>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </ErrorBoundary>

@@ -36,7 +36,7 @@ export function PinLockModal({
       .listUsers()
       .then((users) => {
         if (cancelled) return;
-        const valid = users.filter((u) => u.isActive && u.pin.trim().length >= 4);
+        const valid = users.filter((u) => u.isActive && u.hasPin);
         setHasUsers(valid.length > 0);
       })
       .catch(() => {

@@ -36,7 +36,7 @@ installers and `checksums-<platform>.txt` files. Builds are unsigned; read the
 
 ## Recent improvements
 
-The current release adds a restructured Add Item form with sticky footer, POS quick cash tender chips (Exact, ₹100, ₹200, ₹500, ₹2000), single-line collapsed held bills, always-visible Save & Print action, responsive hourly sales heatmaps, contrast improvements, sales dashboard and charts, discounts and split payments, customer balances and payment collection, returns and credit notes, suppliers and purchase receiving, stock audits, barcode labels, day-end cash reconciliation, user/PIN records, loyalty balances, and English, Tamil and Hindi. Reports include profit summaries and GSTR-1 CSV datasets.
+The current release adds a restructured Add Item form with sticky footer, POS quick cash tender chips (Exact, ₹100, ₹200, ₹500, ₹2000), single-line collapsed held bills, always-visible Save & Print action, responsive hourly sales heatmaps, contrast improvements, sales dashboard and charts, discounts and split payments, customer balances and payment collection, returns and credit notes, suppliers and purchase receiving, stock audits, barcode labels, day-end cash reconciliation, PIN login with owner and cashier roles, loyalty balances, and English, Tamil and Hindi. Reports include profit summaries and GSTR-1 CSV datasets.
 
 The latest published installer is **v0.1.2**. See [what changed](docs/WHATS-NEW.md) and [screen workflows](docs/SCREENS.md) for instructions.
 

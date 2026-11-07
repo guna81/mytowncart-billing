@@ -28,7 +28,13 @@ pub fn query_rows(
     sql: &str,
     params: Vec<serde_json::Value>,
 ) -> RepoResult<Vec<serde_json::Map<String, serde_json::Value>>> {
+    if sql.to_ascii_lowercase().contains("user_pins") {
+        return Err("that table cannot be read through query_rows".to_string());
+    }
     let mut stmt = conn.prepare(sql).map_err(err)?;
+    if !stmt.readonly() {
+        return Err("query_rows only runs read-only statements".to_string());
+    }
     let bind: Vec<Value> = params.iter().map(json_to_sqlite).collect();
     let columns: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
     let rows = stmt
@@ -247,12 +253,66 @@ pub struct CustomerPaymentRow {
     pub created_at: String,
 }
 
+/// What a customer owes: credit sold on active bills, less payments received,
+/// less credit-note value applied to those credit bills. MUST match
+/// `packages/storage/src/ledger.ts::buildCustomerLedger`.
+pub fn customer_outstanding(conn: &Connection, customer_id: i64) -> RepoResult<i64> {
+    let credit: i64 = conn
+        .query_row(
+            "SELECT COALESCE(SUM(p.amount_paise), 0) FROM payments p
+             JOIN bills b ON b.id = p.bill_id
+             WHERE b.customer_id = ?1 AND b.status = 'active' AND p.mode = 'credit'",
+            [customer_id],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+    let paid: i64 = conn
+        .query_row(
+            "SELECT COALESCE(SUM(amount_paise), 0) FROM customer_payments WHERE customer_id = ?1",
+            [customer_id],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+    // Each credit note reduces only its own bill's remaining credit.
+    let mut stmt = conn
+        .prepare(
+            "SELECT b.id,
+                    (SELECT COALESCE(SUM(p.amount_paise), 0) FROM payments p WHERE p.bill_id = b.id AND p.mode = 'credit'),
+                    n.total_paise
+             FROM credit_notes n JOIN bills b ON b.id = n.bill_id
+             WHERE b.customer_id = ?1 AND b.status = 'active'
+             ORDER BY n.id",
+        )
+        .map_err(err)?;
+    let rows: Vec<(i64, i64, i64)> = stmt
+        .query_map([customer_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map_err(err)?
+        .collect::<Result<_, _>>()
+        .map_err(err)?;
+    let mut remaining: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    let mut applied_total = 0;
+    for (bill_id, bill_credit, cn_total) in rows {
+        let left = remaining.entry(bill_id).or_insert(bill_credit);
+        let applied = (*left).min(cn_total).max(0);
+        *left -= applied;
+        applied_total += applied;
+    }
+    Ok(credit - paid - applied_total)
+}
+
 pub fn record_customer_payment(conn: &Connection, p: &CustomerPaymentPayload) -> RepoResult<i64> {
     if p.amount_paise <= 0 {
         return Err("payment amount must be positive".to_string());
     }
     if !matches!(p.mode.as_str(), "cash" | "upi" | "card" | "bank") {
         return Err(format!("bad payment mode \"{}\"", p.mode));
+    }
+    let owed = customer_outstanding(conn, p.customer_id)?;
+    if p.amount_paise > owed {
+        return Err(format!(
+            "payment of {} paise is more than the customer owes ({} paise)",
+            p.amount_paise, owed
+        ));
     }
     conn.execute(
         "INSERT INTO customer_payments (customer_id, amount_paise, mode, notes, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -831,6 +891,11 @@ pub struct NewBillPayload {
     pub round_off_paise: i64,
     #[serde(default)]
     pub notes: String,
+    /// Loyalty points earned / redeemed by this sale; applied in the bill's transaction.
+    #[serde(default)]
+    pub loyalty_earned: i64,
+    #[serde(default)]
+    pub loyalty_redeemed: i64,
     pub created_at: String,
     pub lines: Vec<BillLinePayload>,
     pub payments: Vec<PaymentPayload>,
@@ -1050,9 +1115,13 @@ pub fn create_bill(conn: &mut Connection, p: &NewBillPayload) -> RepoResult<Crea
 
     // 2. Insert the bill.
     tx.execute(
-        "INSERT INTO bills (number, fy, status, customer_id, subtotal_paise, tax_paise, total_paise, created_at)
-         VALUES (?1, ?2, 'active', ?3, ?4, ?5, ?6, ?7)",
-        rusqlite::params![number, p.fy, p.customer_id, p.subtotal_paise, p.tax_paise, p.total_paise, p.created_at],
+        "INSERT INTO bills (number, fy, status, customer_id, subtotal_paise, tax_paise, total_paise, created_at,
+                            discount_paise, round_off_paise, notes)
+         VALUES (?1, ?2, 'active', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        rusqlite::params![
+            number, p.fy, p.customer_id, p.subtotal_paise, p.tax_paise, p.total_paise, p.created_at,
+            p.discount_paise, p.round_off_paise, p.notes
+        ],
     )
     .map_err(err)?;
     let bill_id = tx.last_insert_rowid();
@@ -1062,8 +1131,9 @@ pub fn create_bill(conn: &mut Connection, p: &NewBillPayload) -> RepoResult<Crea
     for (i, line) in p.lines.iter().enumerate() {
         tx.execute(
             "INSERT INTO bill_lines
-               (bill_id, line_no, item_id, name_snapshot, qty_milli, unit_price_paise, tax_rate_bp, tax_paise, total_paise)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+               (bill_id, line_no, item_id, name_snapshot, qty_milli, unit_price_paise, tax_rate_bp, tax_paise, total_paise,
+                discount_paise, hsn_code)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             rusqlite::params![
                 bill_id,
                 (i + 1) as i64,
@@ -1074,6 +1144,8 @@ pub fn create_bill(conn: &mut Connection, p: &NewBillPayload) -> RepoResult<Crea
                 line.tax_rate_bp,
                 line.tax_paise,
                 line.total_paise,
+                line.discount_paise,
+                line.hsn_code,
             ],
         )
         .map_err(err)?;
@@ -1098,6 +1170,37 @@ pub fn create_bill(conn: &mut Connection, p: &NewBillPayload) -> RepoResult<Crea
         .map_err(err)?;
     }
 
+    // 5. Loyalty points, atomically with the bill (any failure rolls the whole sale back).
+    if p.loyalty_earned < 0 || p.loyalty_redeemed < 0 {
+        return Err("loyalty points must not be negative".to_string());
+    }
+    if let Some(customer_id) = p.customer_id {
+        if p.loyalty_earned > 0 || p.loyalty_redeemed > 0 {
+            let balance: i64 = tx
+                .query_row("SELECT loyalty_points FROM customers WHERE id = ?1", [customer_id], |r| r.get(0))
+                .map_err(|_| format!("no customer with id {customer_id}"))?;
+            if p.loyalty_redeemed > balance {
+                return Err("cannot redeem more loyalty points than the customer has".to_string());
+            }
+            for (delta, label) in [(p.loyalty_earned, "Earned"), (-p.loyalty_redeemed, "Redeemed")] {
+                if delta == 0 {
+                    continue;
+                }
+                tx.execute(
+                    "UPDATE customers SET loyalty_points = MAX(0, loyalty_points + ?1) WHERE id = ?2",
+                    rusqlite::params![delta, customer_id],
+                )
+                .map_err(err)?;
+                tx.execute(
+                    "INSERT INTO loyalty_transactions (customer_id, bill_id, points_delta, reason, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![customer_id, bill_id, delta, format!("{label} on {number}"), p.created_at],
+                )
+                .map_err(err)?;
+            }
+        }
+    }
+
     tx.commit().map_err(err)?;
     Ok(CreatedBill { bill_id, number, seq })
 }
@@ -1117,6 +1220,12 @@ pub fn void_bill(conn: &mut Connection, bill_id: i64, reason: &str, voided_at: &
         .map_err(|_| format!("no bill with id {bill_id}"))?;
     if status != "active" {
         return Err(format!("bill {bill_id} is already void"));
+    }
+    let note_count: i64 = tx
+        .query_row("SELECT COUNT(*) FROM credit_notes WHERE bill_id = ?1", [bill_id], |r| r.get(0))
+        .map_err(err)?;
+    if note_count > 0 {
+        return Err(format!("bill {bill_id} has credit notes and cannot be voided"));
     }
     tx.execute(
         "UPDATE bills SET status = 'void', voided_at = ?2, void_reason = ?3 WHERE id = ?1",
@@ -1218,10 +1327,55 @@ pub fn create_credit_note(conn: &mut Connection, p: &NewCreditNotePayload) -> Re
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(err)?;
 
-    // Get the bill's FY
-    let fy: String = tx
-        .query_row("SELECT fy FROM bills WHERE id = ?1", rusqlite::params![p.bill_id], |r| r.get(0))
+    // Get the bill's FY and status
+    let (fy, bill_status): (String, String) = tx
+        .query_row("SELECT fy, status FROM bills WHERE id = ?1", rusqlite::params![p.bill_id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
         .map_err(|_| format!("no bill with id {}", p.bill_id))?;
+    if bill_status != "active" {
+        return Err(format!("bill {} is void; it cannot be returned against", p.bill_id));
+    }
+
+    // Each returned line must belong to this bill, and the cumulative returned
+    // quantity (including earlier credit notes) must not exceed what was sold.
+    let mut requested: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    for line in &p.lines {
+        if line.qty_milli <= 0 {
+            return Err("returned quantity must be positive".to_string());
+        }
+        if line.total_paise < 0 || line.tax_paise < 0 {
+            return Err("credit note amounts must not be negative".to_string());
+        }
+        let item_id = line.item_id.ok_or_else(|| "credit note lines must reference an item".to_string())?;
+        *requested.entry(item_id).or_insert(0) += line.qty_milli;
+    }
+    for (item_id, qty) in &requested {
+        let sold: i64 = tx
+            .query_row(
+                "SELECT COALESCE(SUM(qty_milli), 0) FROM bill_lines WHERE bill_id = ?1 AND item_id = ?2",
+                rusqlite::params![p.bill_id, item_id],
+                |r| r.get(0),
+            )
+            .map_err(err)?;
+        let returned: i64 = tx
+            .query_row(
+                "SELECT COALESCE(SUM(l.qty_milli), 0) FROM credit_note_lines l
+                 JOIN credit_notes c ON c.id = l.credit_note_id
+                 WHERE c.bill_id = ?1 AND l.item_id = ?2",
+                rusqlite::params![p.bill_id, item_id],
+                |r| r.get(0),
+            )
+            .map_err(err)?;
+        if sold == 0 {
+            return Err(format!("item {item_id} is not on bill {}", p.bill_id));
+        }
+        if returned + qty > sold {
+            return Err(format!(
+                "cannot return more than was sold for item {item_id} (sold {sold}, already returned {returned}, requested {qty})"
+            ));
+        }
+    }
 
     // Allocate sequential credit note number for this FY
     let prefix = "CN-";
@@ -1826,41 +1980,89 @@ pub struct UserRow {
     pub id: i64,
     pub name: String,
     pub role: String,
-    pub pin: String,
+    /// Whether a PIN is set. The PIN itself (a salted hash) never leaves the database.
+    pub has_pin: bool,
     pub is_active: bool,
     pub created_at: String,
 }
 
 pub fn upsert_user(conn: &Connection, p: &UserPayload) -> RepoResult<i64> {
+    conn.execute_batch("SAVEPOINT upsert_user").map_err(err)?;
+    match upsert_user_inner(conn, p) {
+        Ok(id) => {
+            conn.execute_batch("RELEASE upsert_user").map_err(err)?;
+            Ok(id)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK TO upsert_user; RELEASE upsert_user");
+            Err(e)
+        }
+    }
+}
+
+fn upsert_user_inner(conn: &Connection, p: &UserPayload) -> RepoResult<i64> {
     if p.name.trim().is_empty() {
         return Err("user name is required".to_string());
     }
     if !matches!(p.role.as_str(), "owner" | "cashier") {
         return Err("role must be 'owner' or 'cashier'".to_string());
     }
-    match p.id {
+    let pin = p.pin.trim();
+    // A blank PIN on an existing user means "leave it unchanged".
+    if p.id.is_none() || !pin.is_empty() {
+        crate::auth::validate_pin(pin)?;
+    }
+    let id = match p.id {
         Some(id) => {
             conn.execute(
-                "UPDATE users SET name = ?2, role = ?3, pin = ?4, is_active = ?5 WHERE id = ?1",
-                rusqlite::params![id, p.name.trim(), p.role, p.pin.trim(), p.is_active as i64],
+                "UPDATE users SET name = ?2, role = ?3, is_active = ?4 WHERE id = ?1",
+                rusqlite::params![id, p.name.trim(), p.role, p.is_active as i64],
             )
             .map_err(err)?;
-            Ok(id)
+            id
         }
         None => {
             conn.execute(
-                "INSERT INTO users (name, role, pin, is_active, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![p.name.trim(), p.role, p.pin.trim(), p.is_active as i64, p.created_at],
+                "INSERT INTO users (name, role, pin, is_active, created_at) VALUES (?1, ?2, '', ?3, ?4)",
+                rusqlite::params![p.name.trim(), p.role, p.is_active as i64, p.created_at],
             )
             .map_err(err)?;
-            Ok(conn.last_insert_rowid())
+            conn.last_insert_rowid()
         }
+    };
+    if !pin.is_empty() {
+        conn.execute(
+            "INSERT INTO user_pins (user_id, hash) VALUES (?1, ?2)
+             ON CONFLICT (user_id) DO UPDATE SET hash = excluded.hash",
+            rusqlite::params![id, crate::auth::hash_pin(pin)?],
+        )
+        .map_err(err)?;
     }
+    // Never leave the shop without an active owner who can log in.
+    let owners: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM users u JOIN user_pins p ON p.user_id = u.id
+             WHERE u.is_active = 1 AND u.role = 'owner'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+    let any_pin: i64 = conn
+        .query_row("SELECT COUNT(*) FROM user_pins", [], |r| r.get(0))
+        .map_err(err)?;
+    if any_pin > 0 && owners == 0 {
+        return Err("at least one active owner with a PIN is required".to_string());
+    }
+    Ok(id)
 }
 
 pub fn list_users(conn: &Connection) -> RepoResult<Vec<UserRow>> {
     let mut stmt = conn
-        .prepare("SELECT id, name, role, pin, is_active, created_at FROM users ORDER BY id ASC")
+        .prepare(
+            "SELECT u.id, u.name, u.role, EXISTS(SELECT 1 FROM user_pins p WHERE p.user_id = u.id),
+                    u.is_active, u.created_at
+             FROM users u ORDER BY u.id ASC",
+        )
         .map_err(err)?;
     let rows = stmt
         .query_map([], |r| {
@@ -1868,7 +2070,7 @@ pub fn list_users(conn: &Connection) -> RepoResult<Vec<UserRow>> {
                 id: r.get(0)?,
                 name: r.get(1)?,
                 role: r.get(2)?,
-                pin: r.get(3)?,
+                has_pin: r.get::<_, i64>(3)? == 1,
                 is_active: r.get::<_, i64>(4)? == 1,
                 created_at: r.get(5)?,
             })
@@ -1879,33 +2081,35 @@ pub fn list_users(conn: &Connection) -> RepoResult<Vec<UserRow>> {
     Ok(rows)
 }
 
+/// Find the active user whose PIN matches (optionally restricted to one role).
+/// Callers are responsible for throttling and for creating a session.
 pub fn verify_pin(conn: &Connection, pin: &str, required_role: Option<&str>) -> RepoResult<Option<UserRow>> {
     let trimmed = pin.trim();
     if trimmed.is_empty() {
         return Ok(None);
     }
-    let mut sql = "SELECT id, name, role, pin, is_active, created_at FROM users WHERE pin = ?1 AND is_active = 1".to_string();
-    if let Some(role) = required_role {
-        sql.push_str(&format!(" AND role = '{role}'"));
-    }
-    sql.push_str(" LIMIT 1");
-    let mut stmt = conn.prepare(&sql).map_err(err)?;
-    let mut rows = stmt
-        .query_map(rusqlite::params![trimmed], |r| {
-            Ok(UserRow {
-                id: r.get(0)?,
-                name: r.get(1)?,
-                role: r.get(2)?,
-                pin: r.get(3)?,
-                is_active: r.get::<_, i64>(4)? == 1,
-                created_at: r.get(5)?,
-            })
-        })
+    let mut stmt = conn
+        .prepare(
+            "SELECT u.id, u.name, u.role, p.hash, u.created_at FROM users u
+             JOIN user_pins p ON p.user_id = u.id
+             WHERE u.is_active = 1 AND (?1 IS NULL OR u.role = ?1) ORDER BY u.id",
+        )
         .map_err(err)?;
-    match rows.next() {
-        Some(r) => Ok(Some(r.map_err(err)?)),
-        None => Ok(None),
+    let candidates: Vec<(i64, String, String, String, String)> = stmt
+        .query_map(rusqlite::params![required_role], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })
+        .map_err(err)?
+        .collect::<Result<_, _>>()
+        .map_err(err)?;
+    // Check every candidate (no early exit on timing of which user matched).
+    let mut found = None;
+    for (id, name, role, hash, created_at) in candidates {
+        if crate::auth::verify_pin_hash(trimmed, &hash) && found.is_none() {
+            found = Some(UserRow { id, name, role, has_pin: true, is_active: true, created_at });
+        }
     }
+    Ok(found)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2550,6 +2754,8 @@ mod tests {
             discount_paise: 0,
             round_off_paise: 0,
             notes: String::new(),
+            loyalty_earned: 0,
+            loyalty_redeemed: 0,
             created_at: "2026-11-04T10:00:00Z".to_string(),
             lines: vec![BillLinePayload {
                 item_id,
@@ -2578,6 +2784,257 @@ mod tests {
             |r| r.get(0),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn bill_discount_round_off_and_hsn_are_persisted() {
+        let (_d, mut conn) = setup();
+        let id = item(&mut conn, "Soap", 10_000);
+        let mut p = bill_payload(id, 1000);
+        p.discount_paise = 50;
+        p.round_off_paise = -5;
+        p.notes = "PO 7".to_string();
+        p.lines[0].discount_paise = 50;
+        p.lines[0].hsn_code = "3401".to_string();
+        let created = create_bill(&mut conn, &p).unwrap();
+        let (d, r, n): (i64, i64, String) = conn
+            .query_row("SELECT discount_paise, round_off_paise, notes FROM bills WHERE id = ?1", [created.bill_id], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap();
+        assert_eq!((d, r, n.as_str()), (50, -5, "PO 7"));
+        let (ld, h): (i64, String) = conn
+            .query_row("SELECT discount_paise, hsn_code FROM bill_lines WHERE bill_id = ?1", [created.bill_id], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((ld, h.as_str()), (50, "3401"));
+    }
+
+    #[test]
+    fn loyalty_is_applied_with_the_bill_and_rolls_back_with_it() {
+        let (_d, mut conn) = setup();
+        let id = item(&mut conn, "Soap", 10_000);
+        let cust = upsert_customer(
+            &conn,
+            &CustomerPayload { id: None, name: "A".into(), phone: "1".into(), gstin: String::new(), address: String::new(), now: "2026-11-04T09:00:00Z".into() },
+        )
+        .unwrap();
+        let mut p = bill_payload(id, 1000);
+        p.customer_id = Some(cust);
+        p.loyalty_earned = 10;
+        create_bill(&mut conn, &p).unwrap();
+        assert_eq!(get_customer_loyalty_balance(&conn, cust).unwrap(), 10);
+
+        // Over-redeeming fails and leaves no bill, stock change or points behind.
+        let bills_before: i64 = conn.query_row("SELECT COUNT(*) FROM bills", [], |r| r.get(0)).unwrap();
+        let stock_before = stock_cache(&conn, id);
+        p.loyalty_earned = 0;
+        p.loyalty_redeemed = 50;
+        assert!(create_bill(&mut conn, &p).is_err());
+        let bills_after: i64 = conn.query_row("SELECT COUNT(*) FROM bills", [], |r| r.get(0)).unwrap();
+        assert_eq!(bills_before, bills_after);
+        assert_eq!(stock_before, stock_cache(&conn, id));
+        assert_eq!(get_customer_loyalty_balance(&conn, cust).unwrap(), 10);
+
+        p.loyalty_redeemed = 4;
+        create_bill(&mut conn, &p).unwrap();
+        assert_eq!(get_customer_loyalty_balance(&conn, cust).unwrap(), 6);
+    }
+
+    #[test]
+    fn customer_payments_are_capped_and_credit_notes_reduce_the_balance() {
+        let (_d, mut conn) = setup();
+        let id = item(&mut conn, "Soap", 10_000);
+        let cust = upsert_customer(
+            &conn,
+            &CustomerPayload { id: None, name: "A".into(), phone: "1".into(), gstin: String::new(), address: String::new(), now: "2026-11-04T09:00:00Z".into() },
+        )
+        .unwrap();
+        // Rs 20 bill: Rs 5 cash + Rs 15 credit.
+        let mut p = bill_payload(id, 2000);
+        p.customer_id = Some(cust);
+        p.subtotal_paise = 2000;
+        p.total_paise = 2000;
+        p.lines[0].qty_milli = 2000;
+        p.lines[0].total_paise = 2000;
+        p.payments = vec![
+            PaymentPayload { mode: "cash".into(), amount_paise: 500 },
+            PaymentPayload { mode: "credit".into(), amount_paise: 1500 },
+        ];
+        let bill = create_bill(&mut conn, &p).unwrap();
+        assert_eq!(customer_outstanding(&conn, cust).unwrap(), 1500);
+
+        let pay = |amount: i64| CustomerPaymentPayload {
+            customer_id: cust,
+            amount_paise: amount,
+            mode: "cash".into(),
+            notes: String::new(),
+            created_at: "2026-11-04T12:00:00Z".into(),
+        };
+        assert!(record_customer_payment(&conn, &pay(1600)).is_err());
+
+        // Return 1 unit (Rs 10): the balance drops by Rs 10.
+        let cn = NewCreditNotePayload {
+            bill_id: bill.bill_id,
+            reason: "damaged".into(),
+            created_at: "2026-11-04T11:00:00Z".into(),
+            lines: vec![CreditNoteLinePayload {
+                item_id: Some(id),
+                name_snapshot: "Item".into(),
+                qty_milli: 1000,
+                unit_price_paise: 1000,
+                tax_rate_bp: 0,
+                tax_paise: 0,
+                total_paise: 1000,
+                hsn_code: String::new(),
+            }],
+        };
+        create_credit_note(&mut conn, &cn).unwrap();
+        assert_eq!(customer_outstanding(&conn, cust).unwrap(), 500);
+        assert!(record_customer_payment(&conn, &pay(600)).is_err());
+        record_customer_payment(&conn, &pay(500)).unwrap();
+        assert_eq!(customer_outstanding(&conn, cust).unwrap(), 0);
+
+        // A bill with credit notes cannot be voided.
+        assert!(void_bill(&mut conn, bill.bill_id, "oops", "2026-11-04T13:00:00Z").is_err());
+    }
+
+    fn user(conn: &Connection, name: &str, role: &str, pin: &str) -> RepoResult<i64> {
+        upsert_user(
+            conn,
+            &UserPayload {
+                id: None,
+                name: name.to_string(),
+                role: role.to_string(),
+                pin: pin.to_string(),
+                is_active: true,
+                created_at: "2026-11-06T10:00:00Z".to_string(),
+            },
+        )
+    }
+
+    #[test]
+    fn pins_are_hashed_and_never_listed_or_readable() {
+        let (_d, conn) = setup();
+        let owner = user(&conn, "Owner", "owner", "4321").unwrap();
+        assert!(list_users(&conn).unwrap().iter().all(|u| u.has_pin));
+        let json = serde_json::to_string(&list_users(&conn).unwrap()).unwrap();
+        assert!(!json.contains("4321") && !json.contains("h1$"));
+        let stored: String = conn.query_row("SELECT hash FROM user_pins WHERE user_id = ?1", [owner], |r| r.get(0)).unwrap();
+        assert!(stored.starts_with("h1$") && !stored.contains("4321"));
+        let plain: String = conn.query_row("SELECT pin FROM users WHERE id = ?1", [owner], |r| r.get(0)).unwrap();
+        assert_eq!(plain, "");
+        assert!(query_rows(&conn, "SELECT hash FROM user_pins", vec![]).is_err());
+        // Blank PIN on edit keeps the old one; a bad PIN is refused.
+        upsert_user(&conn, &UserPayload { id: Some(owner), name: "Owner 2".into(), role: "owner".into(), pin: String::new(), is_active: true, created_at: String::new() }).unwrap();
+        assert!(verify_pin(&conn, "4321", None).unwrap().is_some());
+        assert!(user(&conn, "X", "cashier", "12").is_err());
+    }
+
+    #[test]
+    fn legacy_plaintext_pins_are_upgraded() {
+        let (_d, conn) = setup();
+        conn.execute(
+            "INSERT INTO users (name, role, pin, is_active, created_at) VALUES ('Old', 'owner', '9876', 1, 'x')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(crate::auth::upgrade_legacy_pins(&conn).unwrap(), 1);
+        assert!(verify_pin(&conn, "9876", Some("owner")).unwrap().is_some());
+        let plain: String = conn.query_row("SELECT pin FROM users", [], |r| r.get(0)).unwrap();
+        assert_eq!(plain, "");
+    }
+
+    #[test]
+    fn the_last_owner_cannot_be_removed_and_a_failed_save_leaves_nothing() {
+        let (_d, conn) = setup();
+        // First user must be an owner; the refused cashier is rolled back entirely.
+        assert!(user(&conn, "Priya", "cashier", "1111").is_err());
+        assert_eq!(list_users(&conn).unwrap().len(), 0);
+        let owner = user(&conn, "Owner", "owner", "2222").unwrap();
+        let demote = UserPayload { id: Some(owner), name: "Owner".into(), role: "cashier".into(), pin: String::new(), is_active: true, created_at: String::new() };
+        assert!(upsert_user(&conn, &demote).is_err());
+        assert_eq!(list_users(&conn).unwrap()[0].role, "owner");
+    }
+
+    #[test]
+    fn roles_are_enforced_through_sessions_and_throttled() {
+        let (_d, conn) = setup();
+        let auth = crate::auth::Auth::default();
+        // Setup mode: nobody has a PIN yet, so everything is allowed.
+        assert!(auth.authorize(&conn, "void_bill", None).is_ok());
+
+        user(&conn, "Owner", "owner", "1111").unwrap();
+        user(&conn, "Priya", "cashier", "2222").unwrap();
+        assert!(auth.authorize(&conn, "create_bill", None).is_err());
+        assert!(auth.authorize(&conn, "verify_pin", None).is_ok());
+
+        let token_of = |pin: &str| {
+            crate::auth::login(&auth, &conn, pin, None)
+                .unwrap()
+                .and_then(|v| v["sessionToken"].as_str().map(String::from))
+        };
+        let cashier = token_of("2222").unwrap();
+        assert!(auth.authorize(&conn, "create_bill", Some(&cashier)).is_ok());
+        assert!(auth.authorize(&conn, "void_bill", Some(&cashier)).is_err());
+        assert!(auth.authorize(&conn, "upsert_user", Some(&cashier)).is_err());
+
+        let owner = token_of("1111").unwrap();
+        assert!(auth.authorize(&conn, "void_bill", Some(&owner)).is_ok());
+        auth.end_session(&owner);
+        assert!(auth.authorize(&conn, "void_bill", Some(&owner)).is_err());
+
+        // A role-restricted check never mints a session.
+        let v = crate::auth::login(&auth, &conn, "1111", Some("owner")).unwrap().unwrap();
+        assert!(v.get("sessionToken").is_none());
+
+        // Repeated wrong PINs lock logins out, even for the right PIN.
+        for _ in 0..8 {
+            assert!(crate::auth::login(&auth, &conn, "0000", None).unwrap().is_none());
+        }
+        assert!(crate::auth::login(&auth, &conn, "1111", None).is_err());
+    }
+
+    #[test]
+    fn pin_role_filter_is_a_bound_parameter() {
+        let (_d, conn) = setup();
+        // Would have been an injection point when the role was spliced into the SQL.
+        assert!(verify_pin(&conn, "1234", Some("x' OR '1'='1")).unwrap().is_none());
+    }
+
+    #[test]
+    fn credit_notes_cannot_over_return_or_target_void_bills() {
+        let (_d, mut conn) = setup();
+        let id = item(&mut conn, "Soap", 10_000);
+        let created = create_bill(&mut conn, &bill_payload(id, 2000)).unwrap();
+        let cn = |qty: i64| NewCreditNotePayload {
+            bill_id: created.bill_id,
+            reason: "damaged".to_string(),
+            created_at: "2026-11-04T11:00:00Z".to_string(),
+            lines: vec![CreditNoteLinePayload {
+                item_id: Some(id),
+                name_snapshot: "Item".to_string(),
+                qty_milli: qty,
+                unit_price_paise: 1000,
+                tax_rate_bp: 0,
+                tax_paise: 0,
+                total_paise: 1000,
+                hsn_code: String::new(),
+            }],
+        };
+        create_credit_note(&mut conn, &cn(1500)).unwrap();
+        assert!(create_credit_note(&mut conn, &cn(1000)).is_err());
+        assert!(create_credit_note(&mut conn, &cn(0)).is_err());
+        create_credit_note(&mut conn, &cn(500)).unwrap();
+        // A bill that already has credit notes cannot be voided (stock would be restored twice).
+        assert!(void_bill(&mut conn, created.bill_id, "mistake", "2026-11-04T12:00:00Z").is_err());
+        // A voided bill cannot be returned against.
+        let other = create_bill(&mut conn, &bill_payload(id, 1000)).unwrap();
+        void_bill(&mut conn, other.bill_id, "mistake", "2026-11-04T12:00:00Z").unwrap();
+        let mut late = cn(100);
+        late.bill_id = other.bill_id;
+        assert!(create_credit_note(&mut conn, &late).is_err());
     }
 
     #[test]
@@ -2906,7 +3363,7 @@ mod tests {
 
     #[test]
     fn customer_payments_and_delete_validation() {
-        let (_dir, conn) = setup();
+        let (_dir, mut conn) = setup();
         let cust_id = upsert_customer(
             &conn,
             &CustomerPayload {
@@ -2920,11 +3377,26 @@ mod tests {
         )
         .unwrap();
 
+        // The customer must owe something before a payment can be received.
+        let item_id = item(&mut conn, "Rice", 10_000);
+        let mut credit_bill = bill_payload(item_id, 1000);
+        credit_bill.customer_id = Some(cust_id);
+        credit_bill.payments = vec![PaymentPayload { mode: "credit".to_string(), amount_paise: 1000 }];
+        create_bill(&mut conn, &credit_bill).unwrap();
+        let too_much = CustomerPaymentPayload {
+            customer_id: cust_id,
+            amount_paise: 50_000,
+            mode: "upi".to_string(),
+            notes: String::new(),
+            created_at: "2026-11-06T11:00:00Z".to_string(),
+        };
+        assert!(record_customer_payment(&conn, &too_much).is_err());
+
         let pay_id = record_customer_payment(
             &conn,
             &CustomerPaymentPayload {
                 customer_id: cust_id,
-                amount_paise: 50_000,
+                amount_paise: 400,
                 mode: "upi".to_string(),
                 notes: "GPay partial payment".to_string(),
                 created_at: "2026-11-06T11:00:00Z".to_string(),
@@ -2935,7 +3407,7 @@ mod tests {
 
         let payments = list_customer_payments(&conn, cust_id).unwrap();
         assert_eq!(payments.len(), 1);
-        assert_eq!(payments[0].amount_paise, 50_000);
+        assert_eq!(payments[0].amount_paise, 400);
         assert_eq!(payments[0].mode, "upi");
 
         // Cannot delete customer who has payment records

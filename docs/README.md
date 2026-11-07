@@ -12,6 +12,7 @@
 | [`DEVELOPING.md`](DEVELOPING.md) | setup, commands, browser-only mode, where to change things, tests, releasing |
 | [`RELEASING.md`](RELEASING.md) | published versions, installer downloads, checksums, and the release runbook |
 | [`PILOT.md`](PILOT.md) | operator runbook: day-one checklist, daily routine, troubleshooting, diagnostics |
+| [`MANUAL-CHECKS.md`](MANUAL-CHECKS.md) | checks to run by hand before a release (upgrade, roles, LAN, billing numbers) |
 
 Related, at the repo root:
 

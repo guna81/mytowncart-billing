@@ -39,6 +39,9 @@ interface AppState {
   setIsLocked(locked: boolean): void;
   currentUser: User | null;
   setCurrentUser(user: User | null): void;
+  /** True once any active user has a PIN: from then on a login is required. */
+  loginRequired: boolean;
+  setLoginRequired(required: boolean): void;
 
   /** App UI Locale */
   locale: SupportedLocale;
@@ -78,6 +81,8 @@ export const useAppStore = create<AppState>((set) => ({
   setIsLocked: (isLocked) => set({ isLocked }),
   currentUser: null,
   setCurrentUser: (currentUser) => set({ currentUser }),
+  loginRequired: false,
+  setLoginRequired: (loginRequired) => set({ loginRequired }),
 
   locale: initialLocale,
   setAppLocale: (locale) => {

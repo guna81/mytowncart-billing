@@ -20,17 +20,23 @@ versus the published installer. LAN access is a development feature; follow
 4. **Print test:** make one test bill, *Print receipt*, and check alignment on
    the receipt printer; *Print invoice* for A4. Then void the test bill with
    a reason so reports stay clean.
-5. **Items:** add (or CSV-import) the catalog with prices, GST rates and
+5. **Users and PINs:** in *Users*, add yourself first as an **Owner** with a
+   4–6 digit PIN, then add each cashier. Once the first PIN exists the terminal
+   asks for a PIN; use *Lock* in the sidebar when stepping away. Cashiers cannot
+   void bills, adjust stock or open Settings. Keep the owner PIN private
+   and written down somewhere safe — there is no PIN reset yet, and a restored
+   backup brings the old PINs back with it.
+6. **Items:** add (or CSV-import) the catalog with prices, GST rates and
    opening stock. Take a stock-take first — opening stock is what the app
    trusts until the first count. Re-importing a CSV with existing barcodes
    updates those items but **ignores** their `opening_stock` column; use the
    Stock screen's adjust/purchase action for later corrections.
-6. **Backup:** Settings → Backup and restore → create the recovery key,
+7. **Backup:** Settings → Backup and restore → create the recovery key,
    write it down, acknowledge, plug in a USB drive, enter its folder,
    remember it, and run *Back up now*. Confirm the file exists on the drive
    and that a second computer can open it with the key (optional but
    recommended).
-7. **MyTownCart:** connect, map categories, publish. Items without photos
+8. **MyTownCart:** connect, map categories, publish. Items without photos
    publish hidden; upload photos from the Photos panel to make them visible.
 
 ## Every day
