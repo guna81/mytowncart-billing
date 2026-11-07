@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 
 import { t } from "../i18n";
 import { getRepository, isInTauri } from "../lib/repository";
@@ -92,6 +93,11 @@ export function SetupWizard() {
         <div>
           <h1 className="text-xl font-bold">{t("setup.title")}</h1>
           <p className="text-sm text-gray-500 mt-1">{t("setup.subtitle")}</p>
+          {isInTauri() ? (
+            <Link to="/restore" className="mt-2 inline-block text-sm text-blue-700 underline" data-testid="setup-restore-link">
+              {t("backup.restore_from_setup")}
+            </Link>
+          ) : null}
         </div>
 
         <label className="block">

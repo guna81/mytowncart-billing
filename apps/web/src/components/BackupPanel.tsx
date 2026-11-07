@@ -13,21 +13,21 @@ import {
   BACKUP_SETTINGS_KEY,
   joinPath,
   parseBackupSettings,
-  restoreDatabase,
   sameVolume,
-  writeBackupFile,
-  type Invoke,
+  writeBackupRaw,
   type LocalBackupSettings,
 } from "@mytowncart-billing/backup";
 
 import { t } from "../i18n";
 import {
   createRecoveryKey,
-  encryptCurrentDatabase,
+  encryptMasterBackup,
   hasRecoveryKey,
-  openBackupWithKey,
   revealRecoveryKey,
+  verifyWrittenBackup,
 } from "../lib/cryptoStore";
+import { invoke, invokeRaw, pickPath } from "../lib/shell";
+import { RestoreFlow } from "./RestoreFlow";
 import { getRepository } from "../lib/repository";
 import { isInTauri } from "../lib/tauri";
 
@@ -35,13 +35,6 @@ const inputCls = "mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm";
 const labelCls = "block text-sm font-medium text-gray-700";
 const btnPrimary =
   "rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:bg-blue-300";
-
-async function shellInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<T>(command, args) as Promise<T>;
-}
-
-const invoke: Invoke = (command, args) => shellInvoke(command, args);
 
 const BACKUP_SCHEMA_VERSION = 5;
 
@@ -112,6 +105,11 @@ export function BackupPanel() {
     setMessage(t("backup.folder_saved"));
   };
 
+  const browseFolder = async () => {
+    const chosen = await pickPath({ directory: true, title: t("backup.folder") });
+    if (chosen) setFolder(chosen);
+  };
+
   const backupNow = async () => {
     setError(null);
     setMessage(null);
@@ -119,13 +117,17 @@ export function BackupPanel() {
     setBusy(true);
     try {
       const createdAt = new Date();
-      const bytes = await encryptCurrentDatabase(invoke, {
+      const bytes = await encryptMasterBackup(invoke, invokeRaw, {
         schemaVersion: BACKUP_SCHEMA_VERSION,
         appVersion: APP_VERSION,
         createdAt: createdAt.toISOString(),
       });
       const file = backupFileName(createdAt);
-      await writeBackupFile(invoke, joinPath(settings.folder, file), bytes);
+      const target = joinPath(settings.folder, file);
+      await writeBackupRaw(invokeRaw, target, bytes);
+      // Read it straight back and decrypt it, so a "saved" backup is known good.
+      const check = await verifyWrittenBackup(invoke, invokeRaw, target);
+      if (!check.ok) throw new Error(t("backup.verify_failed"));
       const next: LocalBackupSettings = {
         ...settings,
         lastSuccessAt: createdAt.toISOString(),
@@ -133,7 +135,15 @@ export function BackupPanel() {
       };
       await getRepository().setAppSetting(BACKUP_SETTINGS_KEY, JSON.stringify(next));
       setSettings(next);
-      setMessage(t("backup.save_done", { file }));
+      setMessage(
+        check.summary.photoCount !== null
+          ? t("backup.save_done_full", {
+              file,
+              items: check.summary.itemCount ?? 0,
+              photos: check.summary.photoCount,
+            })
+          : t("backup.save_done", { file }),
+      );
     } catch (err) {
       const message = errorText(err);
       setError(
@@ -231,6 +241,14 @@ export function BackupPanel() {
               <button
                 type="button"
                 className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm"
+                data-testid="backup-folder-browse"
+                onClick={() => void browseFolder()}
+              >
+                {t("backup.browse")}
+              </button>
+              <button
+                type="button"
+                className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm"
                 data-testid="backup-folder-save"
                 disabled={folder.trim() === ""}
                 onClick={() => void saveFolder()}
@@ -270,83 +288,12 @@ export function BackupPanel() {
             ) : null}
           </div>
 
-          <RestoreSection />
+          <div className="mt-4 border-t border-gray-100 pt-3">
+            <h3 className="font-medium text-gray-800">{t("backup.restore")}</h3>
+            <RestoreFlow />
+          </div>
         </>
       ) : null}
     </section>
-  );
-}
-
-function RestoreSection() {
-  const [path, setPath] = useState("");
-  const [key, setKey] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<string | null>(null);
-
-  const restore = async () => {
-    setError(null);
-    setResult(null);
-    if (!window.confirm(t("backup.restore_confirm"))) return;
-    setBusy(true);
-    try {
-      const opened = await openBackupWithKey(invoke, path.trim(), key);
-      if (!opened.ok) {
-        setError(
-          opened.error === "wrong_key"
-            ? t("backup.restore_wrong_key")
-            : opened.error === "not_backup"
-              ? t("backup.restore_not_backup")
-              : t("backup.restore_corrupt"),
-        );
-        return;
-      }
-      const kept = await restoreDatabase(invoke, opened.gz);
-      setResult(t("backup.restore_done", { path: kept }));
-    } catch (err) {
-      setError(t("backup.restore_failed", { message: errorText(err) }));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="mt-4 border-t border-gray-100 pt-3" data-testid="backup-restore">
-      <h3 className="font-medium text-gray-800">{t("backup.restore")}</h3>
-      <p className="mt-1 text-gray-500">{t("backup.restore_intro")}</p>
-      <label className={labelCls}>
-        {t("backup.restore_path")}
-        <input
-          className={`${inputCls} font-mono`}
-          data-testid="backup-restore-path"
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-        />
-      </label>
-      <label className={labelCls}>
-        {t("backup.restore_key")}
-        <input
-          className={`${inputCls} font-mono`}
-          data-testid="backup-restore-key"
-          value={key}
-          onChange={(e) => setKey(e.target.value)}
-        />
-      </label>
-      {error ? (
-        <p className="mt-2 text-red-600" data-testid="backup-restore-error">{error}</p>
-      ) : null}
-      {result ? (
-        <p className="mt-2 text-green-700" data-testid="backup-restore-done">{result}</p>
-      ) : null}
-      <button
-        type="button"
-        className="mt-2 rounded border border-red-300 bg-white px-3 py-1.5 text-sm text-red-700"
-        data-testid="backup-restore-start"
-        disabled={busy || path.trim() === "" || key.trim() === ""}
-        onClick={() => void restore()}
-      >
-        {t("backup.restore_start")}
-      </button>
-    </div>
   );
 }

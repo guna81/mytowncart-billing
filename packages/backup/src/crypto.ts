@@ -25,7 +25,8 @@ const HKDF_INFO = "mytowncart-billing backup v1";
 const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 export interface BackupHeader {
-  v: 1;
+  /** 1 = gzip'd database only; 2 = master bundle (database + photos). */
+  v: 1 | 2;
   salt_b64: string;
   nonce_b64: string;
   cipher: "aes-256-gcm";
@@ -154,7 +155,7 @@ function isHeader(value: unknown): value is BackupHeader {
   if (typeof value !== "object" || value === null) return false;
   const h = value as Record<string, unknown>;
   return (
-    h.v === 1 &&
+    (h.v === 1 || h.v === 2) &&
     h.cipher === "aes-256-gcm" &&
     h.kdf === "hkdf-sha-256" &&
     typeof h.salt_b64 === "string" &&
@@ -168,14 +169,14 @@ function isHeader(value: unknown): value is BackupHeader {
 export async function encryptSnapshot(
   plaintext: Uint8Array,
   key: Uint8Array,
-  meta: { schemaVersion: number; appVersion: string; createdAt: string },
+  meta: { schemaVersion: number; appVersion: string; createdAt: string; format?: 1 | 2 },
 ): Promise<Uint8Array> {
   if (key.length !== RECOVERY_KEY_BYTES) throw new Error("recovery key has the wrong length");
   const crypto = webCrypto();
   const salt = randomBytes(SALT_BYTES);
   const nonce = randomBytes(NONCE_BYTES);
   const header: BackupHeader = {
-    v: 1,
+    v: meta.format ?? 1,
     salt_b64: toBase64(salt),
     nonce_b64: toBase64(nonce),
     cipher: "aes-256-gcm",

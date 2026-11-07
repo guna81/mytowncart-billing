@@ -12,6 +12,7 @@
  */
 
 export * from "./crypto";
+export * from "./bundle";
 export * from "./files";
 
 export interface BackupMeta {

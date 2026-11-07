@@ -6,22 +6,12 @@ import {
   joinPath,
   parseBackupSettings,
   sameVolume,
-  writeBackupFile,
-  type Invoke,
+  writeBackupRaw,
 } from "@mytowncart-billing/backup";
-import {
-  encryptCurrentDatabase,
-  hasRecoveryKey,
-} from "./cryptoStore";
+import { encryptMasterBackup, hasRecoveryKey, verifyWrittenBackup } from "./cryptoStore";
+import { invoke, invokeRaw } from "./shell";
 import { getRepository } from "./repository";
 import { isInTauri } from "./tauri";
-
-async function shellInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<T>(command, args) as Promise<T>;
-}
-
-const invoke: Invoke = (command, args) => shellInvoke(command, args);
 
 const BACKUP_SCHEMA_VERSION = 5;
 
@@ -50,14 +40,20 @@ export async function checkAndRunAutoBackup(): Promise<boolean> {
     if (!hasKey) return false;
 
     const createdAt = new Date();
-    const bytes = await encryptCurrentDatabase(invoke, {
+    const bytes = await encryptMasterBackup(invoke, invokeRaw, {
       schemaVersion: BACKUP_SCHEMA_VERSION,
       appVersion: APP_VERSION,
       createdAt: createdAt.toISOString(),
     });
 
     const file = backupFileName(createdAt);
-    await writeBackupFile(invoke, joinPath(settings.folder, file), bytes);
+    const target = joinPath(settings.folder, file);
+    await writeBackupRaw(invokeRaw, target, bytes);
+    const check = await verifyWrittenBackup(invoke, invokeRaw, target);
+    if (!check.ok) {
+      console.warn(`[auto-backup] Backup written but could not be verified (${check.error})`);
+      return false;
+    }
 
     const next = {
       ...settings,

@@ -586,6 +586,92 @@ fn restore_snapshot(state: tauri::State<'_, AppState>, gz: Vec<u8>) -> Result<St
     result
 }
 
+
+// --- Master backup (bundle v2): raw binary IPC so photo-sized payloads do not
+// round-trip through JSON number arrays. ---------------------------------
+
+fn percent_decode(text: &str) -> Result<String, String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = text.get(i + 1..i + 3).ok_or("bad path header")?;
+            out.push(u8::from_str_radix(hex, 16).map_err(|_| "bad path header")?);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).map_err(|_| "bad path header".to_string())
+}
+
+fn raw_body(request: &tauri::ipc::Request<'_>) -> Result<Vec<u8>, String> {
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => Ok(bytes.clone()),
+        _ => Err("expected a binary request body".to_string()),
+    }
+}
+
+fn path_header(request: &tauri::ipc::Request<'_>) -> Result<PathBuf, String> {
+    let value = request
+        .headers()
+        .get("x-path")
+        .and_then(|v| v.to_str().ok())
+        .ok_or("missing path")?;
+    Ok(PathBuf::from(percent_decode(value)?))
+}
+
+/// Database snapshot + all photos, packed as a v2 bundle.
+#[tauri::command]
+fn bundle_snapshot(state: tauri::State<'_, AppState>) -> Result<tauri::ipc::Response, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    drop(conn);
+    let bytes = backup::build_bundle(
+        &state.db_path,
+        &state.data_dir.join("tmp"),
+        &media::photos_dir(&state.data_dir),
+    )?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[tauri::command]
+fn read_backup_raw(path: String) -> Result<tauri::ipc::Response, String> {
+    let bytes = backup::read_file(std::path::Path::new(&path), MAX_FILE_BYTES)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Body = file bytes; `x-path` header = percent-encoded destination.
+#[tauri::command]
+fn write_backup_raw(request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let path = path_header(&request)?;
+    backup::write_file(&path, &raw_body(&request)?)
+}
+
+/// Body = decrypted plaintext (v2 bundle or legacy v1 gzip). Returns the
+/// pre-restore database copy path.
+#[tauri::command]
+fn restore_backup(
+    state: tauri::State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<String, String> {
+    let plain = raw_body(&request)?;
+    if state.restoring.swap(true, Ordering::SeqCst) {
+        return Err("a restore is already running".to_string());
+    }
+    let result = backup::restore_plaintext(
+        &state.data_dir,
+        &state.db_path,
+        &media::photos_dir(&state.data_dir),
+        &plain,
+        MAX_FILE_BYTES,
+    )
+    .map(|keep| keep.display().to_string());
+    state.restoring.store(false, Ordering::SeqCst);
+    result
+}
+
 // ---------------------------------------------------------------------------
 // Phase 3 Smart-Merchant Commands
 // ---------------------------------------------------------------------------
@@ -745,6 +831,7 @@ pub fn run(driver_script: Option<String>) {
     let script = driver_script.map(std::sync::Arc::new);
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .on_page_load(move |win, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
                 if let Some(script) = script.as_deref() {
@@ -861,6 +948,10 @@ pub fn run(driver_script: Option<String>) {
             backup_file_info,
             same_volume,
             restore_snapshot,
+            bundle_snapshot,
+            read_backup_raw,
+            write_backup_raw,
+            restore_backup,
             upsert_batch,
             list_batches_for_item,
             list_expiring_batches,

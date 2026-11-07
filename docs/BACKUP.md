@@ -69,8 +69,25 @@ backup mean one recovery key can decrypt many backups without key/nonce reuse.
 Because the header is the associated data, any edit to version, schema,
 salt or nonce makes decryption fail.
 
-Plaintext is the gzip-compressed SQLite snapshot produced by the Rust shell
-(see below), so a backup is also usable with standard tools once decrypted.
+Header `v` is the format: **1** = plaintext is the gzip-compressed SQLite
+snapshot (database only, older backups); **2** = master bundle (below). The
+app restores both.
+
+### Master bundle (format v2)
+
+A v2 backup holds the database **and every item photo** (photos are files in
+the app-data `photos/` folder, not in SQLite):
+
+```
+"MTBD1" · u32 BE manifest length · manifest JSON · db.gz · photo bytes…
+```
+
+The manifest (`{v, db_len, item_count, photos:[{name,len}]}`) lets the restore
+screen show what a backup contains before anything is overwritten. Integrity
+of every byte is covered by the AES-GCM tag. Code: `backup.rs`
+(`build_bundle`, `parse_bundle`, `restore_plaintext`) and
+`packages/backup/src/bundle.ts`. Large payloads use raw binary IPC
+(`bundle_snapshot`, `write_backup_raw`, `read_backup_raw`, `restore_backup`).
 
 ## Creating a backup
 
@@ -91,7 +108,28 @@ Plaintext is the gzip-compressed SQLite snapshot produced by the Rust shell
 3. The panel shows the last backup time and warns when the newest backup is
    more than 7 days old.
 
-## Restoring
+## Verifying
+
+Every backup (manual and startup) is read back and decrypted with the stored
+key right after it is written; if that fails it is reported as failed rather
+than saved. The restore screen's **Check backup** button does the same for any
+file and shows date, item count and photo count without restoring.
+
+## Restoring (also on a new PC)
+
+On a fresh install the setup wizard has **Restore from a backup**
+(`#/restore`), so a dead PC can be recovered before the shop is set up. The
+typed recovery key is saved to the new computer's keychain after a successful
+restore, so automatic backups continue.
+
+Flow: choose file (native picker or path) → type key → **Check backup** →
+review contents → **Restore**. A backup from a newer schema is refused.
+Restore validates the whole bundle first, stages photos, swaps the database,
+then swaps the photo folder; the previous data is kept at
+`backups-local/pre-restore-<ts>.db` and photos at
+`backups-local/pre-restore-<ts>-photos/`.
+
+### Restoring (details of the original flow)
 
 1. The seller enters the backup path and the recovery key, then confirms.
 2. `read_backup_file` reads the bytes (size-capped), the web layer checks the

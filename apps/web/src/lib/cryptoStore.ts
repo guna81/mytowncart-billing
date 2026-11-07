@@ -13,9 +13,14 @@ import {
   generateRecoveryKey,
   parseRecoveryKey,
   randomBytes,
+  readBackupRaw,
+  snapshotBundle,
+  summarizeBackup,
   toBase64,
   webCrypto,
+  type BackupSummary,
   type Invoke,
+  type InvokeRaw,
 } from "@mytowncart-billing/backup";
 
 const KEYCHAIN_ENTRY = "backup.recovery-key";
@@ -109,34 +114,74 @@ export async function revealRecoveryKey(invoke: Invoke): Promise<string | null> 
   return raw === null ? null : formatRecoveryKey(raw);
 }
 
-export async function encryptCurrentDatabase(
+/** Stores a recovery key typed in by the seller (e.g. after a restore on a new PC). */
+export async function saveRecoveryKey(invoke: Invoke, raw: Uint8Array): Promise<void> {
+  await invoke("keychain_set", { key: KEYCHAIN_ENTRY, value: await wrapKey(raw) });
+}
+
+/** Master backup: database + photos, encrypted with the stored recovery key. */
+export async function encryptMasterBackup(
   invoke: Invoke,
+  invokeRaw: InvokeRaw,
   meta: { schemaVersion: number; appVersion: string; createdAt: string },
 ): Promise<Uint8Array> {
   const raw = await storedKey(invoke);
   if (raw === null) throw new Error("no_recovery_key");
-  const snapshot = new Uint8Array(await invoke<number[]>("db_snapshot"));
-  return encryptSnapshot(snapshot, raw, meta);
+  const bundle = await snapshotBundle(invokeRaw);
+  return encryptSnapshot(bundle, raw, { ...meta, format: 2 });
 }
 
 export type BackupOpenResult =
-  | { ok: true; gz: Uint8Array; createdAt: string }
-  | { ok: false; error: "bad_key" | "wrong_key" | "not_backup" };
+  | {
+      ok: true;
+      plain: Uint8Array;
+      createdAt: string;
+      appVersion: string;
+      schemaVersion: number;
+      summary: BackupSummary;
+      key: Uint8Array;
+    }
+  | { ok: false; error: "bad_key" | "wrong_key" | "not_backup" | "corrupt" };
 
-/** Decrypts a chosen backup file with the key the seller types in for it. */
-export async function openBackupWithKey(
-  invoke: Invoke,
+/**
+ * Decrypts a backup file and reads what is inside, without restoring it.
+ * Doubles as "verify this backup": success proves the file and key match.
+ */
+export async function openBackupFile(
+  invokeRaw: InvokeRaw,
   path: string,
-  typedKey: string,
+  typedKey: string | Uint8Array,
 ): Promise<BackupOpenResult> {
-  const key = parseRecoveryKey(typedKey);
+  const key = typeof typedKey === "string" ? parseRecoveryKey(typedKey) : typedKey;
   if (key === null) return { ok: false, error: "bad_key" };
-  const file = new Uint8Array(await invoke<number[]>("read_backup_file", { path }));
+  const file = await readBackupRaw(invokeRaw, path);
   try {
     const out = await decryptSnapshot(file, key);
-    return { ok: true, gz: out.plaintext, createdAt: out.header.created_at };
+    const summary = summarizeBackup(out.plaintext);
+    if (summary === null) return { ok: false, error: "corrupt" };
+    return {
+      ok: true,
+      plain: out.plaintext,
+      createdAt: out.header.created_at,
+      appVersion: out.header.app_version,
+      schemaVersion: out.header.schema_version,
+      summary,
+      key,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : "";
-    return { ok: false, error: message === "wrong_key" ? "wrong_key" : "not_backup" };
+    if (message === "wrong_key") return { ok: false, error: "wrong_key" };
+    return { ok: false, error: message === "corrupt" ? "corrupt" : "not_backup" };
   }
+}
+
+/** Re-opens a freshly written backup with the stored key, to prove it is readable. */
+export async function verifyWrittenBackup(
+  invoke: Invoke,
+  invokeRaw: InvokeRaw,
+  path: string,
+): Promise<BackupOpenResult> {
+  const key = await storedKey(invoke);
+  if (key === null) return { ok: false, error: "bad_key" };
+  return openBackupFile(invokeRaw, path, key);
 }

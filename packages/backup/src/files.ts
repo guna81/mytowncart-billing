@@ -80,3 +80,33 @@ export async function snapshotDatabase(invoke: Invoke): Promise<Uint8Array> {
 export async function restoreDatabase(invoke: Invoke, gz: Uint8Array): Promise<string> {
   return invoke<string>("restore_snapshot", { gz: Array.from(gz) });
 }
+
+// --- Master backup (bundle v2): raw binary IPC, no JSON number arrays. ---
+
+export type InvokeRaw = <T>(
+  command: string,
+  args?: Uint8Array | Record<string, unknown>,
+  options?: { headers?: Record<string, string> },
+) => Promise<T>;
+
+/** Database snapshot plus all photos, as one plaintext bundle. */
+export async function snapshotBundle(invokeRaw: InvokeRaw): Promise<Uint8Array> {
+  return new Uint8Array(await invokeRaw<ArrayBuffer>("bundle_snapshot"));
+}
+
+export async function writeBackupRaw(
+  invokeRaw: InvokeRaw,
+  path: string,
+  bytes: Uint8Array,
+): Promise<void> {
+  await invokeRaw("write_backup_raw", bytes, { headers: { "x-path": encodeURIComponent(path) } });
+}
+
+export async function readBackupRaw(invokeRaw: InvokeRaw, path: string): Promise<Uint8Array> {
+  return new Uint8Array(await invokeRaw<ArrayBuffer>("read_backup_raw", { path }));
+}
+
+/** Restores a decrypted bundle (or legacy gzip'd DB); returns the pre-restore copy path. */
+export async function restoreBackup(invokeRaw: InvokeRaw, plain: Uint8Array): Promise<string> {
+  return invokeRaw<string>("restore_backup", plain);
+}

@@ -202,6 +202,9 @@ importers:
       '@tauri-apps/api':
         specifier: ^2.2.0
         version: 2.12.4
+      '@tauri-apps/plugin-dialog':
+        specifier: ^2.8.4
+        version: 2.8.4
       '@tauri-apps/plugin-opener':
         specifier: ^2.7.2
         version: 2.7.2
@@ -259,7 +262,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^3.0.5
-        version: 3.2.7(jiti@2.7.0)(lightningcss@1.33.0)(supports-color@7.2.0)
+        version: 3.2.7(@types/node@26.6.6)(jiti@2.7.0)(lightningcss@1.33.0)(supports-color@7.2.0)
 
   packages/connector-mytowncart:
     devDependencies:
@@ -268,7 +271,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^3.0.5
-        version: 3.2.7(jiti@2.7.0)(lightningcss@1.33.0)(supports-color@7.2.0)
+        version: 3.2.7(@types/node@26.6.6)(jiti@2.7.0)(lightningcss@1.33.0)(supports-color@7.2.0)
 
   packages/core:
     devDependencies:
@@ -277,7 +280,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^3.0.5
-        version: 3.2.7(jiti@2.7.0)(lightningcss@1.33.0)(supports-color@7.2.0)
+        version: 3.2.7(@types/node@26.6.6)(jiti@2.7.0)(lightningcss@1.33.0)(supports-color@7.2.0)
 
   packages/storage:
     dependencies:
@@ -293,7 +296,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^3.0.5
-        version: 3.2.7(jiti@2.7.0)(lightningcss@1.33.0)(supports-color@7.2.0)
+        version: 3.2.7(@types/node@26.6.6)(jiti@2.7.0)(lightningcss@1.33.0)(supports-color@7.2.0)
 
 packages:
 
@@ -939,6 +942,9 @@ packages:
     resolution: {integrity: sha512-JI9bHfudSRJikGOrjbXEm6RjzzvmKuLc+JixB1NE8hNzQkNlCCIC3pTES3uypkR9lxHrsbxzcnSwhI2IxBQphw==}
     engines: {node: '>= 10'}
     hasBin: true
+
+  '@tauri-apps/plugin-dialog@2.8.4':
+    resolution: {integrity: sha512-+6ZOiXenOaxXwb8qCbBPdT2jX2cFPaVVHGIskrpmJLpmWj+qKRTD6X/z9x7hTdSQn7NedcoXCkWGej4a7dC4lw==}
 
   '@tauri-apps/plugin-opener@2.7.2':
     resolution: {integrity: sha512-LyybP1VSzTMQiaFYcsbAse47KpivlyXdLZMQzGLEnkgQacGESnpjAfFoQ6h5sqWgAdZDH9szYjPzHMpv0Sz+TQ==}
@@ -2398,6 +2404,10 @@ snapshots:
       '@tauri-apps/cli-win32-ia32-msvc': 2.12.4
       '@tauri-apps/cli-win32-x64-msvc': 2.12.4
 
+  '@tauri-apps/plugin-dialog@2.8.4':
+    dependencies:
+      '@tauri-apps/api': 2.12.4
+
   '@tauri-apps/plugin-opener@2.7.2':
     dependencies:
       '@tauri-apps/api': 2.12.4
@@ -2568,14 +2578,6 @@ snapshots:
       magic-string: 0.30.21
     optionalDependencies:
       vite: 6.4.5(@types/node@26.6.6)(jiti@2.7.0)(lightningcss@1.33.0)
-
-  '@vitest/mocker@3.2.7(vite@6.4.5(jiti@2.7.0)(lightningcss@1.33.0))':
-    dependencies:
-      '@vitest/spy': 3.2.7
-      estree-walker: 3.0.3
-      magic-string: 0.30.21
-    optionalDependencies:
-      vite: 6.4.5(jiti@2.7.0)(lightningcss@1.33.0)
 
   '@vitest/pretty-format@3.2.7':
     dependencies:
@@ -3267,27 +3269,6 @@ snapshots:
       - tsx
       - yaml
 
-  vite-node@3.2.4(jiti@2.7.0)(lightningcss@1.33.0)(supports-color@7.2.0):
-    dependencies:
-      cac: 6.7.14
-      debug: 4.4.3(supports-color@7.2.0)
-      es-module-lexer: 1.7.0
-      pathe: 2.0.3
-      vite: 6.4.5(jiti@2.7.0)(lightningcss@1.33.0)
-    transitivePeerDependencies:
-      - '@types/node'
-      - jiti
-      - less
-      - lightningcss
-      - sass
-      - sass-embedded
-      - stylus
-      - sugarss
-      - supports-color
-      - terser
-      - tsx
-      - yaml
-
   vite@6.4.5(@types/node@26.6.6)(jiti@2.7.0)(lightningcss@1.33.0):
     dependencies:
       esbuild: 0.25.12
@@ -3298,19 +3279,6 @@ snapshots:
       tinyglobby: 0.2.17
     optionalDependencies:
       '@types/node': 26.6.6
-      fsevents: 2.3.3
-      jiti: 2.7.0
-      lightningcss: 1.33.0
-
-  vite@6.4.5(jiti@2.7.0)(lightningcss@1.33.0):
-    dependencies:
-      esbuild: 0.25.12
-      fdir: 6.5.0(picomatch@4.0.7)
-      picomatch: 4.0.7
-      postcss: 8.5.32
-      rollup: 4.67.4
-      tinyglobby: 0.2.17
-    optionalDependencies:
       fsevents: 2.3.3
       jiti: 2.7.0
       lightningcss: 1.33.0
@@ -3342,45 +3310,6 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 26.6.6
-    transitivePeerDependencies:
-      - jiti
-      - less
-      - lightningcss
-      - msw
-      - sass
-      - sass-embedded
-      - stylus
-      - sugarss
-      - supports-color
-      - terser
-      - tsx
-      - yaml
-
-  vitest@3.2.7(jiti@2.7.0)(lightningcss@1.33.0)(supports-color@7.2.0):
-    dependencies:
-      '@types/chai': 5.2.3
-      '@vitest/expect': 3.2.7
-      '@vitest/mocker': 3.2.7(vite@6.4.5(jiti@2.7.0)(lightningcss@1.33.0))
-      '@vitest/pretty-format': 3.2.7
-      '@vitest/runner': 3.2.7
-      '@vitest/snapshot': 3.2.7
-      '@vitest/spy': 3.2.7
-      '@vitest/utils': 3.2.7
-      chai: 5.3.3
-      debug: 4.4.3(supports-color@7.2.0)
-      expect-type: 1.4.0
-      magic-string: 0.30.21
-      pathe: 2.0.3
-      picomatch: 4.0.7
-      std-env: 3.10.0
-      tinybench: 2.9.0
-      tinyexec: 0.3.2
-      tinyglobby: 0.2.17
-      tinypool: 1.1.1
-      tinyrainbow: 2.0.0
-      vite: 6.4.5(jiti@2.7.0)(lightningcss@1.33.0)
-      vite-node: 3.2.4(jiti@2.7.0)(lightningcss@1.33.0)(supports-color@7.2.0)
-      why-is-node-running: 2.3.0
     transitivePeerDependencies:
       - jiti
       - less

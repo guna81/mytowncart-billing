@@ -22,6 +22,7 @@ import { PosScreen } from "./screens/PosScreen";
 import { ReportsScreen } from "./screens/ReportsScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { SetupWizard } from "./screens/SetupWizard";
+import { RestoreBackupScreen } from "./screens/RestoreBackupScreen";
 import { StockScreen } from "./screens/StockScreen";
 import { StockAuditScreen } from "./screens/StockAuditScreen";
 import { SuppliersScreen } from "./screens/SuppliersScreen";
@@ -68,6 +69,7 @@ export function App() {
       <HashRouter>
         <Routes>
           <Route path="/setup" element={<SetupWizard />} />
+          <Route path="/restore" element={<RestoreBackupScreen />} />
           <Route path="*" element={<Navigate to="/setup" replace />} />
         </Routes>
       </HashRouter>

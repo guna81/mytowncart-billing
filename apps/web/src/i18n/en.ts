@@ -356,16 +356,48 @@ export const en = {
   "backup.save_failed": "The backup could not be saved: {message}",
   "backup.restore": "Restore from a backup file",
   "backup.restore_intro":
-    "Enter the full path of a .mtcb backup file. Your current data is kept as a safety copy first. You must restart the app after restoring.",
+    "Choose a .mtcb backup file and type its recovery key. The app checks it first and shows what is inside. Your current data and photos are kept as a safety copy. Restart the app after restoring.",
   "backup.restore_path": "Backup file path",
   "backup.restore_start": "Restore",
   "backup.restore_key": "Recovery key of that backup",
   "backup.restore_confirm": "Replace all current data with this backup?",
   "backup.restore_done":
-    "Restore finished. Close and reopen MyTownCart Billing. The previous data was kept at: {path}",
+    "Restore finished (data and photos). Close and reopen MyTownCart Billing. The previous data was kept at: {path}",
   "backup.restore_wrong_key": "That recovery key does not open this backup.",
   "backup.restore_not_backup": "That file is not a MyTownCart backup.",
   "backup.restore_corrupt": "That backup file is damaged and cannot be restored.",
+  "backup.browse":
+    "Browse…",
+  "backup.save_done_full":
+    "Backup saved and verified: {file} ({items} items, {photos} photos)",
+  "backup.verify_failed":
+    "The backup was written but could not be read back. Try again or choose another folder.",
+  "backup.check":
+    "Check backup",
+  "backup.checking":
+    "Checking…",
+  "backup.review_title":
+    "This backup opens correctly and contains:",
+  "backup.review_date":
+    "Made on {when}",
+  "backup.review_items":
+    "{count} items",
+  "backup.review_photos":
+    "{count} photos ({mb} MB)",
+  "backup.review_no_photos":
+    "An older backup: it has data only, no item photos.",
+  "backup.restore_newer":
+    "This backup was made by a newer version of the app. Update the app first, then restore.",
+  "backup.restore_key_saved":
+    "Your recovery key was saved on this computer for future backups.",
+  "backup.restore_from_setup":
+    "Already use MyTownCart Billing? Restore from a backup",
+  "backup.restore_first_title":
+    "Restore your shop",
+  "backup.restore_first_subtitle":
+    "Choose your .mtcb backup file and type its recovery key.",
+  "backup.restore_back":
+    "Back to new shop setup",
   "backup.restore_failed": "The restore failed: {message}",
   "settings.gst_enabled": "GST-registered shop",
   "settings.prices_include_tax": "Prices include tax",

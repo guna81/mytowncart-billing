@@ -359,6 +359,38 @@ export const ta: Record<I18nKey, string> = {
   "backup.restore_wrong_key": "மீட்புக் குறியீடு தவறானது.",
   "backup.restore_not_backup": "இது சரியான மை டவுன் கார்ட் பேக்கப் கோப்பு அல்ல.",
   "backup.restore_corrupt": "இந்த கோப்பு சேதமடைந்துள்ளது.",
+  "backup.browse":
+    "உலாவு…",
+  "backup.save_done_full":
+    "காப்புப்பிரதி சேமிக்கப்பட்டு சரிபார்க்கப்பட்டது: {file} ({items} பொருட்கள், {photos} படங்கள்)",
+  "backup.verify_failed":
+    "காப்புப்பிரதி எழுதப்பட்டது, ஆனால் மீண்டும் படிக்க முடியவில்லை. மீண்டும் முயலவும் அல்லது வேறு கோப்புறையைத் தேர்ந்தெடுக்கவும்.",
+  "backup.check":
+    "காப்புப்பிரதியைச் சரிபார்",
+  "backup.checking":
+    "சரிபார்க்கிறது…",
+  "backup.review_title":
+    "இந்தக் காப்புப்பிரதி சரியாகத் திறக்கிறது; இதில் உள்ளவை:",
+  "backup.review_date":
+    "உருவாக்கிய நேரம்: {when}",
+  "backup.review_items":
+    "{count} பொருட்கள்",
+  "backup.review_photos":
+    "{count} படங்கள் ({mb} MB)",
+  "backup.review_no_photos":
+    "பழைய காப்புப்பிரதி: தரவு மட்டும், பொருள் படங்கள் இல்லை.",
+  "backup.restore_newer":
+    "இந்தக் காப்புப்பிரதி செயலியின் புதிய பதிப்பால் உருவாக்கப்பட்டது. முதலில் செயலியைப் புதுப்பிக்கவும்.",
+  "backup.restore_key_saved":
+    "எதிர்கால காப்புப்பிரதிகளுக்காக உங்கள் மீட்பு விசை இந்தக் கணினியில் சேமிக்கப்பட்டது.",
+  "backup.restore_from_setup":
+    "ஏற்கனவே பயன்படுத்துகிறீர்களா? காப்புப்பிரதியிலிருந்து மீட்டெடு",
+  "backup.restore_first_title":
+    "உங்கள் கடையை மீட்டெடு",
+  "backup.restore_first_subtitle":
+    "உங்கள் .mtcb காப்புப்பிரதி கோப்பைத் தேர்ந்தெடுத்து அதன் மீட்பு விசையை உள்ளிடவும்.",
+  "backup.restore_back":
+    "புதிய கடை அமைப்புக்குத் திரும்பு",
   "backup.restore_failed": "மீட்டெடுப்பு தோல்வியடைந்தது: {message}",
   "settings.gst_enabled": "GST பதிவு செய்த கடை",
   "settings.prices_include_tax": "விலையில் வரி உள்ளடங்கியுள்ளது",
