@@ -492,6 +492,13 @@ export class MemoryRepository implements BillingRepository {
         this.recordMovement(l.itemId, l.qtyMilli, "void", "bill", String(billId));
       }
     }
+    const net = new Map<number, number>();
+    for (const t of this.loyaltyTransactions) {
+      if (t.billId === billId) net.set(t.customerId, (net.get(t.customerId) ?? 0) + t.pointsDelta);
+    }
+    for (const [customerId, points] of net) {
+      if (points !== 0) await this.updateCustomerLoyalty(customerId, -points, billId, "Reversed: bill voided");
+    }
   }
 
   async listBills(filter?: BillFilter): Promise<BillSummary[]> {

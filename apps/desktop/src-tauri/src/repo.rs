@@ -1265,6 +1265,37 @@ pub fn void_bill(conn: &mut Connection, bill_id: i64, reason: &str, voided_at: &
             insert_movement(&tx, item_id, qty_milli, "void", Some("bill"), Some(&bill_ref), voided_at)?;
         enqueue_movement(&tx, item_id, movement_id, qty_milli, "void", Some(&bill_ref))?;
     }
+    // Reverse whatever loyalty points this bill earned or redeemed.
+    let loyalty: Vec<(i64, i64)> = {
+        let mut st = tx
+            .prepare(
+                "SELECT customer_id, SUM(points_delta) FROM loyalty_transactions
+                 WHERE bill_id = ?1 GROUP BY customer_id",
+            )
+            .map_err(err)?;
+        let rows = st
+            .query_map([bill_id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(err)?;
+        rows
+    };
+    for (customer_id, net) in loyalty {
+        if net == 0 {
+            continue;
+        }
+        tx.execute(
+            "UPDATE customers SET loyalty_points = MAX(0, loyalty_points - ?1) WHERE id = ?2",
+            rusqlite::params![net, customer_id],
+        )
+        .map_err(err)?;
+        tx.execute(
+            "INSERT INTO loyalty_transactions (customer_id, bill_id, points_delta, reason, created_at)
+             VALUES (?1, ?2, ?3, 'Reversed: bill voided', ?4)",
+            rusqlite::params![customer_id, bill_id, -net, voided_at],
+        )
+        .map_err(err)?;
+    }
     tx.commit().map_err(err)?;
     Ok(())
 }
@@ -2894,8 +2925,12 @@ mod tests {
         assert_eq!(get_customer_loyalty_balance(&conn, cust).unwrap(), 10);
 
         p.loyalty_redeemed = 4;
-        create_bill(&mut conn, &p).unwrap();
+        let redeemed = create_bill(&mut conn, &p).unwrap();
         assert_eq!(get_customer_loyalty_balance(&conn, cust).unwrap(), 6);
+
+        // Voiding gives the redeemed points back.
+        void_bill(&mut conn, redeemed.bill_id, "wrong item", "2026-11-04T10:00:00Z").unwrap();
+        assert_eq!(get_customer_loyalty_balance(&conn, cust).unwrap(), 10);
     }
 
     #[test]

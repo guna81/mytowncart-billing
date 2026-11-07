@@ -45,3 +45,4 @@ LAN. Run these on a **copy** of real shop data (Settings → Backup first).
 7. Redeem loyalty points on a bill, then check the balance. Expect: points changed once.
 8. Pay a ₹380 cash bill with ₹500. At Day end, expected cash should rise by ₹380, not ₹500.
 9. Return an item from a UPI sale or a credit sale. Day end should show no cash refund.
+10. Give a customer loyalty points, make a bill that earns and redeems points, then void it as the owner. Expect: the customer's balance returns to what it was before the bill, and the history shows a "Reversed: bill voided" row.

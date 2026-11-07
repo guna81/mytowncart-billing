@@ -15,7 +15,8 @@ not rebuild desktop installers.
 - **Counter billing:** search suggestions, line and bill discounts, round-off,
   split payments, credit sales, held bills, and receipt/invoice printing.
 - **Customer accounts:** GSTIN and address, outstanding credit, received
-  payments, and displayed loyalty balances.
+  payments, and displayed loyalty balances. Voiding a bill gives back redeemed
+  loyalty points and removes the ones it earned.
 - **Returns:** create credit notes from saved bills and retain the original
   sale for history.
 - **Purchasing:** supplier records, purchase invoices and received stock,

@@ -592,6 +592,32 @@ describe("customer loyalty points", () => {
   });
 });
 
+describe("voiding a bill reverses its loyalty points", () => {
+  it("gives back redeemed points and removes earned ones", async () => {
+    const itemId = await makeItem({ pricePaise: 10_000, taxRateBp: 0 });
+    const customerId = await repo.upsertCustomer({ name: "Loyal", phone: "9000000001" });
+    await repo.updateCustomerLoyalty(customerId, 20, null, "seed");
+    const sale = await repo.createBill({
+      fy: "2026-27",
+      prefix: "INV-",
+      customerId,
+      subtotalPaise: 10_000,
+      taxPaise: 0,
+      totalPaise: 10_000,
+      createdAt: "2026-11-04T10:00:00.000Z",
+      lines: [
+        { itemId, nameSnapshot: "x", qtyMilli: 1000, unitPricePaise: 10_000, taxRateBp: 0, taxPaise: 0, totalPaise: 10_000 },
+      ],
+      payments: [{ mode: "cash", amountPaise: 10_000 }],
+      loyaltyEarned: 5,
+      loyaltyRedeemed: 8,
+    });
+    expect(await repo.getCustomerLoyaltyBalance(customerId)).toBe(17);
+    await repo.voidBill(sale.billId, "wrong bill");
+    expect(await repo.getCustomerLoyaltyBalance(customerId)).toBe(20);
+  });
+});
+
 describe("multi-barcodes per item", () => {
   it("supports multiple secondary barcodes and barcode lookup", async () => {
     const itemId = await makeItem({ barcode: "8901234567890" });
