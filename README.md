@@ -35,13 +35,13 @@ orders and stock when online. Visit the [MyTownCart platform](https://mytowncart
 
 ## Download MyTownCart Billing
 
-- [Windows (64-bit EXE)](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-windows-x64.exe) · [MSI](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-windows-x64.msi)
-- [macOS — Apple Silicon (M1 and newer)](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-macos-arm64.dmg)
-- [macOS — Intel](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-macos-x64.dmg)
-- [Linux — Debian / Ubuntu (64-bit)](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-linux-x64.deb)
-- [Linux — AppImage (64-bit)](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.2/MyTownCart-Billing-v0.1.2-linux-x64.AppImage)
+- [Windows (64-bit EXE)](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.3/MyTownCart-Billing-v0.1.3-windows-x64.exe) · [MSI](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.3/MyTownCart-Billing-v0.1.3-windows-x64.msi)
+- [macOS — Apple Silicon (M1 and newer)](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.3/MyTownCart-Billing-v0.1.3-macos-arm64.dmg)
+- [macOS — Intel](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.3/MyTownCart-Billing-v0.1.3-macos-x64.dmg)
+- [Linux — Debian / Ubuntu (64-bit)](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.3/MyTownCart-Billing-v0.1.3-linux-x64.deb)
+- [Linux — AppImage (64-bit)](https://github.com/guna81/mytowncart-billing/releases/download/v0.1.3/MyTownCart-Billing-v0.1.3-linux-x64.AppImage)
 
-**Version 0.1.2 is available:** [v0.1.2 release notes](https://github.com/guna81/mytowncart-billing/releases/tag/v0.1.2).
+**Version 0.1.3 is available:** [v0.1.3 release notes](https://github.com/guna81/mytowncart-billing/releases/tag/v0.1.3).
 macOS and Linux are community builds; a failed platform build may have no download.
 Releases are published automatically when a version tag is pushed; the
 [website download section](https://guna81.github.io/mytowncart-billing/#download)
@@ -56,7 +56,7 @@ installers and `checksums-<platform>.txt` files. Builds are unsigned; read the
 
 The current release adds a restructured Add Item form with sticky footer, POS quick cash tender chips (Exact, ₹100, ₹200, ₹500, ₹2000), single-line collapsed held bills, always-visible Save & Print action, responsive hourly sales heatmaps, contrast improvements, sales dashboard and charts, discounts and split payments, customer balances and payment collection, returns and credit notes, suppliers and purchase receiving, stock audits, barcode labels, day-end cash reconciliation, PIN login with owner and cashier roles, loyalty balances, and English, Tamil and Hindi. Reports include profit summaries and GSTR-1 CSV datasets.
 
-The latest published installer is **v0.1.2**. See [what changed](docs/WHATS-NEW.md) and [screen workflows](docs/SCREENS.md) for instructions.
+The latest published installer is **v0.1.3**. See [what changed](docs/WHATS-NEW.md) and [screen workflows](docs/SCREENS.md) for instructions.
 
 ## Billing and inventory features
 

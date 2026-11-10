@@ -4,9 +4,19 @@ Reviewed against the working source on November 6, 2026.
 
 ## Release status
 
-The latest published installer is [v0.1.0](https://github.com/guna81/mytowncart-billing/releases/tag/v0.1.0),
-published November 5. The list below describes current source functionality,
-not a promise that every feature is included in that installer. A new release
+The latest published installer is [v0.1.3](https://github.com/guna81/mytowncart-billing/releases/tag/v0.1.3).
+
+### New in v0.1.3
+
+- **Categories:** a Categories screen to manage item categories, with a
+  category picker on the item form.
+- **Item details and photos:** richer item details and multiple product
+  images per item, with a main image.
+- **MyTownCart publishing:** items and categories can be published to the
+  MyTownCart marketplace, including over the local network, with automatic
+  catalog sync.
+
+The list below describes current source functionality. A new release
 must build the intended committed source; updating docs or GitHub Pages does
 not rebuild desktop installers.
 
