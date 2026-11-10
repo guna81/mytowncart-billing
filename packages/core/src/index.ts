@@ -12,7 +12,7 @@ export const APP_NAME = "MyTownCart Billing" as const;
 export const APP_SLUG = "mytowncart-billing" as const;
 
 /** Semver of this release; keep in sync with the root package.json. */
-export const APP_VERSION = "0.1.2" as const;
+export const APP_VERSION = "0.1.3" as const;
 
 export * from "./money";
 export * from "./quantity";

@@ -121,7 +121,7 @@ describe("publishService", () => {
     const catId = await repo.upsertCategory({ name: "Groceries" });
     await repo.setCategoryMarketplaceId(catId, "cat-1");
 
-    const id1 = await repo.upsertItem({
+    await repo.upsertItem({
       name: "Item 1",
       barcode: "111",
       categoryId: catId,
@@ -132,7 +132,7 @@ describe("publishService", () => {
       openingStockMilli: 2000,
       isActive: true,
     });
-    const id2 = await repo.upsertItem({
+    await repo.upsertItem({
       name: "Item 2",
       barcode: "222",
       categoryId: catId,

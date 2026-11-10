@@ -342,22 +342,22 @@ describe("photos and held bills", () => {
 
     let list = await repo.listItemImages(id);
     expect(list).toHaveLength(2);
-    expect(list[0].id).toBe(img1.id);
-    expect(list[0].isMain).toBe(true);
+    expect(list[0]!.id).toBe(img1.id);
+    expect(list[0]!.isMain).toBe(true);
 
     // Promote img2 to main
     await repo.setItemImageMain(img2.id);
     list = await repo.listItemImages(id);
-    expect(list[0].id).toBe(img2.id);
-    expect(list[0].isMain).toBe(true);
-    expect(list[1].isMain).toBe(false);
+    expect(list[0]!.id).toBe(img2.id);
+    expect(list[0]!.isMain).toBe(true);
+    expect(list[1]!.isMain).toBe(false);
 
     // Record upload for img2
     await repo.recordImageUploads([
       { itemId: id, imageHash: "hash-2", uploadedAt: "2026-11-10T12:00:00.000Z" },
     ]);
     list = await repo.listItemImages(id);
-    expect(list[0].imageUploadedAt).toBe("2026-11-10T12:00:00.000Z");
+    expect(list[0]!.imageUploadedAt).toBe("2026-11-10T12:00:00.000Z");
 
     // Read image
     const read = await repo.readItemImage(img2.id);
@@ -367,8 +367,8 @@ describe("photos and held bills", () => {
     await repo.deleteItemImage(img2.id);
     list = await repo.listItemImages(id);
     expect(list).toHaveLength(1);
-    expect(list[0].id).toBe(img1.id);
-    expect(list[0].isMain).toBe(true);
+    expect(list[0]!.id).toBe(img1.id);
+    expect(list[0]!.isMain).toBe(true);
   });
 
   it("round-trips a held bill", async () => {

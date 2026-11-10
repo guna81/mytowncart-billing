@@ -7,7 +7,6 @@
 
 import {
   contentHash,
-  externalIdOf,
   IMAGE_MIME,
   localIsoTimestamp,
   planPublish,
@@ -15,7 +14,6 @@ import {
   stockUnitsOf,
   type BlockedItem,
   type PublishItemInput,
-  type ReadyItem,
 } from "@mytowncart-billing/core";
 import type {
   MarketplaceCategory,
@@ -23,7 +21,6 @@ import type {
   UpsertResult,
 } from "@mytowncart-billing/connector-mytowncart";
 import type { BillingRepository, Category, Item, PublishOutcome } from "@mytowncart-billing/storage";
-import { currentToken } from "./connection";
 
 export interface PublishResult {
   total: number;

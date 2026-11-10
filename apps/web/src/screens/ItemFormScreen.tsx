@@ -14,7 +14,7 @@ import {
   UNIT_KINDS,
   type UnitKind,
 } from "@mytowncart-billing/core";
-import type { Category, ItemBarcode, ItemImage } from "@mytowncart-billing/storage";
+import type { Category, ItemBarcode } from "@mytowncart-billing/storage";
 import { PageHeader } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
 import { triggerImmediateSync } from "../lib/autoSync";
