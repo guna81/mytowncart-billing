@@ -346,6 +346,17 @@ describe("stock", () => {
     expect(out.moves[0]).toMatchObject({ id: 13, externalId: "itm_1", deltaUnits: -2, reason: "online_order" });
     expect(calls[0].url).toContain("cursor=12");
   });
+
+  it("appends force=1 when force is true", async () => {
+    const { fetch, calls } = fakeFetch([
+      [
+        /stock\/\?cursor=5&limit=500&force=1$/,
+        () => jsonResponse({ movements: [], next_cursor: 5 }),
+      ],
+    ]);
+    await connector(fetch).pullStock(5, { force: true });
+    expect(calls[0].url).toContain("force=1");
+  });
 });
 
 describe("orders", () => {
@@ -389,6 +400,53 @@ describe("orders", () => {
       { externalId: "itm_1", productName: "Milk", qtyUnits: 2, unitPricePaise: 6000 },
       { externalId: null, productName: "Phone repair", qtyUnits: 1, unitPricePaise: 1000 },
     ]);
+  });
+
+  it("appends force=1 to orders request when force is true", async () => {
+    const { fetch, calls } = fakeFetch([
+      [
+        /orders\/\?after=abc&force=1$/,
+        () => jsonResponse({ orders: [] }),
+      ],
+    ]);
+    await connector(fetch).pullOrders("abc", { force: true });
+    expect(calls[0].url).toContain("force=1");
+  });
+
+  it("uploads, lists and deletes product images", async () => {
+    let callIndex = 0;
+    const { fetch, calls } = fakeFetch([
+      [
+        /products\/itm_1\/images\/(\?.*)?$/,
+        () => {
+          const reqMethod = calls[callIndex++]?.init?.method ?? "GET";
+          if (reqMethod === "POST") {
+            return jsonResponse({ image_id: "img-uuid-1", is_main: true, is_active: true }, 201);
+          }
+          if (reqMethod === "GET") {
+            return jsonResponse({
+              images: [
+                { id: "img-uuid-1", image: "https://cdn.example.com/1.webp", is_main: true },
+              ],
+            });
+          }
+          return jsonResponse({}, 200);
+        },
+      ],
+    ]);
+
+    const conn = connector(fetch);
+    const blob = new Blob(["image data"], { type: "image/jpeg" });
+    const uploaded = await conn.uploadImage("itm_1", blob, true);
+    expect(uploaded).toEqual({ imageId: "img-uuid-1", isMain: true, isActive: true });
+
+    const images = await conn.listImages("itm_1");
+    expect(images).toHaveLength(1);
+    expect(images[0].id).toBe("img-uuid-1");
+
+    await conn.deleteImage("itm_1", "img-uuid-1");
+    expect(calls[2].init?.method).toBe("DELETE");
+    expect(calls[2].url).toContain("image_id=img-uuid-1");
   });
 });
 

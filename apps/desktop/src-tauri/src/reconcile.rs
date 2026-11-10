@@ -41,7 +41,7 @@ pub fn apply_reconcile_fixes(conn: &mut Connection, fixes: &[ReconcileFixPayload
     for fix in fixes {
         let exists: i64 = tx
             .query_row(
-                "SELECT COUNT(*) FROM items WHERE id = ?1 AND remote_product_id = ?2",
+                "SELECT COUNT(*) FROM items WHERE id = ?1 AND (remote_product_id = ?2 OR ('itm_' || id) = ?2)",
                 rusqlite::params![fix.item_id, fix.external_id],
                 |r| r.get(0),
             )

@@ -113,6 +113,52 @@ describe("items", () => {
     expect(hits.map((i) => i.name)).toEqual(["Rice 5kg"]);
   });
 
+  it("stores, updates, and searches by brand, description, and custom attributes", async () => {
+    const id = await makeItem({
+      name: "Organic Honey",
+      brand: "NaturePure",
+      description: "100% pure raw mountain honey",
+      customAttributes: { Origin: "Himalayas", Grade: "A+" },
+    });
+    const item = (await repo.getItem(id))!;
+    expect(item.brand).toBe("NaturePure");
+    expect(item.description).toBe("100% pure raw mountain honey");
+    expect(item.customAttributes).toEqual({ Origin: "Himalayas", Grade: "A+" });
+
+    // Update
+    await repo.upsertItem({
+      id,
+      name: "Organic Honey 500g",
+      barcode: "",
+      categoryId: null,
+      unitKind: "count",
+      pricePaise: 35000,
+      mrpPaise: 35000,
+      taxRateBp: 500,
+      openingStockMilli: 0,
+      isActive: true,
+      brand: "NaturePure Gold",
+      description: "Updated honey description",
+      customAttributes: { Origin: "Himalayas", Grade: "Premium", Weight: "500g" },
+    });
+    const updated = (await repo.getItem(id))!;
+    expect(updated.brand).toBe("NaturePure Gold");
+    expect(updated.description).toBe("Updated honey description");
+    expect(updated.customAttributes).toEqual({ Origin: "Himalayas", Grade: "Premium", Weight: "500g" });
+
+    // Search by brand
+    const brandHits = await repo.listItems({ search: "naturepure" });
+    expect(brandHits.map((i) => i.id)).toContain(id);
+
+    // Search by description
+    const descHits = await repo.listItems({ search: "updated honey" });
+    expect(descHits.map((i) => i.id)).toContain(id);
+
+    // Search by custom attribute
+    const attrHits = await repo.listItems({ search: "himalayas" });
+    expect(attrHits.map((i) => i.id)).toContain(id);
+  });
+
   it("import isolates bad rows and re-importing a barcode updates", async () => {
     const results = await repo.importItems([
       itemInput({ barcode: "111", openingStockMilli: 1000 }),
@@ -280,6 +326,49 @@ describe("photos and held bills", () => {
       { itemId: id, imageHash: "new-hash", uploadedAt: "2026-11-05T10:01:00.000Z" },
     ]);
     expect((await repo.getItem(id))?.imageUploadedAt).toBe("2026-11-05T10:01:00.000Z");
+  });
+
+  it("handles multi-image lifecycle, ordering, and main promotion", async () => {
+    const id = await makeItem();
+    const bytes1 = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1]);
+    const bytes2 = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 2]);
+
+    const img1 = await repo.addItemImage(id, bytes1, "hash-1");
+    expect(img1.isMain).toBe(true);
+    expect(img1.imageHash).toBe("hash-1");
+
+    const img2 = await repo.addItemImage(id, bytes2, "hash-2");
+    expect(img2.isMain).toBe(false);
+
+    let list = await repo.listItemImages(id);
+    expect(list).toHaveLength(2);
+    expect(list[0].id).toBe(img1.id);
+    expect(list[0].isMain).toBe(true);
+
+    // Promote img2 to main
+    await repo.setItemImageMain(img2.id);
+    list = await repo.listItemImages(id);
+    expect(list[0].id).toBe(img2.id);
+    expect(list[0].isMain).toBe(true);
+    expect(list[1].isMain).toBe(false);
+
+    // Record upload for img2
+    await repo.recordImageUploads([
+      { itemId: id, imageHash: "hash-2", uploadedAt: "2026-11-10T12:00:00.000Z" },
+    ]);
+    list = await repo.listItemImages(id);
+    expect(list[0].imageUploadedAt).toBe("2026-11-10T12:00:00.000Z");
+
+    // Read image
+    const read = await repo.readItemImage(img2.id);
+    expect(read).toEqual({ bytes: bytes2, imageHash: "hash-2" });
+
+    // Delete img2 (which is main) -> img1 promoted to main
+    await repo.deleteItemImage(img2.id);
+    list = await repo.listItemImages(id);
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe(img1.id);
+    expect(list[0].isMain).toBe(true);
   });
 
   it("round-trips a held bill", async () => {

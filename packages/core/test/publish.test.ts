@@ -109,6 +109,9 @@ describe("contentHash", () => {
       { barcode: "456" },
       { marketplaceCategoryId: "other" },
       { isActive: false },
+      { description: "Moisturizing soap" },
+      { brand: "Dove" },
+      { customAttributes: { Fragrance: "Lavender" } },
     ];
     const hashes = new Set([contentHash(base), ...variants.map((v) => contentHash({ ...base, ...v }))]);
     expect(hashes.size).toBe(variants.length + 1);

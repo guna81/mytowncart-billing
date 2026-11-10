@@ -92,7 +92,7 @@ export class Http {
     return payload as T;
   }
 
-  async upload(path: string, file: Blob, filename: string, extra?: Record<string, string>): Promise<void> {
+  async upload<T = void>(path: string, file: Blob, filename: string, extra?: Record<string, string>): Promise<T> {
     const form = new FormData();
     form.append("image", file, filename);
     for (const [k, v] of Object.entries(extra ?? {})) form.append(k, v);
@@ -118,6 +118,8 @@ export class Http {
         response.status,
       );
     }
+    const payload = await readJson(response);
+    return payload as T;
   }
 }
 

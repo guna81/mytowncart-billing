@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -14,13 +14,14 @@ import {
   UNIT_KINDS,
   type UnitKind,
 } from "@mytowncart-billing/core";
-import type { Category, ItemBarcode } from "@mytowncart-billing/storage";
+import type { Category, ItemBarcode, ItemImage } from "@mytowncart-billing/storage";
 import { PageHeader } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
+import { triggerImmediateSync } from "../lib/autoSync";
 import { getRepository } from "../lib/repository";
 import { useAppStore } from "../store/appStore";
 
-const inputCls = "mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-2xs";
+const inputCls = "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-2xs";
 const labelCls = "block text-sm font-semibold text-gray-800";
 
 export function ItemFormScreen() {
@@ -32,6 +33,8 @@ export function ItemFormScreen() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [name, setName] = useState("");
   const [barcode, setBarcode] = useState("");
+  const [brand, setBrand] = useState("");
+  const [description, setDescription] = useState("");
   const [categoryId, setCategoryId] = useState<number | null>(null);
   const [newCategory, setNewCategory] = useState("");
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
@@ -43,10 +46,21 @@ export function ItemFormScreen() {
   const [taxPercent, setTaxPercent] = useState("0");
   const [openingStock, setOpeningStock] = useState("0");
   const [isActive, setIsActive] = useState(true);
+  const [customAttributes, setCustomAttributes] = useState<{ key: string; value: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
-  const [photoUploadedAt, setPhotoUploadedAt] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<
+    {
+      id: string | number;
+      url: string;
+      bytes?: Uint8Array;
+      hash: string;
+      isMain: boolean;
+      imageUploadedAt: string | null;
+    }[]
+  >([]);
+  const photosRef = useRef(photos);
+  photosRef.current = photos;
 
   // Secondary Barcodes
   const [secondaryBarcodes, setSecondaryBarcodes] = useState<ItemBarcode[]>([]);
@@ -95,20 +109,55 @@ export function ItemFormScreen() {
     await loadBarcodes(editId);
   };
 
-  const loadPhoto = async (itemId: number) => {
-    const photo = await getRepository().readItemPhoto(itemId);
-    setPhotoUrl(
-      photo ? URL.createObjectURL(new Blob([photo.bytes as BlobPart], { type: "image/*" })) : null,
-    );
-    const item = await getRepository().getItem(itemId);
-    setPhotoUploadedAt(item?.imageUploadedAt ?? null);
+  const loadPhotos = async (itemId: number) => {
+    const repo = getRepository();
+    for (const p of photosRef.current) {
+      URL.revokeObjectURL(p.url);
+    }
+    const itemImages = await repo.listItemImages(itemId);
+    if (itemImages.length > 0) {
+      const loaded = [];
+      for (const img of itemImages) {
+        const photo = await repo.readItemImage(img.id);
+        if (photo) {
+          const url = URL.createObjectURL(new Blob([photo.bytes as BlobPart], { type: "image/*" }));
+          loaded.push({
+            id: img.id,
+            url,
+            hash: img.imageHash,
+            isMain: img.isMain,
+            imageUploadedAt: img.imageUploadedAt,
+          });
+        }
+      }
+      setPhotos(loaded);
+    } else {
+      const legacyPhoto = await repo.readItemPhoto(itemId);
+      const item = await repo.getItem(itemId);
+      if (legacyPhoto) {
+        const url = URL.createObjectURL(new Blob([legacyPhoto.bytes as BlobPart], { type: "image/*" }));
+        setPhotos([
+          {
+            id: "legacy",
+            url,
+            hash: legacyPhoto.imageHash ?? "",
+            isMain: true,
+            imageUploadedAt: item?.imageUploadedAt ?? null,
+          },
+        ]);
+      } else {
+        setPhotos([]);
+      }
+    }
   };
 
   useEffect(() => {
     return () => {
-      if (photoUrl) URL.revokeObjectURL(photoUrl);
+      for (const p of photosRef.current) {
+        URL.revokeObjectURL(p.url);
+      }
     };
-  }, [photoUrl]);
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -116,11 +165,13 @@ export function ItemFormScreen() {
       setCategories(await repo.listCategories());
       if (editId !== null) {
         await loadBarcodes(editId);
+        await loadPhotos(editId);
         const item = await repo.getItem(editId);
-        if (item?.photoFile) await loadPhoto(editId);
         if (item) {
           setName(item.name);
           setBarcode(item.barcode);
+          setBrand(item.brand ?? "");
+          setDescription(item.description ?? "");
           setCategoryId(item.categoryId);
           setUnitKind(item.unitKind);
           setPrice(formatPaise(item.pricePaise));
@@ -130,6 +181,11 @@ export function ItemFormScreen() {
           setTaxPercent((item.taxRateBp / 100).toString());
           setOpeningStock("0");
           setIsActive(item.isActive);
+          const attrs = Object.entries(item.customAttributes ?? {}).map(([key, value]) => ({
+            key,
+            value,
+          }));
+          setCustomAttributes(attrs);
         }
       }
     })();
@@ -156,10 +212,23 @@ export function ItemFormScreen() {
         finalCategoryId = await repo.upsertCategory({ name: newCategory.trim() });
       }
       const costPricePaise = costPrice ? (parsePaise(costPrice) ?? 0) : 0;
-      await repo.upsertItem({
+
+      const finalAttributes: Record<string, string> = {};
+      for (const attr of customAttributes) {
+        const k = attr.key.trim();
+        const v = attr.value.trim();
+        if (k) {
+          finalAttributes[k] = v;
+        }
+      }
+
+      const savedItemId = await repo.upsertItem({
         id: editId ?? undefined,
         name: name.trim(),
         barcode: barcode.trim(),
+        brand: brand.trim(),
+        description: description.trim(),
+        customAttributes: finalAttributes,
         categoryId: finalCategoryId,
         unitKind,
         pricePaise,
@@ -170,7 +239,17 @@ export function ItemFormScreen() {
         hsnCode: hsnCode.trim(),
         costPricePaise,
       });
+
+      if (editId === null && photos.length > 0) {
+        for (const p of photos) {
+          if (p.bytes) {
+            await repo.addItemImage(savedItemId, p.bytes, p.hash, p.isMain);
+          }
+        }
+      }
+
       bumpDataVersion();
+      triggerImmediateSync();
       navigate("/items");
     } catch (err) {
       setError(t("common.error", { message: err instanceof Error ? err.message : String(err) }));
@@ -179,39 +258,101 @@ export function ItemFormScreen() {
     }
   };
 
-  const onPhotoFile = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const onPhotoFiles = async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!file || editId === null) return;
+    if (files.length === 0) return;
     setError(null);
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const check = checkImage(file, bytes.subarray(0, 12));
-    if (!check.ok || check.kind === null) {
-      setError(t(`item_form.photo_error.${check.error ?? "not_an_image"}` as I18nKey));
-      return;
+
+    const validNewPhotos: { bytes: Uint8Array; hash: string }[] = [];
+    for (const file of files) {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const check = checkImage(file, bytes.subarray(0, 12));
+      if (!check.ok || check.kind === null) {
+        setError(t(`item_form.photo_error.${check.error ?? "not_an_image"}` as I18nKey));
+        return;
+      }
+      const hash = await imageHash(bytes);
+      if (hash === null) {
+        setError(t("common.error", { message: "this browser cannot verify photos" }));
+        return;
+      }
+      validNewPhotos.push({ bytes, hash });
     }
-    const hash = await imageHash(bytes);
-    if (hash === null) {
-      setError(t("common.error", { message: "this browser cannot verify photos" }));
-      return;
+
+    if (editId !== null) {
+      for (let i = 0; i < validNewPhotos.length; i++) {
+        const p = validNewPhotos[i];
+        if (!p) continue;
+        const isFirst = photos.length === 0 && i === 0;
+        await getRepository().addItemImage(editId, p.bytes, p.hash, isFirst);
+      }
+      await loadPhotos(editId);
+      bumpDataVersion();
+    } else {
+      const added = validNewPhotos.map((p, idx) => ({
+        id: `pending-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+        url: URL.createObjectURL(new Blob([p.bytes as BlobPart], { type: "image/*" })),
+        bytes: p.bytes,
+        hash: p.hash,
+        isMain: photos.length === 0 && idx === 0,
+        imageUploadedAt: null,
+      }));
+      setPhotos((prev) => [...prev, ...added]);
     }
-    await getRepository().setItemPhoto(editId, bytes, hash);
-    await loadPhoto(editId);
-    bumpDataVersion();
   };
 
-  const removePhoto = async () => {
-    if (editId === null) return;
-    await getRepository().clearItemPhoto(editId);
-    await loadPhoto(editId);
-    bumpDataVersion();
+  const setAsMain = async (photo: { id: string | number; isMain: boolean }) => {
+    if (editId !== null && typeof photo.id === "number") {
+      await getRepository().setItemImageMain(photo.id);
+      await loadPhotos(editId);
+      bumpDataVersion();
+    } else {
+      setPhotos((prev) =>
+        prev.map((p) => ({
+          ...p,
+          isMain: p.id === photo.id,
+        })),
+      );
+    }
+  };
+
+  const removePhoto = async (photo?: { id: string | number; isMain: boolean; url: string }) => {
+    const target = photo ?? photos[0];
+    if (!target) return;
+    if (editId !== null && typeof target.id === "number") {
+      await getRepository().deleteItemImage(target.id);
+      await loadPhotos(editId);
+      bumpDataVersion();
+    } else if (editId !== null && target.id === "legacy") {
+      await getRepository().clearItemPhoto(editId);
+      await loadPhotos(editId);
+      bumpDataVersion();
+    } else {
+      URL.revokeObjectURL(target.url);
+      setPhotos((prev) => {
+        const next = prev.filter((p) => p.id !== target.id);
+        if (target.isMain && next[0]) {
+          next[0].isMain = true;
+        }
+        return [...next];
+      });
+    }
   };
 
   return (
     <div className="max-w-4xl mx-auto pb-24">
       <PageHeader
-        title={t(editId === null ? "item_form.add_title" : "item_form.edit_title")}
-        subtitle={editId !== null ? `#${editId}` : undefined}
+        title={
+          editId !== null ? (
+            <span className="inline-flex items-baseline gap-2">
+              <span>{t("item_form.edit_title")}</span>
+              <span className="text-xl font-normal text-gray-500">#{editId}</span>
+            </span>
+          ) : (
+            t("item_form.add_title")
+          )
+        }
       />
 
       <form onSubmit={(e) => void submit(e)} className="mt-4 space-y-6">
@@ -249,6 +390,20 @@ export function ItemFormScreen() {
                 onChange={(e) => setBarcode(e.target.value)}
               />
               <span className="text-xs text-gray-600 mt-1 block">{t("item_form.barcode_hint")}</span>
+            </label>
+
+            <label className={labelCls}>
+              <span className="flex items-center justify-between">
+                <span>{t("item_form.brand")}</span>
+                <span className="text-xs text-gray-600 font-normal">{t("item_form.optional")}</span>
+              </span>
+              <input
+                data-testid="item-brand"
+                className={inputCls}
+                placeholder={t("item_form.brand_hint")}
+                value={brand}
+                onChange={(e) => setBrand(e.target.value)}
+              />
             </label>
 
             <label className={labelCls}>
@@ -303,6 +458,21 @@ export function ItemFormScreen() {
                   <option key={k} value={k}>{t(`item_form.unit.${k}`)}</option>
                 ))}
               </select>
+            </label>
+
+            <label className={`${labelCls} md:col-span-2`}>
+              <span className="flex items-center justify-between">
+                <span>{t("item_form.description")}</span>
+                <span className="text-xs text-gray-600 font-normal">{t("item_form.optional")}</span>
+              </span>
+              <textarea
+                data-testid="item-description"
+                rows={3}
+                className={`${inputCls} resize-y`}
+                placeholder={t("item_form.description_hint")}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
             </label>
           </div>
         </section>
@@ -420,54 +590,200 @@ export function ItemFormScreen() {
                 <span>{t("item_form.is_active")}</span>
               </label>
             </div>
+          </div>
+        </section>
 
-            <div data-testid="item-photo" className="md:col-span-2 pt-2 border-t border-gray-100">
-              <span className={labelCls}>{t("item_form.photo")}</span>
-              <div className="mt-2 flex items-center gap-4">
-                <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg border-2 border-dashed border-gray-300 bg-gray-50">
-                  {photoUrl ? (
-                    <img src={photoUrl} alt="" className="h-full w-full object-cover" />
+        {/* Card 4: Product Photos */}
+        <section
+          data-testid="item-photo"
+          className="rounded-xl border border-gray-200 bg-white p-6 shadow-xs space-y-4"
+        >
+          <div className="flex items-center justify-between border-b border-gray-100 pb-2.5">
+            <div>
+              <h2 className="text-base font-bold text-gray-900">
+                {t("item_form.section.photos")}
+              </h2>
+              <p className="text-xs text-gray-600 mt-0.5">
+                {t("item_form.photo_hint")}
+              </p>
+            </div>
+            <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">
+              {photos.length} {photos.length === 1 ? "photo" : "photos"}
+            </span>
+          </div>
+
+          {/* Photo gallery thumbnails */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4" data-testid="item-photos-grid">
+            {photos.map((photo, i) => (
+              <div
+                key={photo.id}
+                data-testid={`item-photo-card-${i}`}
+                className={`group relative aspect-square rounded-xl overflow-hidden border-2 bg-gray-50 shadow-xs transition-all ${
+                  photo.isMain ? "border-blue-600 ring-2 ring-blue-500/20" : "border-gray-200 hover:border-gray-300"
+                }`}
+              >
+                <img src={photo.url} alt="" className="h-full w-full object-cover" />
+
+                {/* Top Overlay: Main Badge or Set as Main */}
+                <div className="absolute top-2 left-2 flex items-center gap-1">
+                  {photo.isMain ? (
+                    <span
+                      data-testid="item-photo-main-badge"
+                      className="rounded bg-blue-600 px-2 py-0.5 text-xs font-semibold text-white shadow-xs flex items-center gap-1"
+                    >
+                      {t("item_form.photo_main_badge")}
+                    </span>
                   ) : (
-                    <div className="flex flex-col items-center justify-center text-gray-500">
-                      <svg className="h-8 w-8 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                      </svg>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void setAsMain(photo)}
+                      className="rounded bg-white/95 backdrop-blur-xs px-2 py-0.5 text-xs font-medium text-gray-700 opacity-90 hover:opacity-100 hover:bg-white shadow-xs border border-gray-200 transition-opacity"
+                    >
+                      {t("item_form.photo_set_main")}
+                    </button>
                   )}
                 </div>
-                {editId === null ? (
-                  <p className="text-sm text-gray-600">{t("item_form.photo_save_first")}</p>
-                ) : (
-                  <div className="space-y-2">
-                    <label className="inline-block cursor-pointer rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-xs">
-                      {photoUrl ? t("item_form.photo_replace") : t("item_form.photo_choose")}
-                      <input
-                        type="file"
-                        accept={Object.values(IMAGE_MIME).join(",")}
-                        className="hidden"
-                        data-testid="item-photo-input"
-                        onChange={(e) => void onPhotoFile(e)}
-                      />
-                    </label>
-                    {photoUrl ? (
-                      <button
-                        type="button"
-                        className="block text-sm text-red-600 hover:underline"
-                        data-testid="item-photo-remove"
-                        onClick={() => void removePhoto()}
-                      >
-                        {t("item_form.photo_remove")}
-                      </button>
-                    ) : null}
-                    {photoUploadedAt ? (
-                      <p className="text-xs text-green-700 font-medium">{t("item_form.photo_uploaded")}</p>
-                    ) : null}
-                  </div>
-                )}
+
+                {/* Top Right: Remove Button */}
+                <button
+                  type="button"
+                  data-testid={i === 0 ? "item-photo-remove" : `item-photo-remove-${i}`}
+                  onClick={() => void removePhoto(photo)}
+                  className="absolute top-2 right-2 rounded-full bg-red-600/90 hover:bg-red-700 text-white p-1 shadow-xs transition-opacity"
+                  title={t("item_form.photo_remove")}
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+
+                {/* Bottom: Sync Status Indicator */}
+                <div className="absolute bottom-1.5 left-2 right-2 flex items-center justify-between pointer-events-none">
+                  {photo.imageUploadedAt ? (
+                    <span className="rounded bg-black/60 backdrop-blur-xs px-1.5 py-0.5 text-[10px] font-medium text-green-300">
+                      ✓ {t("item_form.photo_uploaded")}
+                    </span>
+                  ) : (
+                    <span className="rounded bg-black/60 backdrop-blur-xs px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
+                      {t("item_form.photo_pending_sync")}
+                    </span>
+                  )}
+                </div>
               </div>
-              <p className="mt-1.5 text-xs text-gray-600">{t("item_form.photo_hint")}</p>
-            </div>
+            ))}
+
+            {/* Add Photo Button Card */}
+            <label className="flex flex-col items-center justify-center aspect-square rounded-xl border-2 border-dashed border-gray-300 bg-gray-50/70 hover:bg-gray-100 hover:border-blue-400 cursor-pointer transition-colors p-3 text-center group">
+              <div className="rounded-full bg-white p-2 shadow-2xs group-hover:scale-105 transition-transform">
+                <svg className="h-6 w-6 text-gray-500 group-hover:text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </div>
+              <span className="mt-2 text-xs font-medium text-gray-700 group-hover:text-blue-600">
+                {photos.length > 0 ? t("item_form.photo_add_more") : t("item_form.photo_choose")}
+              </span>
+              <input
+                type="file"
+                multiple
+                accept={Object.values(IMAGE_MIME).join(",")}
+                className="hidden"
+                data-testid="item-photo-input"
+                onChange={(e) => void onPhotoFiles(e)}
+              />
+            </label>
           </div>
+        </section>
+
+        {/* Card 5: Custom Attributes / Specifications */}
+        <section
+          className="rounded-xl border border-gray-200 bg-white p-6 shadow-xs space-y-4"
+          data-testid="item-custom-attributes"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-100 pb-2.5 gap-2">
+            <div>
+              <h2 className="text-base font-bold text-gray-900">
+                {t("item_form.section.custom_attributes")}
+              </h2>
+              <p className="text-xs text-gray-600 mt-0.5">
+                {t("item_form.custom_attributes_hint")}
+              </p>
+            </div>
+            <button
+              type="button"
+              data-testid="attr-add"
+              onClick={() => setCustomAttributes([...customAttributes, { key: "", value: "" }])}
+              className="self-start sm:self-auto rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition-colors"
+            >
+              {t("item_form.add_attribute")}
+            </button>
+          </div>
+
+          {/* Quick Presets */}
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-gray-500 font-medium">{t("item_form.attribute_presets")}</span>
+            {["Size", "Color", "Material", "Flavor", "Weight", "Volume", "Warranty"].map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => {
+                  if (!customAttributes.some((a) => a.key.toLowerCase() === preset.toLowerCase())) {
+                    setCustomAttributes([...customAttributes, { key: preset, value: "" }]);
+                  }
+                }}
+                className="rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1 text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-colors cursor-pointer"
+              >
+                + {preset}
+              </button>
+            ))}
+          </div>
+
+          {customAttributes.length === 0 ? (
+            <p className="text-xs text-gray-500 py-2 italic">{t("item_form.no_attributes")}</p>
+          ) : (
+            <div className="space-y-2.5">
+              {customAttributes.map((attr, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder={t("item_form.attribute_name")}
+                    data-testid={`attr-key-${idx}`}
+                    value={attr.key}
+                    onChange={(e) => {
+                      const updated = [...customAttributes];
+                      updated[idx] = { ...updated[idx]!, key: e.target.value };
+                      setCustomAttributes(updated);
+                    }}
+                    className="w-1/3 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-900 focus:border-blue-500 focus:outline-none"
+                  />
+                  <input
+                    type="text"
+                    placeholder={t("item_form.attribute_value")}
+                    data-testid={`attr-val-${idx}`}
+                    value={attr.value}
+                    onChange={(e) => {
+                      const updated = [...customAttributes];
+                      updated[idx] = { ...updated[idx]!, value: e.target.value };
+                      setCustomAttributes(updated);
+                    }}
+                    className="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-900 focus:border-blue-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    data-testid={`attr-remove-${idx}`}
+                    onClick={() => {
+                      setCustomAttributes(customAttributes.filter((_, i) => i !== idx));
+                    }}
+                    className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                    title="Remove attribute"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* Secondary Barcodes & Pack Multipliers */}

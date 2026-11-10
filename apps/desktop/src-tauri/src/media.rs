@@ -106,6 +106,35 @@ pub fn store_photo(data_dir: &Path, item_id: i64, bytes: &[u8]) -> Result<String
     Ok(name)
 }
 
+/// Write one item image with a distinct image_id. Returns the relative file name.
+pub fn store_item_image(
+    data_dir: &Path,
+    item_id: i64,
+    image_id: i64,
+    bytes: &[u8],
+) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Err("the photo is empty".to_string());
+    }
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err(format!(
+            "the photo is {} MB; the limit is {} MB",
+            bytes.len() / (1024 * 1024),
+            MAX_IMAGE_BYTES / (1024 * 1024)
+        ));
+    }
+    let kind = sniff(bytes)
+        .ok_or("this is not a JPEG, PNG or WebP image — use a photo from your camera or gallery")?;
+    let dir = photos_dir(data_dir);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let name = format!("{item_id}_{image_id}.{}", kind.extension());
+    let path = dir.join(&name);
+    let tmp = dir.join(format!("{name}.tmp"));
+    fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    Ok(name)
+}
+
 pub fn read_photo(data_dir: &Path, file_name: &str) -> Result<Vec<u8>, String> {
     if !is_safe_file_name(file_name) {
         return Err("bad photo file name".to_string());

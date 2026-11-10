@@ -29,6 +29,9 @@ export interface DemoItemSeed {
   taxRateBp: number;
   openingStockMilli: number;
   hsnCode: string;
+  brand?: string;
+  description?: string;
+  customAttributes?: Record<string, string>;
 }
 
 export interface DemoCustomerSeed {
@@ -81,6 +84,9 @@ export const DEMO_ITEMS: readonly DemoItemSeed[] = [
     taxRateBp: 1800,
     openingStockMilli: 6000,
     hsnCode: "85171300",
+    brand: "Apple",
+    description: "6.1-inch Super Retina XDR display, A18 Bionic chip, advanced camera system.",
+    customAttributes: { Storage: "128GB", Color: "Midnight", Warranty: "1 Year Apple Care" },
   },
   {
     name: "Samsung Galaxy A55 5G (8GB/128GB, Awesome Iceblue)",
@@ -93,6 +99,9 @@ export const DEMO_ITEMS: readonly DemoItemSeed[] = [
     taxRateBp: 1800,
     openingStockMilli: 10000,
     hsnCode: "85171300",
+    brand: "Samsung",
+    description: "FHD+ Super AMOLED 120Hz display, 50MP triple camera with OIS.",
+    customAttributes: { RAM: "8GB", Storage: "128GB", Color: "Awesome Iceblue" },
   },
   {
     name: "Redmi Note 13 Pro 5G (8GB/256GB, Arctic White)",
@@ -105,6 +114,9 @@ export const DEMO_ITEMS: readonly DemoItemSeed[] = [
     taxRateBp: 1800,
     openingStockMilli: 12000,
     hsnCode: "85171300",
+    brand: "Xiaomi",
+    description: "200MP ultra-clear camera with OIS, 1.5K 120Hz AMOLED display.",
+    customAttributes: { RAM: "8GB", Storage: "256GB", Color: "Arctic White" },
   },
   {
     name: "OnePlus Nord CE 4 (8GB/128GB, Celadon Marble)",
@@ -546,6 +558,9 @@ export async function seedDemoData(
       openingStockMilli: item.openingStockMilli,
       isActive: true,
       hsnCode: item.hsnCode,
+      brand: item.brand,
+      description: item.description,
+      customAttributes: item.customAttributes,
     });
     itemMap.set(item.barcode, id);
   }

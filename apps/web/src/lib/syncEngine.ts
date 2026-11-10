@@ -21,9 +21,12 @@ import type {
 } from "@mytowncart-billing/connector-mytowncart";
 import {
   externalIdOf,
+  IMAGE_MIME,
+  localIsoTimestamp,
   planPublish,
   reconcile,
   remoteHashOf,
+  sniffImage,
   stockUnitsOf,
   type PublishItemInput,
   type ReconcileInput,
@@ -38,7 +41,7 @@ import type {
   RemoteItemLink,
 } from "@mytowncart-billing/storage";
 
-import { isInTauri } from "./repository";
+import { isInTauri, isLanServer } from "./repository";
 import { loadRemoteSeen, saveRemoteSeen } from "./remoteSeen";
 
 /** Server cap from `me/`; never ask for more. */
@@ -84,6 +87,9 @@ function toPlanInputs(items: readonly Item[], categories: readonly Category[]): 
     photoPath: item.photoPath,
     marketplaceCategoryId: item.categoryId === null ? null : (mapped.get(item.categoryId) ?? null),
     lastPublishedHash: item.contentHash,
+    description: item.description,
+    brand: item.brand,
+    customAttributes: item.customAttributes,
   }));
 }
 
@@ -104,7 +110,7 @@ function newKey(externalId: string, now: Date): string {
 
 export async function runSync(
   deps: SyncDeps,
-  options: { bulkMax?: number } = {},
+  options: { bulkMax?: number; force?: boolean } = {},
 ): Promise<SyncOutcome> {
   const { repo, connector } = deps;
   const now = deps.now();
@@ -123,9 +129,9 @@ export async function runSync(
   const bulkMax = Math.min(Math.max(1, options.bulkMax ?? DEFAULT_BULK_MAX), DEFAULT_BULK_MAX);
   const deltas = await pushStock(repo, connector, pending, now, outcome, bulkMax);
   await pushCatalog(repo, connector, deltas, outcome);
-  await pullStock(repo, connector, outcome);
+  await pullStock(repo, connector, outcome, options.force);
   await recordSnapshot(repo, connector, now, outcome);
-  await pullOrders(repo, connector, now, outcome);
+  await pullOrders(repo, connector, now, outcome, options.force);
   return outcome;
 }
 
@@ -243,9 +249,70 @@ async function pushCatalog(
         categoryId: r.input.marketplaceCategoryId as string,
         isActive: r.input.isActive,
         contentHash: r.hash,
+        description: r.input.description,
+        brand: r.input.brand,
+        customAttributes: r.input.customAttributes,
       })),
     );
     const byExternal = new Map(results.map((r) => [r.externalId, r]));
+
+    // Upload photos for items with pending local photos so they become visible
+    for (const r of changed) {
+      const item = items.find((i) => i.id === r.input.id);
+      if (!item) continue;
+      try {
+        const images = await repo.listItemImages(item.id);
+        if (images.length > 0) {
+          const sorted = [...images].sort(
+            (a, b) => (b.isMain ? 1 : 0) - (a.isMain ? 1 : 0) || a.position - b.position,
+          );
+          for (const img of sorted) {
+            if (img.imageUploadedAt !== img.imageHash) {
+              try {
+                const photo = await repo.readItemImage(img.id);
+                if (photo && photo.imageHash === img.imageHash) {
+                  const blob = new Blob([photo.bytes as BlobPart], {
+                    type: IMAGE_MIME[sniffImage(photo.bytes) ?? "jpeg"],
+                  });
+                  await connector.uploadImage(r.externalId, blob, img.isMain);
+                  await repo.recordImageUploads([
+                    {
+                      itemId: item.id,
+                      imageHash: img.imageHash,
+                      uploadedAt: localIsoTimestamp(new Date()),
+                    },
+                  ]);
+                }
+              } catch {
+                // Failure to upload a photo must not abort catalog sync
+              }
+            }
+          }
+        } else if (
+          item.photoFile !== "" &&
+          item.imageHash !== null &&
+          item.imageUploadedAt !== item.imageHash
+        ) {
+          const photo = await repo.readItemPhoto(item.id);
+          if (photo && photo.imageHash === item.imageHash) {
+            const blob = new Blob([photo.bytes as BlobPart], {
+              type: IMAGE_MIME[sniffImage(photo.bytes) ?? "jpeg"],
+            });
+            await connector.uploadImage(r.externalId, blob, !item.imageUploadedAt);
+            await repo.recordImageUploads([
+              {
+                itemId: item.id,
+                imageHash: item.imageHash,
+                uploadedAt: localIsoTimestamp(new Date()),
+              },
+            ]);
+          }
+        }
+      } catch {
+        // Failure to inspect or upload photos must not abort catalog sync
+      }
+    }
+
     await repo.recordPublish(
       changed.map((r) => {
         const result = byExternal.get(r.externalId);
@@ -276,12 +343,13 @@ async function pullStock(
   repo: BillingRepository,
   connector: MarketplaceConnector,
   outcome: SyncOutcome,
+  force = false,
 ): Promise<void> {
   const stored = Number((await repo.getSyncCursor("stock")) ?? "0");
   let cursor = Number.isSafeInteger(stored) && stored >= 0 ? stored : 0;
   try {
     for (let page = 0; page < PULL_PAGE_CAP; page++) {
-      const feed = await connector.pullStock(cursor);
+      const feed = await connector.pullStock(cursor, { force });
       if (feed.nextCursor === cursor && feed.moves.length === 0) break;
       const applied = await repo.applyStockPull(
         String(feed.nextCursor),
@@ -301,12 +369,16 @@ async function pullStock(
   }
 }
 
+function remoteItemHash(r: RemoteItem): string {
+  return `${r.pricePaise}:${r.stockUnits}:${r.isActive ? 1 : 0}`;
+}
+
 function toLinks(remote: readonly RemoteItem[]): RemoteItemLink[] {
   return remote.map((r) => ({
     externalId: r.externalId,
     stockUnits: r.stockUnits,
     pricePaise: r.pricePaise,
-    remoteHash: "",
+    remoteHash: remoteItemHash(r),
   }));
 }
 
@@ -330,10 +402,11 @@ async function pullOrders(
   connector: MarketplaceConnector,
   now: Date,
   outcome: SyncOutcome,
+  force = false,
 ): Promise<void> {
   try {
     const after = await repo.getSyncCursor("orders");
-    const page = await connector.pullOrders(after ?? undefined);
+    const page = await connector.pullOrders(after ?? undefined, { force });
     outcome.orders = await repo.recordRemoteOrders(
       page.orders.map((o) => ({
         id: o.id,
@@ -381,9 +454,9 @@ export async function listReconcileRows(
   );
 }
 
-/** Only the desktop shell runs background sync; the browser demo stays local. */
+/** Background sync is available in Tauri desktop app or connected LAN server. */
 export function syncAvailable(): boolean {
-  return isInTauri();
+  return isInTauri() || isLanServer();
 }
 
 export { remoteHashOf };

@@ -66,7 +66,22 @@ export interface Item {
   remoteHash: string | null;
   hsnCode: string;
   costPricePaise: number;
+  description: string;
+  brand: string;
+  customAttributes: Record<string, string>;
   updatedAt: string;
+}
+
+export interface ItemImage {
+  id: number;
+  itemId: number;
+  fileName: string;
+  imageHash: string;
+  isMain: boolean;
+  position: number;
+  remoteImageId: string | null;
+  imageUploadedAt: string | null;
+  createdAt: string;
 }
 
 /** A bill parked at the till; not yet a bill (no number, no stock movement). */
@@ -165,6 +180,9 @@ export interface ItemInput {
   isActive: boolean;
   hsnCode?: string;
   costPricePaise?: number;
+  description?: string;
+  brand?: string;
+  customAttributes?: Record<string, string>;
 }
 
 export interface Customer {

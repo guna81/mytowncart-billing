@@ -52,6 +52,12 @@ interface AppState {
   updateChecking: boolean;
   updateCheckResult: UpdateCheckResult | null;
   runUpdateCheck(force?: boolean): Promise<UpdateCheckResult | null>;
+
+  /** Auto sync products and stock */
+  autoSyncEnabled: boolean;
+  setAutoSyncEnabled(enabled: boolean): void;
+  isSyncing: boolean;
+  setIsSyncing(isSyncing: boolean): void;
 }
 
 const initialLocale =
@@ -95,6 +101,10 @@ export const useAppStore = create<AppState>((set) => ({
   updateInfo: null,
   updateChecking: false,
   updateCheckResult: null,
+  autoSyncEnabled: true,
+  setAutoSyncEnabled: (autoSyncEnabled) => set({ autoSyncEnabled }),
+  isSyncing: false,
+  setIsSyncing: (isSyncing) => set({ isSyncing }),
   runUpdateCheck: async (force?: boolean) => {
     if (!isInTauri()) {
       return null;

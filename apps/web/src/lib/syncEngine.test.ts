@@ -178,4 +178,55 @@ describe("runSync", () => {
     });
     expect(outcome.problems).toEqual(["catalog read: boom"]);
   });
+
+  it("passes force option to pullStock and pullOrders", async () => {
+    const { repo } = await fixture();
+    let pullStockOpts: { force?: boolean } | undefined;
+    let pullOrdersOpts: { force?: boolean } | undefined;
+    await runSync(
+      {
+        repo,
+        connector: fakeConnector({
+          pullStock: (_c, opts) => {
+            pullStockOpts = opts;
+            return Promise.resolve({ moves: [], nextCursor: 0 });
+          },
+          pullOrders: (_a, opts) => {
+            pullOrdersOpts = opts;
+            return Promise.resolve({ orders: [] });
+          },
+        }),
+        now,
+        isApproved: () => true,
+      },
+      { force: true },
+    );
+    expect(pullStockOpts).toEqual({ force: true });
+    expect(pullOrdersOpts).toEqual({ force: true });
+  });
+
+  it("generates non-empty remoteHash when recording remote catalog items", async () => {
+    const { repo, itemId } = await fixture();
+    await runSync({
+      repo,
+      connector: fakeConnector({
+        listRemoteItems: () =>
+          Promise.resolve([
+            {
+              externalId: `itm_${itemId}`,
+              productId: "p-1",
+              variantId: "v-1",
+              stockUnits: 5,
+              pricePaise: 1200,
+              isActive: true,
+            },
+          ]),
+      }),
+      now,
+      isApproved: () => true,
+    });
+    const items = await repo.listItems({ activeOnly: false });
+    const item = items.find((i) => i.id === itemId);
+    expect(item?.remoteHash).toBe("1200:5:1");
+  });
 });

@@ -42,6 +42,7 @@ import type {
   Item,
   ItemBarcode,
   ItemBatch,
+  ItemImage,
   ItemInput,
   LoyaltyTransaction,
   NewCreditNotePayload,
@@ -94,9 +95,11 @@ export class MemoryRepository implements BillingRepository {
   private nextIds = {
     category: 1, item: 1, customer: 1, customerPayment: 1, bill: 1, line: 1, payment: 1, movement: 1, held: 1,
     outbox: 1, creditNote: 1, creditNoteLine: 1, supplier: 1, purchase: 1, purchaseLine: 1, user: 1, auditLog: 1,
-    batch: 1, loyaltyTx: 1, itemBarcode: 1, dayEndClosure: 1,
+    batch: 1, loyaltyTx: 1, itemBarcode: 1, dayEndClosure: 1, itemImage: 1,
   };
   private photos = new Map<number, MemoryPhoto>();
+  private itemImages = new Map<number, ItemImage>();
+  private imageBytes = new Map<number, Uint8Array>();
   private held = new Map<number, HeldBill>();
   private outbox: OutboxRow[] = [];
   private cursors = new Map<string, string>();
@@ -169,7 +172,15 @@ export class MemoryRepository implements BillingRepository {
     if (filter?.search) {
       const q = filter.search.toLowerCase();
       rows = rows.filter(
-        (i) => i.name.toLowerCase().includes(q) || i.barcode.toLowerCase().includes(q),
+        (i) =>
+          i.name.toLowerCase().includes(q) ||
+          i.barcode.toLowerCase().includes(q) ||
+          (i.brand && i.brand.toLowerCase().includes(q)) ||
+          (i.description && i.description.toLowerCase().includes(q)) ||
+          (i.customAttributes &&
+            Object.entries(i.customAttributes).some(
+              ([k, v]) => k.toLowerCase().includes(q) || v.toLowerCase().includes(q),
+            )),
       );
     }
     return rows.sort((a, b) => a.name.localeCompare(b.name));
@@ -205,6 +216,10 @@ export class MemoryRepository implements BillingRepository {
         isActive: input.isActive,
         hsnCode: input.hsnCode ?? existing.hsnCode ?? "",
         costPricePaise: input.costPricePaise ?? existing.costPricePaise ?? 0,
+        description: input.description !== undefined ? input.description : (existing.description ?? ""),
+        brand: input.brand !== undefined ? input.brand : (existing.brand ?? ""),
+        customAttributes:
+          input.customAttributes !== undefined ? { ...input.customAttributes } : (existing.customAttributes ?? {}),
         updatedAt: now,
       });
       return input.id;
@@ -240,6 +255,9 @@ export class MemoryRepository implements BillingRepository {
       remoteHash: null,
       hsnCode: input.hsnCode ?? "",
       costPricePaise: input.costPricePaise ?? 0,
+      description: input.description ?? "",
+      brand: input.brand ?? "",
+      customAttributes: input.customAttributes ? { ...input.customAttributes } : {},
       updatedAt: now,
     });
     if (input.openingStockMilli !== 0) {
@@ -592,6 +610,118 @@ export class MemoryRepository implements BillingRepository {
     return { bytes: new Uint8Array(photo.bytes), imageHash: photo.imageHash };
   }
 
+  async listItemImages(itemId: number): Promise<ItemImage[]> {
+    return [...this.itemImages.values()]
+      .filter((img) => img.itemId === itemId)
+      .sort((a, b) => (b.isMain ? 1 : 0) - (a.isMain ? 1 : 0) || a.position - b.position || a.id - b.id);
+  }
+
+  async addItemImage(
+    itemId: number,
+    bytes: Uint8Array,
+    imageHash: string,
+    isMain = false,
+  ): Promise<ItemImage> {
+    const item = this.items.get(itemId);
+    if (!item) throw new Error(`no item with id ${itemId}`);
+    const existing = await this.listItemImages(itemId);
+    const makeMain = isMain || existing.length === 0;
+
+    const kind =
+      bytes[0] === 0xff && bytes[1] === 0xd8 ? "jpg" : bytes[1] === 0x50 ? "png" : "webp";
+    const id = this.nextIds.itemImage++;
+    const fileName = `${itemId}_${id}.${kind}`;
+    const now = localIsoTimestamp(new Date());
+
+    if (makeMain) {
+      for (const img of existing) {
+        if (img.isMain) img.isMain = false;
+      }
+      item.photoFile = fileName;
+      item.imageHash = imageHash;
+      item.imageUploadedAt = null;
+      item.updatedAt = now;
+      this.photos.set(itemId, { bytes: new Uint8Array(bytes), imageHash });
+    }
+
+    const itemImage: ItemImage = {
+      id,
+      itemId,
+      fileName,
+      imageHash,
+      isMain: makeMain,
+      position: existing.length,
+      remoteImageId: null,
+      imageUploadedAt: null,
+      createdAt: now,
+    };
+
+    this.itemImages.set(id, itemImage);
+    this.imageBytes.set(id, new Uint8Array(bytes));
+    return itemImage;
+  }
+
+  async deleteItemImage(imageId: number): Promise<void> {
+    const img = this.itemImages.get(imageId);
+    if (!img) return;
+    this.itemImages.delete(imageId);
+    this.imageBytes.delete(imageId);
+
+    if (img.isMain) {
+      const remaining = await this.listItemImages(img.itemId);
+      const item = this.items.get(img.itemId);
+      const now = localIsoTimestamp(new Date());
+      if (remaining.length > 0 && remaining[0]) {
+        const nextMain = remaining[0];
+        nextMain.isMain = true;
+        if (item) {
+          item.photoFile = nextMain.fileName;
+          item.imageHash = nextMain.imageHash;
+          item.imageUploadedAt = nextMain.imageUploadedAt;
+          item.updatedAt = now;
+        }
+        const bytes = this.imageBytes.get(nextMain.id);
+        if (bytes) {
+          this.photos.set(img.itemId, { bytes: new Uint8Array(bytes), imageHash: nextMain.imageHash });
+        }
+      } else if (item) {
+        item.photoFile = "";
+        item.imageHash = null;
+        item.imageUploadedAt = null;
+        item.updatedAt = now;
+        this.photos.delete(img.itemId);
+      }
+    }
+  }
+
+  async setItemImageMain(imageId: number): Promise<void> {
+    const img = this.itemImages.get(imageId);
+    if (!img) throw new Error(`no image with id ${imageId}`);
+    const existing = await this.listItemImages(img.itemId);
+    for (const other of existing) {
+      other.isMain = other.id === imageId;
+    }
+    const item = this.items.get(img.itemId);
+    const now = localIsoTimestamp(new Date());
+    if (item) {
+      item.photoFile = img.fileName;
+      item.imageHash = img.imageHash;
+      item.imageUploadedAt = img.imageUploadedAt;
+      item.updatedAt = now;
+    }
+    const bytes = this.imageBytes.get(imageId);
+    if (bytes) {
+      this.photos.set(img.itemId, { bytes: new Uint8Array(bytes), imageHash: img.imageHash });
+    }
+  }
+
+  async readItemImage(imageId: number): Promise<{ bytes: Uint8Array; imageHash: string } | null> {
+    const img = this.itemImages.get(imageId);
+    const bytes = this.imageBytes.get(imageId);
+    if (!img || !bytes) return null;
+    return { bytes: new Uint8Array(bytes), imageHash: img.imageHash };
+  }
+
   async recordImageUploads(
     uploads: readonly { itemId: number; imageHash: string; uploadedAt: string }[],
   ): Promise<void> {
@@ -599,6 +729,11 @@ export class MemoryRepository implements BillingRepository {
       const item = this.items.get(upload.itemId);
       // Hash mismatch: the photo was replaced while the upload was in flight.
       if (item && item.imageHash === upload.imageHash) item.imageUploadedAt = upload.uploadedAt;
+      for (const img of this.itemImages.values()) {
+        if (img.itemId === upload.itemId && img.imageHash === upload.imageHash) {
+          img.imageUploadedAt = upload.uploadedAt;
+        }
+      }
     }
   }
 
@@ -684,7 +819,9 @@ export class MemoryRepository implements BillingRepository {
     const applied: { externalId: string; itemId: number | null; deltaMilli: number }[] = [];
     for (const move of moves) {
       if (move.deltaUnits === 0) continue;
-      const item = [...this.items.values()].find((i) => i.remoteProductId === move.externalId);
+      const item = [...this.items.values()].find(
+        (i) => i.remoteProductId === move.externalId || `itm_${i.id}` === move.externalId,
+      );
       const deltaMilli = move.deltaUnits * 1000;
       if (item) this.recordMovement(item.id, deltaMilli, move.reason, "sync", move.externalId);
       applied.push({ externalId: move.externalId, itemId: item?.id ?? null, deltaMilli });
@@ -695,7 +832,9 @@ export class MemoryRepository implements BillingRepository {
   async recordRemoteCatalog(items: readonly RemoteItemLink[]): Promise<number> {
     let linked = 0;
     for (const link of items) {
-      const item = [...this.items.values()].find((i) => i.remoteProductId === link.externalId);
+      const item = [...this.items.values()].find(
+        (i) => i.remoteProductId === link.externalId || `itm_${i.id}` === link.externalId,
+      );
       if (!item) continue;
       item.remoteHash = link.remoteHash;
       linked += 1;

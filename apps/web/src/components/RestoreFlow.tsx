@@ -21,7 +21,7 @@ import { isInTauri } from "../lib/tauri";
 /** Newest database schema this app can open. */
 export const SUPPORTED_BACKUP_SCHEMA = 5;
 
-const inputCls = "mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm font-mono";
+const inputCls = "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-2xs font-mono";
 const labelCls = "block text-sm font-medium text-gray-700";
 
 type Opened = Extract<BackupOpenResult, { ok: true }>;

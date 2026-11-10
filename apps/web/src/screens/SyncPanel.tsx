@@ -13,6 +13,7 @@ import {
 } from "@mytowncart-billing/core";
 import type { Item, OutboxRow, ReconcileFix, RemoteOrderRecord } from "@mytowncart-billing/storage";
 import { t, type I18nKey } from "../i18n";
+import { setAutoSyncSetting } from "../lib/autoSync";
 import { getConnector } from "../lib/marketplace";
 import { getRepository } from "../lib/repository";
 import { listReconcileRows, runSync, syncAvailable, type SyncOutcome } from "../lib/syncEngine";
@@ -47,6 +48,7 @@ function errorText(err: unknown): string {
 export function SyncPanel() {
   const dataVersion = useAppStore((s) => s.dataVersion);
   const bumpDataVersion = useAppStore((s) => s.bumpDataVersion);
+  const autoSyncEnabled = useAppStore((s) => s.autoSyncEnabled);
   const [pending, setPending] = useState<OutboxRow[]>([]);
   const [last, setLast] = useState<LastSync | null>(null);
   const [busy, setBusy] = useState(false);
@@ -66,17 +68,20 @@ export function SyncPanel() {
     void refresh();
   }, [refresh, dataVersion]);
 
-  const syncNow = useCallback(async () => {
+  const syncNow = useCallback(async (force = true) => {
     setBusy(true);
     setError(null);
     try {
       const repo = getRepository();
-      const outcome = await runSync({
-        repo,
-        connector: getConnector(),
-        now: () => new Date(),
-        isApproved: () => true,
-      });
+      const outcome = await runSync(
+        {
+          repo,
+          connector: getConnector(),
+          now: () => new Date(),
+          isApproved: () => true,
+        },
+        { force },
+      );
       const record: LastSync = { at: outcome.at, outcome };
       await repo.setAppSetting(SYNC_SETTINGS_KEY, JSON.stringify(record));
       setLast(record);
@@ -92,7 +97,7 @@ export function SyncPanel() {
   // Automatic sync while connected; the tab only schedule-ticks the desktop app.
   useEffect(() => {
     if (!syncAvailable()) return;
-    const timer = setInterval(() => void syncNow(), AUTO_SYNC_MS);
+    const timer = setInterval(() => void syncNow(false), AUTO_SYNC_MS);
     return () => clearInterval(timer);
   }, [syncNow]);
 
@@ -145,7 +150,24 @@ export function SyncPanel() {
             {t("sync.desktop_only")}
           </p>
         ) : (
-          <p className="mt-2 text-xs text-gray-500">{t("sync.auto")}</p>
+          <div className="mt-4 flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 p-3">
+            <div>
+              <span className="text-sm font-semibold text-gray-900">{t("sync.auto_title")}</span>
+              <p className="text-xs text-gray-600 mt-0.5">
+                {autoSyncEnabled ? t("sync.auto_on_hint") : t("sync.auto_off_hint")}
+              </p>
+            </div>
+            <label className="relative inline-flex cursor-pointer items-center">
+              <input
+                type="checkbox"
+                className="peer sr-only"
+                checked={autoSyncEnabled}
+                data-testid="sync-auto-toggle"
+                onChange={(e) => void setAutoSyncSetting(e.target.checked)}
+              />
+              <div className="peer h-6 w-11 rounded-full bg-gray-300 peer-focus:outline-none after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-blue-600 peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+            </label>
+          </div>
         )}
 
         <p className="mt-3 text-sm text-gray-700" data-testid="sync-last">

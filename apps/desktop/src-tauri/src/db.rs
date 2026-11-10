@@ -74,6 +74,16 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "payments_cash_kept",
         sql: include_str!("../migrations/0010_payments_cash_kept.sql"),
     },
+    Migration {
+        version: 11,
+        name: "item_details",
+        sql: include_str!("../migrations/0011_item_details.sql"),
+    },
+    Migration {
+        version: 12,
+        name: "item_images",
+        sql: include_str!("../migrations/0012_item_images.sql"),
+    },
 ];
 
 #[derive(Debug, Error)]

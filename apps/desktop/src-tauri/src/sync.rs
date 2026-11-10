@@ -254,7 +254,7 @@ pub fn apply_stock_pull(
         }
         let item_id: Option<i64> = tx
             .query_row(
-                "SELECT id FROM items WHERE remote_product_id = ?1",
+                "SELECT id FROM items WHERE remote_product_id = ?1 OR ('itm_' || id) = ?1",
                 rusqlite::params![mv.external_id],
                 |r| r.get(0),
             )
@@ -322,13 +322,15 @@ pub fn record_remote_catalog(conn: &Connection, items: &[RemoteItemPayload]) -> 
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     let mut linked = 0usize;
     for item in items {
-        if item.remote_hash.trim().is_empty() {
-            return Err("remote_hash is required".to_string());
-        }
+        let hash = if item.remote_hash.trim().is_empty() {
+            format!("{}:{}:{}", item.price_paise, item.stock_units, item.external_id)
+        } else {
+            item.remote_hash.clone()
+        };
         let n = tx
             .execute(
-                "UPDATE items SET remote_hash = ?2 WHERE remote_product_id = ?1",
-                rusqlite::params![item.external_id, item.remote_hash],
+                "UPDATE items SET remote_hash = ?2 WHERE remote_product_id = ?1 OR ('itm_' || id) = ?1",
+                rusqlite::params![item.external_id, hash],
             )
             .map_err(|e| e.to_string())?;
         linked += n;

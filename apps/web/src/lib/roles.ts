@@ -17,6 +17,7 @@ export const OWNER_ONLY_ROUTES: readonly string[] = [
   "/purchases",
   "/stock-audit",
   "/mytowncart",
+  "/categories",
   "/items/new",
 ];
 

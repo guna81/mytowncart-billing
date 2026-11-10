@@ -6,12 +6,14 @@
  * localStorage or a log (§8.7).
  */
 import type { ConnectionToken } from "@mytowncart-billing/connector-mytowncart";
-import { isInTauri } from "./repository";
+import { isInTauri, isLanServer } from "./repository";
+import { lanConnection } from "./lanMarketplace";
 
 const KEYCHAIN_KEY = "mytowncart.integration";
 
 /** Browser store and the per-request token cache in one place. */
 let current: ConnectionToken | null = null;
+let loaded = false;
 
 async function invokeKeychain<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
   const { invoke } = await import("@tauri-apps/api/core");
@@ -34,10 +36,17 @@ function parse(json: string | null): ConnectionToken | null {
   }
 }
 
-export async function loadConnection(): Promise<ConnectionToken | null> {
+export async function loadConnection(opts?: { force?: boolean }): Promise<ConnectionToken | null> {
+  if (isLanServer()) {
+    current = parse(await lanConnection("GET"));
+    loaded = true;
+    return current;
+  }
   if (!isInTauri()) return current;
+  if (loaded && !opts?.force) return current;
   const stored = await invokeKeychain<string | null>("keychain_get", { key: KEYCHAIN_KEY });
   current = parse(stored);
+  loaded = true;
   return current;
 }
 
@@ -46,16 +55,25 @@ export async function saveConnection(next: ConnectionToken): Promise<void> {
     await invokeKeychain<void>("keychain_set", { key: KEYCHAIN_KEY, value: JSON.stringify(next) });
   }
   current = next;
+  loaded = true;
 }
 
 export async function clearConnection(): Promise<void> {
+  if (isLanServer()) await lanConnection("DELETE");
   if (isInTauri()) {
     await invokeKeychain<void>("keychain_delete", { key: KEYCHAIN_KEY });
   }
   current = null;
+  loaded = true;
 }
 
 /** Token getter handed to the connector; null when disconnected. */
 export function currentToken(): string | null {
   return current?.token ?? null;
+}
+
+/** Reset in-memory cache for unit tests. */
+export function _resetConnectionCacheForTest(): void {
+  current = null;
+  loaded = false;
 }

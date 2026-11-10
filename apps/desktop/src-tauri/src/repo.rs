@@ -352,7 +352,7 @@ pub fn list_customer_payments(conn: &Connection, customer_id: i64) -> RepoResult
 // Items.
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemPayload {
     pub id: Option<i64>,
@@ -371,6 +371,12 @@ pub struct ItemPayload {
     pub hsn_code: String,
     #[serde(default)]
     pub cost_price_paise: i64,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub brand: String,
+    #[serde(default)]
+    pub custom_attributes: String,
     pub now: String,
 }
 
@@ -397,11 +403,13 @@ fn upsert_item_inner(conn: &Connection, p: &ItemPayload) -> RepoResult<i64> {
                 .execute(
                     "UPDATE items SET name = ?2, barcode = ?3, category_id = ?4, unit_kind = ?5,
                        price_paise = ?6, mrp_paise = ?7, tax_rate_bp = ?8, is_active = ?9,
-                       hsn_code = ?10, cost_price_paise = ?11, updated_at = ?12
+                       hsn_code = ?10, cost_price_paise = ?11, description = ?12, brand = ?13,
+                       custom_attributes = ?14, updated_at = ?15
                      WHERE id = ?1",
                     rusqlite::params![
                         id, p.name, p.barcode, p.category_id, p.unit_kind, p.price_paise,
-                        p.mrp_paise, p.tax_rate_bp, p.is_active as i64, p.hsn_code, p.cost_price_paise, p.now,
+                        p.mrp_paise, p.tax_rate_bp, p.is_active as i64, p.hsn_code, p.cost_price_paise,
+                        p.description, p.brand, p.custom_attributes, p.now,
                     ],
                 )
                 .map_err(err)?;
@@ -427,11 +435,13 @@ fn upsert_item_inner(conn: &Connection, p: &ItemPayload) -> RepoResult<i64> {
             }
             conn.execute(
                 "INSERT INTO items (name, barcode, category_id, unit_kind, price_paise, mrp_paise,
-                   tax_rate_bp, stock_milli, is_active, hsn_code, cost_price_paise, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?10, ?11)",
+                   tax_rate_bp, stock_milli, is_active, hsn_code, cost_price_paise,
+                   description, brand, custom_attributes, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 rusqlite::params![
                     p.name, p.barcode, p.category_id, p.unit_kind, p.price_paise, p.mrp_paise,
-                    p.tax_rate_bp, p.is_active as i64, p.hsn_code, p.cost_price_paise, p.now,
+                    p.tax_rate_bp, p.is_active as i64, p.hsn_code, p.cost_price_paise,
+                    p.description, p.brand, p.custom_attributes, p.now,
                 ],
             )
             .map_err(err)?;
@@ -480,6 +490,15 @@ pub fn set_item_photo(
         let _ = crate::media::delete_photo(data_dir, &file_name);
         return Err(format!("no item with id {item_id}"));
     }
+    let _ = conn.execute(
+        "DELETE FROM item_images WHERE item_id = ?1 AND is_main = 1",
+        rusqlite::params![item_id],
+    );
+    let _ = conn.execute(
+        "INSERT INTO item_images (item_id, file_name, image_hash, is_main, position, remote_image_id, image_uploaded_at, created_at)
+         VALUES (?1, ?2, ?3, 1, 0, NULL, NULL, ?4)",
+        rusqlite::params![item_id, file_name, image_hash, now],
+    );
     Ok(file_name)
 }
 
@@ -503,10 +522,252 @@ pub fn clear_item_photo(
         rusqlite::params![item_id, now],
     )
     .map_err(err)?;
+    let _ = conn.execute(
+        "DELETE FROM item_images WHERE item_id = ?1",
+        rusqlite::params![item_id],
+    );
     if let Some(name) = previous.filter(|n| !n.is_empty()) {
         crate::media::delete_photo(data_dir, &name)?;
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemImageRow {
+    pub id: i64,
+    pub item_id: i64,
+    pub file_name: String,
+    pub image_hash: String,
+    pub is_main: bool,
+    pub position: i64,
+    pub remote_image_id: Option<String>,
+    pub image_uploaded_at: Option<String>,
+    pub created_at: String,
+}
+
+pub fn list_item_images(conn: &Connection, item_id: i64) -> RepoResult<Vec<ItemImageRow>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, item_id, file_name, image_hash, is_main, position, remote_image_id, image_uploaded_at, created_at
+             FROM item_images
+             WHERE item_id = ?1
+             ORDER BY is_main DESC, position ASC, id ASC",
+        )
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(rusqlite::params![item_id], |r| {
+            let is_main_int: i64 = r.get(4)?;
+            Ok(ItemImageRow {
+                id: r.get(0)?,
+                item_id: r.get(1)?,
+                file_name: r.get(2)?,
+                image_hash: r.get(3)?,
+                is_main: is_main_int != 0,
+                position: r.get(5)?,
+                remote_image_id: r.get(6)?,
+                image_uploaded_at: r.get(7)?,
+                created_at: r.get(8)?,
+            })
+        })
+        .map_err(err)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(err)?);
+    }
+    Ok(out)
+}
+
+pub fn add_item_image(
+    conn: &Connection,
+    data_dir: &std::path::Path,
+    item_id: i64,
+    bytes: &[u8],
+    image_hash: &str,
+    is_main: bool,
+    now: &str,
+) -> RepoResult<ItemImageRow> {
+    if image_hash.is_empty() {
+        return Err("image_hash is required".to_string());
+    }
+    let item_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM items WHERE id = ?1",
+            rusqlite::params![item_id],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+    if !item_exists {
+        return Err(format!("no item with id {item_id}"));
+    }
+
+    let existing_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM item_images WHERE item_id = ?1",
+            rusqlite::params![item_id],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+    let make_main = is_main || existing_count == 0;
+
+    let tx = conn.unchecked_transaction().map_err(err)?;
+    tx.execute(
+        "INSERT INTO item_images (item_id, file_name, image_hash, is_main, position, remote_image_id, image_uploaded_at, created_at)
+         VALUES (?1, '', ?2, ?3, ?4, NULL, NULL, ?5)",
+        rusqlite::params![item_id, image_hash, if make_main { 1 } else { 0 }, existing_count, now],
+    )
+    .map_err(err)?;
+    let image_id = tx.last_insert_rowid();
+
+    let file_name = match crate::media::store_item_image(data_dir, item_id, image_id, bytes) {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = tx.rollback();
+            return Err(e);
+        }
+    };
+
+    tx.execute(
+        "UPDATE item_images SET file_name = ?1 WHERE id = ?2",
+        rusqlite::params![file_name, image_id],
+    )
+    .map_err(err)?;
+
+    if make_main {
+        tx.execute(
+            "UPDATE item_images SET is_main = 0 WHERE item_id = ?1 AND id != ?2",
+            rusqlite::params![item_id, image_id],
+        )
+        .map_err(err)?;
+        tx.execute(
+            "UPDATE items SET photo_path = ?2, image_hash = ?3, image_uploaded_at = NULL, updated_at = ?4 WHERE id = ?1",
+            rusqlite::params![item_id, file_name, image_hash, now],
+        )
+        .map_err(err)?;
+    }
+
+    tx.commit().map_err(err)?;
+
+    Ok(ItemImageRow {
+        id: image_id,
+        item_id,
+        file_name,
+        image_hash: image_hash.to_string(),
+        is_main: make_main,
+        position: existing_count,
+        remote_image_id: None,
+        image_uploaded_at: None,
+        created_at: now.to_string(),
+    })
+}
+
+pub fn delete_item_image(
+    conn: &Connection,
+    data_dir: &std::path::Path,
+    image_id: i64,
+    now: &str,
+) -> RepoResult<()> {
+    let (item_id, file_name, was_main): (i64, String, bool) = conn
+        .query_row(
+            "SELECT item_id, file_name, is_main FROM item_images WHERE id = ?1",
+            rusqlite::params![image_id],
+            |r| {
+                let m: i64 = r.get(2)?;
+                Ok((r.get(0)?, r.get(1)?, m != 0))
+            },
+        )
+        .map_err(|_| format!("no image with id {image_id}"))?;
+
+    let tx = conn.unchecked_transaction().map_err(err)?;
+    tx.execute("DELETE FROM item_images WHERE id = ?1", rusqlite::params![image_id])
+        .map_err(err)?;
+
+    if was_main {
+        let next_main: Result<(i64, String, String, Option<String>), _> = tx.query_row(
+            "SELECT id, file_name, image_hash, image_uploaded_at FROM item_images WHERE item_id = ?1 ORDER BY position ASC, id ASC LIMIT 1",
+            rusqlite::params![item_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        );
+
+        match next_main {
+            Ok((next_id, next_file, next_hash, next_uploaded)) => {
+                tx.execute(
+                    "UPDATE item_images SET is_main = 1 WHERE id = ?1",
+                    rusqlite::params![next_id],
+                )
+                .map_err(err)?;
+                tx.execute(
+                    "UPDATE items SET photo_path = ?2, image_hash = ?3, image_uploaded_at = ?4, updated_at = ?5 WHERE id = ?1",
+                    rusqlite::params![item_id, next_file, next_hash, next_uploaded, now],
+                )
+                .map_err(err)?;
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                tx.execute(
+                    "UPDATE items SET photo_path = '', image_hash = NULL, image_uploaded_at = NULL, updated_at = ?2 WHERE id = ?1",
+                    rusqlite::params![item_id, now],
+                )
+                .map_err(err)?;
+            }
+            Err(e) => return Err(err(e)),
+        }
+    }
+
+    tx.commit().map_err(err)?;
+
+    if !file_name.is_empty() {
+        let _ = crate::media::delete_photo(data_dir, &file_name);
+    }
+    Ok(())
+}
+
+pub fn set_item_image_main(
+    conn: &Connection,
+    image_id: i64,
+    now: &str,
+) -> RepoResult<()> {
+    let (item_id, file_name, image_hash, image_uploaded_at): (i64, String, String, Option<String>) = conn
+        .query_row(
+            "SELECT item_id, file_name, image_hash, image_uploaded_at FROM item_images WHERE id = ?1",
+            rusqlite::params![image_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .map_err(|_| format!("no image with id {image_id}"))?;
+
+    let tx = conn.unchecked_transaction().map_err(err)?;
+    tx.execute(
+        "UPDATE item_images SET is_main = 0 WHERE item_id = ?1",
+        rusqlite::params![item_id],
+    )
+    .map_err(err)?;
+    tx.execute(
+        "UPDATE item_images SET is_main = 1 WHERE id = ?1",
+        rusqlite::params![image_id],
+    )
+    .map_err(err)?;
+    tx.execute(
+        "UPDATE items SET photo_path = ?2, image_hash = ?3, image_uploaded_at = ?4, updated_at = ?5 WHERE id = ?1",
+        rusqlite::params![item_id, file_name, image_hash, image_uploaded_at, now],
+    )
+    .map_err(err)?;
+    tx.commit().map_err(err)?;
+    Ok(())
+}
+
+pub fn read_item_image(
+    conn: &Connection,
+    data_dir: &std::path::Path,
+    image_id: i64,
+) -> RepoResult<(Vec<u8>, String)> {
+    let (file_name, image_hash): (String, String) = conn
+        .query_row(
+            "SELECT file_name, image_hash FROM item_images WHERE id = ?1",
+            rusqlite::params![image_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|_| format!("no image with id {image_id}"))?;
+    let bytes = crate::media::read_photo(data_dir, &file_name)?;
+    Ok((bytes, image_hash))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -546,6 +807,11 @@ pub fn record_image_uploads(
         // while the upload was in flight) a no-op instead of a wrong state.
         tx.execute(
             "UPDATE items SET image_uploaded_at = ?3 WHERE id = ?1 AND image_hash = ?2",
+            rusqlite::params![item_id, image_hash, uploaded_at],
+        )
+        .map_err(err)?;
+        tx.execute(
+            "UPDATE item_images SET image_uploaded_at = ?3 WHERE item_id = ?1 AND image_hash = ?2",
             rusqlite::params![item_id, image_hash, uploaded_at],
         )
         .map_err(err)?;
@@ -2824,6 +3090,9 @@ mod tests {
                 is_active: true,
                 hsn_code: String::new(),
                 cost_price_paise: 0,
+                description: String::new(),
+                brand: String::new(),
+                custom_attributes: String::new(),
                 now: "2026-11-04T10:00:00Z".to_string(),
             },
         )
@@ -3383,6 +3652,9 @@ mod tests {
             is_active: true,
             hsn_code: String::new(),
             cost_price_paise: 0,
+            description: String::new(),
+            brand: String::new(),
+            custom_attributes: String::new(),
             now: "2026-11-04T10:00:00Z".to_string(),
         };
         let bad = ItemPayload { name: String::new(), ..good.clone() };
@@ -3412,6 +3684,9 @@ mod tests {
             is_active: true,
             hsn_code: String::new(),
             cost_price_paise: 0,
+            description: String::new(),
+            brand: String::new(),
+            custom_attributes: String::new(),
             now: "2026-11-04T10:00:00Z".to_string(),
         };
         import_items(&mut conn, std::slice::from_ref(&payload)).unwrap();
@@ -3428,6 +3703,60 @@ mod tests {
         assert_eq!(count, 1);
         assert_eq!(name, "Renamed");
         assert_eq!(stock, 1_000, "re-import must not re-apply opening stock");
+    }
+
+    #[test]
+    fn item_additional_details_persist_and_update() {
+        let (_dir, mut conn) = setup();
+        let payload = ItemPayload {
+            id: None,
+            name: "Dark Chocolate 70%".to_string(),
+            barcode: "890123000001".to_string(),
+            category_id: None,
+            unit_kind: "count".to_string(),
+            price_paise: 25000,
+            mrp_paise: 25000,
+            tax_rate_bp: 1800,
+            opening_stock_milli: 10_000,
+            is_active: true,
+            hsn_code: "1806".to_string(),
+            cost_price_paise: 18000,
+            description: "Premium rich dark chocolate with organic cocoa beans.".to_string(),
+            brand: "ChocoDelight".to_string(),
+            custom_attributes: r#"{"Weight":"100g","Cocoa":"70%"}"#.to_string(),
+            now: "2026-11-04T10:00:00Z".to_string(),
+        };
+        let id = upsert_item(&mut conn, &payload).unwrap();
+        let (desc, brand, attrs): (String, String, String) = conn
+            .query_row(
+                "SELECT description, brand, custom_attributes FROM items WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(desc, "Premium rich dark chocolate with organic cocoa beans.");
+        assert_eq!(brand, "ChocoDelight");
+        assert_eq!(attrs, r#"{"Weight":"100g","Cocoa":"70%"}"#);
+
+        // Update details
+        let update_payload = ItemPayload {
+            id: Some(id),
+            brand: "ChocoDelight Reserve".to_string(),
+            description: "Updated description".to_string(),
+            custom_attributes: r#"{"Weight":"100g","Cocoa":"85%"}"#.to_string(),
+            ..payload
+        };
+        upsert_item(&mut conn, &update_payload).unwrap();
+        let (desc2, brand2, attrs2): (String, String, String) = conn
+            .query_row(
+                "SELECT description, brand, custom_attributes FROM items WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(desc2, "Updated description");
+        assert_eq!(brand2, "ChocoDelight Reserve");
+        assert_eq!(attrs2, r#"{"Weight":"100g","Cocoa":"85%"}"#);
     }
 
     #[test]
@@ -3902,5 +4231,80 @@ mod tests {
 
         let expected = get_day_end_expected_cash(&conn, today).unwrap();
         assert_eq!(expected.total_bills_count, 0); // No bills seeded in fresh test db
+    }
+
+    #[test]
+    fn item_multi_images_lifecycle_and_main_promotion() {
+        let (dir, mut conn) = setup();
+        let item_id = item(&mut conn, "Product with Photos", 1000);
+
+        const PNG: &[u8] = b"\x89PNG\r\n\x1a\nfake-png-1";
+        const JPEG: &[u8] = b"\xFF\xD8\xFF\xE0fake-jpeg-2";
+
+        // 1. Add first image (should automatically become main)
+        let img1 = add_item_image(&conn, dir.path(), item_id, PNG, "hash-1", false, "2026-11-10T10:00:00Z").unwrap();
+        assert_eq!(img1.item_id, item_id);
+        assert!(img1.is_main);
+        assert_eq!(img1.image_hash, "hash-1");
+
+        // Verify items table kept in sync
+        let (photo_path, image_hash): (String, Option<String>) = conn
+            .query_row("SELECT photo_path, image_hash FROM items WHERE id = ?1", rusqlite::params![item_id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!(photo_path, img1.file_name);
+        assert_eq!(image_hash.as_deref(), Some("hash-1"));
+
+        // 2. Add second image (not main)
+        let img2 = add_item_image(&conn, dir.path(), item_id, JPEG, "hash-2", false, "2026-11-10T10:01:00Z").unwrap();
+        assert!(!img2.is_main);
+        assert_eq!(img2.image_hash, "hash-2");
+
+        let images = list_item_images(&conn, item_id).unwrap();
+        assert_eq!(images.len(), 2);
+        assert_eq!(images[0].id, img1.id);
+        assert!(images[0].is_main);
+        assert_eq!(images[1].id, img2.id);
+        assert!(!images[1].is_main);
+
+        // 3. Promote second image to main
+        set_item_image_main(&conn, img2.id, "2026-11-10T10:02:00Z").unwrap();
+        let images = list_item_images(&conn, item_id).unwrap();
+        assert_eq!(images[0].id, img2.id);
+        assert!(images[0].is_main);
+        assert_eq!(images[1].id, img1.id);
+        assert!(!images[1].is_main);
+
+        let (photo_path2, _): (String, Option<String>) = conn
+            .query_row("SELECT photo_path, image_hash FROM items WHERE id = ?1", rusqlite::params![item_id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!(photo_path2, img2.file_name);
+
+        // 4. Record upload for both
+        record_image_uploads(&conn, &[(item_id, "hash-2".to_string(), "2026-11-10T10:05:00Z".to_string())]).unwrap();
+        let images = list_item_images(&conn, item_id).unwrap();
+        assert_eq!(images[0].image_uploaded_at.as_deref(), Some("2026-11-10T10:05:00Z"));
+
+        // 5. Read image bytes
+        let (read_bytes, read_hash) = read_item_image(&conn, dir.path(), img2.id).unwrap();
+        assert_eq!(read_bytes, JPEG);
+        assert_eq!(read_hash, "hash-2");
+
+        // 6. Delete main image (img2) -> img1 should be promoted to main
+        delete_item_image(&conn, dir.path(), img2.id, "2026-11-10T10:06:00Z").unwrap();
+        let images = list_item_images(&conn, item_id).unwrap();
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].id, img1.id);
+        assert!(images[0].is_main);
+
+        // 7. Delete last image -> items table cleared
+        delete_item_image(&conn, dir.path(), img1.id, "2026-11-10T10:07:00Z").unwrap();
+        let images = list_item_images(&conn, item_id).unwrap();
+        assert_eq!(images.len(), 0);
+
+        let (photo_path_final, image_hash_final): (String, Option<String>) = conn
+            .query_row("SELECT photo_path, image_hash FROM items WHERE id = ?1", rusqlite::params![item_id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!(photo_path_final, "");
+        assert_eq!(image_hash_final, None);
     }
 }

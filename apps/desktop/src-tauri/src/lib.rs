@@ -473,6 +473,58 @@ fn read_item_photo(state: tauri::State<'_, AppState>, item_id: i64) -> Result<Ve
 }
 
 #[tauri::command]
+fn list_item_images(
+    state: tauri::State<'_, AppState>,
+    item_id: i64,
+) -> Result<Vec<repo::ItemImageRow>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::list_item_images(&conn, item_id)
+}
+
+#[tauri::command]
+fn add_item_image(
+    state: tauri::State<'_, AppState>,
+    item_id: i64,
+    bytes: Vec<u8>,
+    image_hash: String,
+    is_main: bool,
+    now: String,
+) -> Result<repo::ItemImageRow, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::add_item_image(&conn, &state.data_dir, item_id, &bytes, &image_hash, is_main, &now)
+}
+
+#[tauri::command]
+fn delete_item_image(
+    state: tauri::State<'_, AppState>,
+    image_id: i64,
+    now: String,
+) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::delete_item_image(&conn, &state.data_dir, image_id, &now)
+}
+
+#[tauri::command]
+fn set_item_image_main(
+    state: tauri::State<'_, AppState>,
+    image_id: i64,
+    now: String,
+) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    repo::set_item_image_main(&conn, image_id, &now)
+}
+
+#[tauri::command]
+fn read_item_image(
+    state: tauri::State<'_, AppState>,
+    image_id: i64,
+) -> Result<Vec<u8>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let (bytes, _) = repo::read_item_image(&conn, &state.data_dir, image_id)?;
+    Ok(bytes)
+}
+
+#[tauri::command]
 fn record_image_uploads(
     state: tauri::State<'_, AppState>,
     uploads: Vec<repo::ImageUploadPayload>,
@@ -992,6 +1044,11 @@ pub fn run(driver_script: Option<String>) {
             set_item_photo,
             clear_item_photo,
             read_item_photo,
+            list_item_images,
+            add_item_image,
+            delete_item_image,
+            set_item_image_main,
+            read_item_image,
             record_image_uploads,
             save_held_bill,
             take_held_bill,

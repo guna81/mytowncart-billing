@@ -9,6 +9,7 @@ via `t(key)`; add a key there rather than hard-coding a string.
 | `#/setup` | `SetupWizard` | first run: shop name, GST, invoice prefix |
 | `#/` | `PosScreen` | billing (the home screen) |
 | `#/items`, `#/items/new`, `#/items/:id/edit` | `ItemsScreen`, `ItemFormScreen` | catalog |
+| `#/categories` | `CategoriesScreen` | product categories and marketplace mapping |
 | `#/bills`, `#/bills/:id` | `BillsScreen`, `BillDetailScreen` | history, void, reprint |
 | `#/customers` | `CustomersScreen` | customers, credit bills |
 | `#/stock` | `StockScreen` | stock levels, adjustments, movement history |

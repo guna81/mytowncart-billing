@@ -6,18 +6,13 @@
  * store is never presented as "live".
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 
 import {
-  externalIdOf,
   formatPaise,
-  IMAGE_MIME,
-  localIsoTimestamp,
   planPublish,
-  sniffImage,
-  stockUnitsOf,
   suggestCategories,
   type PublishItemInput,
-  type ReadyItem,
 } from "@mytowncart-billing/core";
 import {
   CLIENT_NAME,
@@ -28,11 +23,12 @@ import {
   type MarketplaceProfile,
   type UpsertResult,
 } from "@mytowncart-billing/connector-mytowncart";
-import type { Category, Item, PublishOutcome } from "@mytowncart-billing/storage";
-import { PageHeader } from "../components/ui";
+import type { Category, Item } from "@mytowncart-billing/storage";
+import { Modal, PageHeader } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
 import { clearConnection, loadConnection, saveConnection } from "../lib/connection";
 import { getConnector } from "../lib/marketplace";
+import { openReleasePage } from "../lib/tauri";
 import { getRepository } from "../lib/repository";
 import { useAppStore } from "../store/appStore";
 import { SyncPanel } from "./SyncPanel";
@@ -67,6 +63,9 @@ export function toPlanInputs(
     photoPath: item.photoPath,
     marketplaceCategoryId: item.categoryId === null ? null : (mapped.get(item.categoryId) ?? null),
     lastPublishedHash: item.contentHash,
+    description: item.description,
+    brand: item.brand,
+    customAttributes: item.customAttributes,
   }));
 }
 
@@ -147,6 +146,10 @@ function ConnectPanel({
             href={session.verificationUrl}
             target="_blank"
             rel="noreferrer"
+            onClick={(e) => {
+              e.preventDefault();
+              void openReleasePage(session.verificationUrl).catch(() => {});
+            }}
           >
             {t("mtc.open_link")}
           </a>
@@ -194,6 +197,18 @@ function CategoryMapping({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  // Add category modal state
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newCatName, setNewCatName] = useState("");
+  const [newCatMarketplaceId, setNewCatMarketplaceId] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+
+  const newSuggestions = useMemo(() => {
+    if (!newCatName.trim() || marketplace.length === 0) return [];
+    return suggestCategories(newCatName.trim(), marketplace, 3);
+  }, [newCatName, marketplace]);
+
   const save = async () => {
     setSaving(true);
     setSaved(false);
@@ -209,12 +224,75 @@ function CategoryMapping({
     onSave();
   };
 
+  const handleAddCategory = async () => {
+    const trimmed = newCatName.trim();
+    if (!trimmed) {
+      setAddError(t("categories.name_required"));
+      return;
+    }
+    if (categories.some((c) => c.name.toLowerCase() === trimmed.toLowerCase())) {
+      setAddError(t("categories.name_exists"));
+      return;
+    }
+
+    setAdding(true);
+    setAddError(null);
+    try {
+      const repo = getRepository();
+      const id = await repo.upsertCategory({ name: trimmed });
+      if (newCatMarketplaceId) {
+        await repo.setCategoryMarketplaceId(id, newCatMarketplaceId);
+      }
+      setShowAddModal(false);
+      setNewCatName("");
+      setNewCatMarketplaceId("");
+      onSave();
+    } catch (err) {
+      setAddError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAdding(false);
+    }
+  };
+
   return (
     <section className="rounded border border-gray-200 bg-white p-4" data-testid="mtc-mapping">
-      <h2 className="font-semibold">{t("mtc.mapping")}</h2>
-      <p className="mt-1 text-sm text-gray-500">{t("mtc.mapping_intro")}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="font-semibold">{t("mtc.mapping")}</h2>
+          <p className="mt-1 text-sm text-gray-500">{t("mtc.mapping_intro")}</p>
+        </div>
+        <button
+          type="button"
+          className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50"
+          data-testid="mtc-mapping-add-btn"
+          onClick={() => {
+            setNewCatName("");
+            setNewCatMarketplaceId("");
+            setAddError(null);
+            setShowAddModal(true);
+          }}
+        >
+          + {t("mtc.mapping_add_category")}
+        </button>
+      </div>
+
       {categories.length === 0 ? (
-        <p className="mt-2 text-sm text-gray-500">{t("mtc.mapping_none")}</p>
+        <div className="mt-4 rounded-lg border border-dashed border-gray-300 p-6 text-center">
+          <p className="text-sm text-gray-500">{t("mtc.mapping_none")}</p>
+          <button
+            type="button"
+            className={`${btnPrimary} mt-3`}
+            data-testid="mtc-mapping-add-first-btn"
+            onClick={() => {
+              setNewCatName("");
+              setNewCatMarketplaceId("");
+              setAddError(null);
+              setShowAddModal(true);
+            }}
+          >
+            + {t("mtc.mapping_add_category")}
+          </button>
+        </div>
       ) : (
         <table className="mt-3 w-full text-sm">
           <tbody>
@@ -225,7 +303,7 @@ function CategoryMapping({
                   <td className="py-2 pr-4 font-medium">{category.name}</td>
                   <td className="py-2">
                     <select
-                      className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-2xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                       data-testid={`mtc-map-${category.id}`}
                       value={draft[category.id] ?? ""}
                       onChange={(e) => {
@@ -265,233 +343,99 @@ function CategoryMapping({
           </span>
         ) : null}
       </div>
-    </section>
-  );
-}
 
-function PublishPanel({
-  ready,
-  blocked,
-  categories,
-  lastPublishedAt,
-  onPublished,
-}: {
-  ready: ReadyItem[];
-  blocked: ReturnType<typeof planPublish>["blocked"];
-  categories: readonly Category[];
-  lastPublishedAt: string | null;
-  onPublished(): void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<{ count: number; failed: number } | null>(null);
-  const bumpDataVersion = useAppStore((s) => s.bumpDataVersion);
-  const sellerIsApproved = useAppStore((s) => s.sellerIsApproved) === true;
-
-  const changed = useMemo(
-    () => ready.filter((r) => r.input.lastPublishedHash !== r.hash),
-    [ready],
-  );
-
-  const publish = async () => {
-    setBusy(true);
-    setError(null);
-    setDone(null);
-    try {
-      const connector = getConnector();
-      const results = await connector.upsertItems(
-        changed.map((r) => ({
-          externalId: r.externalId,
-          name: r.input.name.trim(),
-          pricePaise: r.input.pricePaise,
-          mrpPaise: r.input.mrpPaise,
-          stockUnits: stockUnitsOf(r.input.stockMilli) ?? 0,
-          barcode: r.input.barcode === "" ? null : r.input.barcode,
-          categoryId: r.input.marketplaceCategoryId as string,
-          isActive: true,
-          contentHash: r.hash,
-        })),
-      );
-      const byExternal = new Map(results.map((r) => [r.externalId, r]));
-      const outcomes: PublishOutcome[] = changed.map((r) => {
-        const result = byExternal.get(r.externalId);
-        const state = result ? stateForResult(result, sellerIsApproved) : "error";
-        return {
-          itemId: r.input.id,
-          state,
-          remoteProductId: result?.productId ?? null,
-          remoteVariantId: result?.variantId ?? null,
-          // Keep the previous hash when the publish failed so a retry re-sends it.
-          contentHash: result && result.status !== "error" ? r.hash : null,
-        };
-      });
-      // Record the mapping we actually sent, so toPlanInputs sees the same hash next time.
-      const mappings = new Map(
-        categories.flatMap((c) =>
-          c.marketplaceCategoryId === null ? [] : [[c.id, c.marketplaceCategoryId] as const],
-        ),
-      );
-      await getRepository().recordPublish(outcomes, mappings);
-      setDone({ count: outcomes.length, failed: outcomes.filter((o) => o.state === "error").length });
-      bumpDataVersion();
-      onPublished();
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <section className="rounded border border-gray-200 bg-white p-4" data-testid="mtc-publish">
-      <h2 className="font-semibold">{t("mtc.publish")}</h2>
-      <p className="mt-1 text-sm text-gray-600" data-testid="mtc-review">
-        {t("mtc.review", { ready: ready.length, blocked: blocked.length })}
-      </p>
-      <p className="mt-1 text-xs text-gray-500">
-        {lastPublishedAt
-          ? t("mtc.last_published", { when: new Date(lastPublishedAt).toLocaleString() })
-          : t("mtc.never_published")}
-      </p>
-
-      {blocked.length > 0 ? (
-        <ul className="mt-3 space-y-1 text-sm" data-testid="mtc-blocked">
-          {blocked.map((b) => (
-            <li key={b.id} className="flex justify-between gap-4 rounded bg-amber-50 px-2 py-1">
-              <span className="font-medium">{b.name}</span>
-              <span className="text-amber-800">
-                {t(`mtc.blocked.${b.reason.code}` as I18nKey)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      {error ? (
-        <p className="mt-3 text-sm text-red-600" data-testid="mtc-publish-error">
-          {error}
-        </p>
-      ) : null}
-      {done ? (
-        <p className="mt-3 text-sm text-green-700" data-testid="mtc-publish-done">
-          {t("mtc.publish_done", { count: done.count - done.failed })}
-          {done.failed > 0 ? ` · ${done.failed} failed` : ""}
-        </p>
-      ) : null}
-
-      <button
-        type="button"
-        className={`${btnPrimary} mt-3`}
-        data-testid="mtc-publish-cta"
-        disabled={busy || changed.length === 0}
-        onClick={() => void publish()}
+      {/* Add Category Modal */}
+      <Modal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        title={t("categories.new_dialog_title")}
+        dataTestId="mtc-add-category-modal"
       >
-        {busy ? t("mtc.publishing") : t("mtc.publish_cta", { count: changed.length })}
-      </button>
-      <p className="mt-1 text-xs text-gray-500">{t("mtc.publish_changed_only")}</p>
-    </section>
-  );
-}
-
-/**
- * D9: the marketplace keeps a published item hidden until a photo arrives, so
- * every linked item with a local photo that was never acknowledged is uploaded
- * here. After the last upload the item is upserted again, which flips it live.
- */
-function PhotoPanel({
-  items,
-  onDone,
-}: {
-  items: Item[];
-  onDone(): void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<{ ok: number; total: number } | null>(null);
-
-  const pending = useMemo(
-    () =>
-      items.filter(
-        (i) =>
-          i.remoteProductId !== null &&
-          i.photoFile !== "" &&
-          i.imageHash !== null &&
-          i.imageUploadedAt !== i.imageHash,
-      ),
-    [items],
-  );
-
-  const upload = async () => {
-    setBusy(true);
-    setError(null);
-    setDone(null);
-    const repo = getRepository();
-    const connector = getConnector();
-    let ok = 0;
-    try {
-      for (const item of pending) {
-        const photo = await repo.readItemPhoto(item.id);
-        if (!photo || photo.imageHash === null || photo.imageHash !== item.imageHash) continue;
-        const imageHash = photo.imageHash;
-        try {
-          const blob = new Blob([photo.bytes as BlobPart], {
-            type: IMAGE_MIME[sniffImage(photo.bytes) ?? "jpeg"],
-          });
-          await connector.uploadImage(externalIdOf(item.id), blob, !item.imageUploadedAt);
-          await repo.recordImageUploads([
-            {
-              itemId: item.id,
-              imageHash,
-              uploadedAt: localIsoTimestamp(new Date()),
-            },
-          ]);
-          ok++;
-        } catch {
-          // One failed upload must not stop the rest; the summary reports it.
-        }
-      }
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setDone({ ok, total: pending.length });
-      setBusy(false);
-      onDone();
-    }
-  };
-
-  return (
-    <section className="rounded border border-gray-200 bg-white p-4" data-testid="mtc-photos">
-      <h2 className="font-semibold">{t("mtc.photos")}</h2>
-      <p className="mt-1 text-sm text-gray-600">{t("mtc.photos_intro")}</p>
-      {pending.length === 0 ? (
-        <p className="mt-2 text-sm text-gray-500" data-testid="mtc-photos-none">
-          {t("mtc.photos_none")}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="mt-2 text-sm text-red-600" data-testid="mtc-photos-error">{error}</p>
-      ) : null}
-      {done ? (
-        <p
-          className={`mt-2 text-sm ${done.ok === done.total ? "text-green-700" : "text-amber-800"}`}
-          data-testid="mtc-photos-done"
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void handleAddCategory();
+          }}
+          className="space-y-4"
         >
-          {done.ok === done.total
-            ? t("mtc.photos_done", { count: done.ok })
-            : t("mtc.photos_partial", { ok: done.ok, total: done.total, failed: done.total - done.ok })}
-        </p>
-      ) : null}
-      {pending.length > 0 ? (
-        <button
-          type="button"
-          className={`${btnPrimary} mt-3`}
-          data-testid="mtc-photos-cta"
-          disabled={busy}
-          onClick={() => void upload()}
-        >
-          {busy ? t("mtc.photos_uploading") : t("mtc.photos_cta", { count: pending.length })}
-        </button>
-      ) : null}
+          <div>
+            <label className="block text-sm font-semibold text-gray-800 mb-1">
+              {t("categories.name")} *
+            </label>
+            <input
+              autoFocus
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              placeholder="e.g. Snacks, Beverages, Dairy"
+              data-testid="mtc-new-cat-name"
+              value={newCatName}
+              onChange={(e) => {
+                setNewCatName(e.target.value);
+                setAddError(null);
+              }}
+            />
+            {addError ? (
+              <p className="mt-1 text-xs text-red-600 font-medium" data-testid="mtc-new-cat-error">
+                {addError}
+              </p>
+            ) : null}
+          </div>
+
+          {marketplace.length > 0 ? (
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1">
+                {t("categories.marketplace_category")}
+              </label>
+              <select
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-2xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                data-testid="mtc-new-cat-marketplace"
+                value={newCatMarketplaceId}
+                onChange={(e) => setNewCatMarketplaceId(e.target.value)}
+              >
+                <option value="">{t("categories.select_marketplace")}</option>
+                {marketplace.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+
+              {newSuggestions.length > 0 && !newCatMarketplaceId ? (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-gray-600">
+                  <span>Suggested:</span>
+                  {newSuggestions.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className="rounded bg-blue-50 px-2 py-0.5 text-blue-700 hover:bg-blue-100"
+                      onClick={() => setNewCatMarketplaceId(s.id)}
+                    >
+                      + {s.name}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="mt-5 flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
+            <button
+              type="button"
+              className={btnSecondary}
+              onClick={() => setShowAddModal(false)}
+            >
+              {t("common.cancel")}
+            </button>
+            <button
+              type="submit"
+              className={btnPrimary}
+              disabled={adding}
+              data-testid="mtc-new-cat-save"
+            >
+              {adding ? t("common.saving") : t("categories.add")}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </section>
   );
 }
@@ -539,12 +483,17 @@ export function MyTownCartScreen() {
 
   useEffect(() => {
     void (async () => {
-      const token = await loadConnection();
-      await loadLocal();
-      if (token) {
-        setPhase("connected");
-        await loadRemote(token);
-      } else {
+      try {
+        const token = await loadConnection();
+        await loadLocal();
+        if (token) {
+          setPhase("connected");
+          await loadRemote(token);
+        } else {
+          setPhase("disconnected");
+        }
+      } catch (err) {
+        setConnectError(t("mtc.connect_failed", { message: errorText(err) }));
         setPhase("disconnected");
       }
     })();
@@ -556,14 +505,6 @@ export function MyTownCartScreen() {
 
   const planInputs = useMemo(() => toPlanInputs(items, categories), [items, categories]);
   const plan = useMemo(() => planPublish(planInputs, marketplace ?? []), [planInputs, marketplace]);
-
-  const lastPublishedAt = useMemo(() => {
-    const published = items.filter((i) => i.contentHash !== null);
-    if (published.length === 0) return null;
-    return published
-      .map((i) => i.updatedAt)
-      .sort((a, b) => b.localeCompare(a))[0] ?? null;
-  }, [items]);
 
   const onConnected = async (token: ConnectionToken) => {
     setPhase("connected");
@@ -662,14 +603,26 @@ export function MyTownCartScreen() {
                 marketplace={marketplace}
                 onSave={() => bumpDataVersion()}
               />
-              <PublishPanel
-                ready={plan.ready}
-                blocked={plan.blocked}
-                categories={categories}
-                lastPublishedAt={lastPublishedAt}
-                onPublished={() => void loadLocal()}
-              />
-              <PhotoPanel items={items} onDone={() => void loadLocal()} />
+              <section
+                className="rounded-lg border border-blue-200 bg-blue-50/60 p-4"
+                data-testid="mtc-catalog-banner"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div>
+                    <h3 className="font-semibold text-blue-950">{t("mtc.catalog_nav_title")}</h3>
+                    <p className="mt-1 text-sm text-blue-800">
+                      {t("mtc.catalog_nav_desc")}
+                    </p>
+                  </div>
+                  <Link
+                    to="/items"
+                    className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 whitespace-nowrap shadow-xs transition-colors"
+                    data-testid="mtc-goto-items"
+                  >
+                    {t("mtc.catalog_nav_cta")} →
+                  </Link>
+                </div>
+              </section>
               <ReviewTable items={items} blocked={plan.blocked} />
             </>
           ) : null}

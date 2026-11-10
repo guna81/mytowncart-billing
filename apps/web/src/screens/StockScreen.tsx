@@ -5,12 +5,13 @@ import { formatQty, isBatchExpired, isBatchNearExpiry, isLowStock, parseQty } fr
 import type { Item, ItemBatch, StockMovementRecord } from "@mytowncart-billing/storage";
 import { PageHeader } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
+import { triggerImmediateSync } from "../lib/autoSync";
 import { getRepository } from "../lib/repository";
 import { useIsOwner } from "../lib/roles";
 import { effectiveLowStockThreshold } from "../lib/stockAlerts";
 import { useAppStore } from "../store/appStore";
 
-const inputCls = "mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm";
+const inputCls = "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-2xs";
 const labelCls = "block text-sm font-medium text-gray-700";
 
 type AdjustReason = "adjustment" | "purchase" | "import";
@@ -36,6 +37,7 @@ function AdjustDialog({
       return;
     }
     await getRepository().adjustStock(item.id, parsed, reason);
+    triggerImmediateSync();
     onSaved();
   };
 

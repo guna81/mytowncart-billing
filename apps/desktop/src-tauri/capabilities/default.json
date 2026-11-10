@@ -17,7 +17,11 @@
         },
         {
           "url": "https://github.com/guna81/mytowncart-billing/releases/*"
-        }
+        },
+        { "url": "https://mytowncart.com/*" },
+        { "url": "https://api.mytowncart.com/*" },
+        { "url": "https://mytowncart.in/*" },
+        { "url": "https://api.mytowncart.in/*" }
       ]
     }
   ]

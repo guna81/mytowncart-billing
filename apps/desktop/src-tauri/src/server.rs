@@ -2,6 +2,7 @@
 //! Embedded Local Web Server (LAN / Mobile POS) for MyTownCart Billing.
 //! Serves the web UI and exposes an HTTP invoke endpoint connected to the local SQLite database.
 
+use std::io::Read;
 use std::net::UdpSocket;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -193,6 +194,33 @@ fn handle_http_request(
         return;
     }
 
+    if path == "api/marketplace/connection" || path.starts_with("api/marketplace/proxy/") {
+        let provided = request.headers().iter().find(|h| h.field.equiv("X-MTC-Key"))
+            .map(|h| h.value.as_str()).unwrap_or("");
+        if !token_matches(provided, token) {
+            let _ = request.respond(Response::from_string("Unauthorized").with_status_code(401));
+            return;
+        }
+        let session = request.headers().iter().find(|h| h.field.equiv("X-MTC-Session"))
+            .map(|h| h.value.as_str().to_string());
+        let command = if path == "api/marketplace/connection" && request.method() == &Method::Delete {
+            "marketplace_disconnect"
+        } else if path.starts_with("api/marketplace/proxy/connect/") {
+            "marketplace_connect"
+        } else {
+            "marketplace_request"
+        };
+        let authorized = state.conn.lock().map_err(|e| e.to_string())
+            .and_then(|conn| state.auth.authorize(&conn, command, session.as_deref()).map(|_| ()));
+        if let Err(err) = authorized {
+            let _ = request.respond(Response::from_string(err).with_status_code(403));
+            return;
+        }
+        let response = marketplace_request(&mut request, &url_str, path);
+        let _ = request.respond(response);
+        return;
+    }
+
     // Photo direct endpoint: /api/photos/{itemId}?key=TOKEN (an <img> tag cannot send headers)
     if let Some(id_str) = path.strip_prefix("api/photos/") {
         let from_query = url_str
@@ -299,6 +327,88 @@ fn handle_http_request(
 
     // Static assets
     serve_static_asset(request, app_handle, path);
+}
+
+const MARKETPLACE_KEY: &str = "mytowncart.integration";
+
+fn marketplace_request(request: &mut Request, url: &str, path: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+    fn error(status: u16, message: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+        Response::from_string(message).with_status_code(status)
+    }
+    if path == "api/marketplace/connection" {
+        return match request.method() {
+            Method::Get => match crate::keychain::get(MARKETPLACE_KEY) {
+                Ok(value) => {
+                    let safe = value.and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok())
+                        .filter(|v| v.is_object() && v.get("token").and_then(|t| t.as_str()).is_some_and(|t| !t.is_empty()))
+                        .map(|mut v| { v["token"] = "host-managed".into(); v.to_string() });
+                    Response::from_string(serde_json::to_string(&safe).unwrap_or_else(|_| "null".into()))
+                        .with_header(Header::from_bytes("Content-Type", "application/json").unwrap())
+                }
+                Err(_) => error(500, "Could not read the marketplace connection from the credential store."),
+            },
+            Method::Delete => match crate::keychain::delete(MARKETPLACE_KEY) {
+                Ok(()) => Response::from_string("null").with_header(Header::from_bytes("Content-Type", "application/json").unwrap()),
+                Err(_) => error(500, "Could not remove the marketplace connection from the credential store."),
+            },
+            _ => error(405, "Method not allowed"),
+        };
+    }
+    let suffix = path.strip_prefix("api/marketplace/proxy").unwrap_or("");
+    // Restrict the proxy to the integration API and never allow URL traversal.
+    if suffix.contains("..") || suffix.contains('%') || suffix.contains('\\') || suffix.is_empty() {
+        return error(400, "Invalid marketplace path");
+    }
+    let method = match request.method() {
+        Method::Get => reqwest::Method::GET,
+        Method::Post => reqwest::Method::POST,
+        _ => return error(405, "Method not allowed"),
+    };
+    let query = url.split_once('?').map(|(_, q)| format!("?{q}")).unwrap_or_default();
+    let target = format!("https://api.mytowncart.com/api/v1/integrations{suffix}{query}");
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30)).redirect(reqwest::redirect::Policy::none()).build() {
+        Ok(c) => c,
+        Err(_) => return error(502, "Could not initialize the marketplace connection."),
+    };
+    let mut outbound = client.request(method, target);
+    for h in request.headers() {
+        if h.field.equiv("Content-Type") || h.field.equiv("X-App-Version") {
+            outbound = outbound.header(h.field.as_str().as_str(), h.value.as_str());
+        }
+    }
+    if !suffix.starts_with("/connect/") {
+        let stored = match crate::keychain::get(MARKETPLACE_KEY) {
+            Ok(Some(s)) => s,
+            Ok(None) => return error(401, "No marketplace connection."),
+            Err(_) => return error(500, "Could not read the marketplace connection from the credential store."),
+        };
+        let secret = serde_json::from_str::<serde_json::Value>(&stored).ok()
+            .and_then(|v| v.get("token").and_then(|t| t.as_str()).map(str::to_owned));
+        match secret { Some(token) => outbound = outbound.bearer_auth(token), None => return error(500, "Invalid marketplace connection.") }
+    }
+    let mut body = Vec::new();
+    if std::io::Read::read_to_end(&mut request.as_reader().take(12 * 1024 * 1024 + 1), &mut body).is_err() || body.len() > 12 * 1024 * 1024 {
+        return error(413, "Marketplace request too large.");
+    }
+    let response = match outbound.body(body).send() {
+        Ok(r) => r,
+        Err(_) => return error(502, "Could not reach MyTownCart."),
+    };
+    let status = response.status().as_u16();
+    let mut bytes = match response.bytes() { Ok(b) => b.to_vec(), Err(_) => return error(502, "Could not read MyTownCart response.") };
+    if suffix == "/connect/poll/" && status == 200 {
+        let mut data: serde_json::Value = match serde_json::from_slice(&bytes) { Ok(v) => v, Err(_) => return error(502, "Invalid marketplace response.") };
+        let Some(secret) = data.get("token").and_then(|v| v.as_str()) else { return error(502, "Marketplace did not issue a token.") };
+        let saved = serde_json::json!({"token": secret, "sellerName": data["seller"]["name"], "sellerIsApproved": data["seller"]["is_approved"], "scopes": data["scopes"]});
+        if crate::keychain::set(MARKETPLACE_KEY, &saved.to_string()).is_err() {
+            return error(500, "Could not save the marketplace connection in the credential store. Please connect again.");
+        }
+        data["token"] = "host-managed".into();
+        bytes = data.to_string().into_bytes();
+    }
+    Response::from_data(bytes).with_status_code(status)
+        .with_header(Header::from_bytes("Content-Type", "application/json").unwrap())
 }
 
 fn read_item_photo_bytes(state: &AppState, item_id: i64) -> Result<Vec<u8>, String> {
@@ -679,6 +789,42 @@ pub fn dispatch_invoke(
         "read_item_photo" => {
             let item_id: i64 = get_arg(&args, "itemId", "item_id")?;
             let bytes = read_item_photo_bytes(state, item_id)?;
+            serde_json::to_value(bytes).map_err(|e| e.to_string())
+        }
+        "list_item_images" => {
+            let item_id: i64 = get_arg(&args, "itemId", "item_id")?;
+            let conn = state.conn.lock().map_err(|e| e.to_string())?;
+            let list = repo::list_item_images(&conn, item_id)?;
+            serde_json::to_value(list).map_err(|e| e.to_string())
+        }
+        "add_item_image" => {
+            let item_id: i64 = get_arg(&args, "itemId", "item_id")?;
+            let bytes: Vec<u8> = get_arg(&args, "bytes", "bytes")?;
+            let image_hash: String = get_arg(&args, "imageHash", "image_hash")?;
+            let is_main: bool = get_opt_arg(&args, "isMain", "is_main")?.unwrap_or(false);
+            let now: String = get_arg(&args, "now", "now")?;
+            let conn = state.conn.lock().map_err(|e| e.to_string())?;
+            let row = repo::add_item_image(&conn, &state.data_dir, item_id, &bytes, &image_hash, is_main, &now)?;
+            serde_json::to_value(row).map_err(|e| e.to_string())
+        }
+        "delete_item_image" => {
+            let image_id: i64 = get_arg(&args, "imageId", "image_id")?;
+            let now: String = get_arg(&args, "now", "now")?;
+            let conn = state.conn.lock().map_err(|e| e.to_string())?;
+            repo::delete_item_image(&conn, &state.data_dir, image_id, &now)?;
+            Ok(serde_json::Value::Null)
+        }
+        "set_item_image_main" => {
+            let image_id: i64 = get_arg(&args, "imageId", "image_id")?;
+            let now: String = get_arg(&args, "now", "now")?;
+            let conn = state.conn.lock().map_err(|e| e.to_string())?;
+            repo::set_item_image_main(&conn, image_id, &now)?;
+            Ok(serde_json::Value::Null)
+        }
+        "read_item_image" => {
+            let image_id: i64 = get_arg(&args, "imageId", "image_id")?;
+            let conn = state.conn.lock().map_err(|e| e.to_string())?;
+            let (bytes, _) = repo::read_item_image(&conn, &state.data_dir, image_id)?;
             serde_json::to_value(bytes).map_err(|e| e.to_string())
         }
         "save_held_bill" => {

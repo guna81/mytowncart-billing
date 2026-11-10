@@ -33,6 +33,7 @@ import type {
   Item,
   ItemBarcode,
   ItemBatch,
+  ItemImage,
   ItemInput,
   LoyaltyTransaction,
   NewCreditNotePayload,
@@ -76,6 +77,25 @@ function bool(v: unknown): boolean {
   return v === 1 || v === true;
 }
 
+function parseJsonAttributes(v: unknown): Record<string, string> {
+  if (typeof v !== "string" || !v.trim()) return {};
+  try {
+    const parsed = JSON.parse(v);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const result: Record<string, string> = {};
+      for (const [k, val] of Object.entries(parsed)) {
+        if (typeof val === "string" || typeof val === "number" || typeof val === "boolean") {
+          result[k] = String(val);
+        }
+      }
+      return result;
+    }
+  } catch {
+    // Ignore invalid JSON
+  }
+  return {};
+}
+
 function rowToItem(r: Row): Item {
   return {
     id: num(r.id),
@@ -100,6 +120,9 @@ function rowToItem(r: Row): Item {
     remoteHash: r.remote_hash == null ? null : str(r.remote_hash),
     hsnCode: str(r.hsn_code ?? ""),
     costPricePaise: num(r.cost_price_paise ?? 0),
+    description: str(r.description ?? ""),
+    brand: str(r.brand ?? ""),
+    customAttributes: parseJsonAttributes(r.custom_attributes),
     updatedAt: str(r.updated_at),
   };
 }
@@ -128,7 +151,8 @@ const ITEM_SELECT =
   "SELECT i.id, i.name, i.barcode, i.category_id, c.name AS category_name, i.unit_kind, " +
   "i.price_paise, i.mrp_paise, i.tax_rate_bp, i.stock_milli, i.is_active, i.photo_path, " +
   "i.publish_state, i.remote_product_id, i.remote_variant_id, i.content_hash, " +
-  "i.photo_path, i.image_hash, i.image_uploaded_at, i.remote_hash, i.hsn_code, i.cost_price_paise, i.updated_at " +
+  "i.photo_path, i.image_hash, i.image_uploaded_at, i.remote_hash, i.hsn_code, i.cost_price_paise, " +
+  "i.description, i.brand, i.custom_attributes, i.updated_at " +
   "FROM items i LEFT JOIN categories c ON c.id = i.category_id";
 
 const BILL_SELECT =
@@ -151,6 +175,9 @@ function itemToPayload(input: ItemInput, now: string): Record<string, unknown> {
     isActive: input.isActive,
     hsnCode: input.hsnCode ?? "",
     costPricePaise: input.costPricePaise ?? 0,
+    description: input.description ?? "",
+    brand: input.brand ?? "",
+    customAttributes: JSON.stringify(input.customAttributes ?? {}),
     now,
   };
 }
@@ -262,8 +289,10 @@ export class TauriRepository implements BillingRepository {
     const where: string[] = [];
     if (filter?.activeOnly !== false) where.push("i.is_active = 1");
     if (filter?.search) {
-      where.push(`(i.name LIKE ?${params.length + 1} OR i.barcode LIKE ?${params.length + 2})`);
-      params.push(`%${filter.search}%`, `%${filter.search}%`);
+      where.push(
+        `(i.name LIKE ?${params.length + 1} OR i.barcode LIKE ?${params.length + 2} OR i.brand LIKE ?${params.length + 3} OR i.description LIKE ?${params.length + 4})`,
+      );
+      params.push(`%${filter.search}%`, `%${filter.search}%`, `%${filter.search}%`, `%${filter.search}%`);
     }
     if (where.length > 0) sql += " WHERE " + where.join(" AND ");
     sql += " ORDER BY i.name";
@@ -508,6 +537,72 @@ export class TauriRepository implements BillingRepository {
     const invoke = await this.getInvoke();
     const bytes = await invoke<number[]>("read_item_photo", { itemId });
     return { bytes: new Uint8Array(bytes), imageHash: item.imageHash };
+  }
+
+  async listItemImages(itemId: number): Promise<ItemImage[]> {
+    const invoke = await this.getInvoke();
+    const rows = await invoke<Record<string, unknown>[]>("list_item_images", { itemId });
+    return (rows || []).map((r) => ({
+      id: num(r.id),
+      itemId: num(r.itemId ?? r.item_id),
+      fileName: str(r.fileName ?? r.file_name),
+      imageHash: str(r.imageHash ?? r.image_hash),
+      isMain: Boolean(r.isMain ?? r.is_main),
+      position: num(r.position),
+      remoteImageId: r.remoteImageId == null && r.remote_image_id == null ? null : str(r.remoteImageId ?? r.remote_image_id),
+      imageUploadedAt: r.imageUploadedAt == null && r.image_uploaded_at == null ? null : str(r.imageUploadedAt ?? r.image_uploaded_at),
+      createdAt: str(r.createdAt ?? r.created_at),
+    }));
+  }
+
+  async addItemImage(
+    itemId: number,
+    bytes: Uint8Array,
+    imageHash: string,
+    isMain = false,
+  ): Promise<ItemImage> {
+    const invoke = await this.getInvoke();
+    const r = await invoke<Record<string, unknown>>("add_item_image", {
+      itemId,
+      bytes: Array.from(bytes),
+      imageHash,
+      isMain,
+      now: localIsoTimestamp(new Date()),
+    });
+    return {
+      id: num(r.id),
+      itemId: num(r.itemId ?? r.item_id),
+      fileName: str(r.fileName ?? r.file_name),
+      imageHash: str(r.imageHash ?? r.image_hash),
+      isMain: Boolean(r.isMain ?? r.is_main),
+      position: num(r.position),
+      remoteImageId: r.remoteImageId == null && r.remote_image_id == null ? null : str(r.remoteImageId ?? r.remote_image_id),
+      imageUploadedAt: r.imageUploadedAt == null && r.image_uploaded_at == null ? null : str(r.imageUploadedAt ?? r.image_uploaded_at),
+      createdAt: str(r.createdAt ?? r.created_at),
+    };
+  }
+
+  async deleteItemImage(imageId: number): Promise<void> {
+    const invoke = await this.getInvoke();
+    await invoke("delete_item_image", { imageId, now: localIsoTimestamp(new Date()) });
+  }
+
+  async setItemImageMain(imageId: number): Promise<void> {
+    const invoke = await this.getInvoke();
+    await invoke("set_item_image_main", { imageId, now: localIsoTimestamp(new Date()) });
+  }
+
+  async readItemImage(imageId: number): Promise<{ bytes: Uint8Array; imageHash: string } | null> {
+    const invoke = await this.getInvoke();
+    try {
+      const bytes = await invoke<number[]>("read_item_image", { imageId });
+      const rows = await this.query("SELECT image_hash FROM item_images WHERE id = ?", [imageId]);
+      const firstRow = rows[0];
+      const hash = firstRow ? str(firstRow.image_hash) : "";
+      return { bytes: new Uint8Array(bytes), imageHash: hash };
+    } catch {
+      return null;
+    }
   }
 
   async recordImageUploads(

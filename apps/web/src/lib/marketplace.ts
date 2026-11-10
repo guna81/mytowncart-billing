@@ -11,6 +11,8 @@ import {
   MyTownCartConnector,
 } from "@mytowncart-billing/connector-mytowncart";
 import { currentToken } from "./connection";
+import { isLanServer } from "./repository";
+import { lanMarketplaceFetch } from "./lanMarketplace";
 
 const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
 
@@ -25,6 +27,7 @@ export function getConnector(): MyTownCartConnector {
       webBaseUrl: MARKETPLACE_WEB_URL,
       appVersion: APP_VERSION,
       getToken: currentToken,
+      ...(isLanServer() ? { fetch: lanMarketplaceFetch } : {}),
     });
   }
   return connector;

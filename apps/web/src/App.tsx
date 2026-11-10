@@ -8,6 +8,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { PrintView } from "./print/PrintView";
 import { t } from "./i18n";
 import { checkAndRunAutoBackup } from "./lib/autoBackup";
+import { useAutoSync } from "./lib/autoSync";
 import { DIAGNOSTICS_KEY, setDiagnosticsEnabled } from "./lib/diagnostics";
 import { SHOP_LOGO_KEY } from "./lib/shopLogo";
 import { getRepository } from "./lib/repository";
@@ -17,6 +18,7 @@ import { CustomersScreen } from "./screens/CustomersScreen";
 import { DashboardScreen } from "./screens/DashboardScreen";
 import { ItemFormScreen } from "./screens/ItemFormScreen";
 import { ItemsScreen } from "./screens/ItemsScreen";
+import { CategoriesScreen } from "./screens/CategoriesScreen";
 import { BarcodeLabelsScreen } from "./screens/BarcodeLabelsScreen";
 import { MyTownCartScreen } from "./screens/MyTownCartScreen";
 import { PosScreen } from "./screens/PosScreen";
@@ -41,6 +43,8 @@ export function App() {
   const setShopLogo = useAppStore((s) => s.setShopLogo);
   const setBooted = useAppStore((s) => s.setBooted);
   const runUpdateCheck = useAppStore((s) => s.runUpdateCheck);
+
+  useAutoSync();
 
   useEffect(() => {
     void (async () => {
@@ -86,6 +90,7 @@ export function App() {
             <Route path="/dashboard" element={<OwnerOnly><DashboardScreen /></OwnerOnly>} />
             <Route path="/items" element={<ItemsScreen />} />
             <Route path="/items/labels" element={<BarcodeLabelsScreen />} />
+            <Route path="/categories" element={<OwnerOnly><CategoriesScreen /></OwnerOnly>} />
             <Route path="/items/new" element={<OwnerOnly><ItemFormScreen /></OwnerOnly>} />
             <Route path="/items/:id/edit" element={<OwnerOnly><ItemFormScreen /></OwnerOnly>} />
             <Route path="/bills" element={<BillsScreen />} />

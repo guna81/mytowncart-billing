@@ -18,6 +18,7 @@ import type {
   PublishItem,
   RemoteItem,
   RemoteOrder,
+  RemoteProductImage,
   Scope,
   StockPull,
   StockPush,
@@ -311,6 +312,11 @@ export class MyTownCartConnector implements MarketplaceConnector {
           stock: item.stockUnits,
           ...(item.barcode ? { barcode: item.barcode } : {}),
           is_active: item.isActive,
+          ...(item.description ? { description: item.description } : {}),
+          ...(item.brand ? { brand: item.brand } : {}),
+          ...(item.customAttributes && Object.keys(item.customAttributes).length > 0
+            ? { attributes: item.customAttributes }
+            : {}),
         })),
       });
       out.push(
@@ -327,13 +333,35 @@ export class MyTownCartConnector implements MarketplaceConnector {
     return out;
   }
 
-  async uploadImage(externalId: string, file: Blob, isMain = false): Promise<void> {
-    await this.http.upload(
+  async uploadImage(
+    externalId: string,
+    file: Blob,
+    isMain = false,
+  ): Promise<{ imageId: string; isMain: boolean; isActive: boolean }> {
+    const res = await this.http.upload<{ image_id: string; is_main: boolean; is_active: boolean }>(
       `/products/${encodeURIComponent(externalId)}/images/`,
       file,
       `${externalId}.jpg`,
       isMain ? { is_main: "true" } : undefined,
     );
+    return {
+      imageId: res?.image_id,
+      isMain: Boolean(res?.is_main),
+      isActive: Boolean(res?.is_active),
+    };
+  }
+
+  async deleteImage(externalId: string, imageId?: string): Promise<void> {
+    const qs = imageId ? `?image_id=${encodeURIComponent(imageId)}` : "";
+    await this.http.json("DELETE", `/products/${encodeURIComponent(externalId)}/images/${qs}`);
+  }
+
+  async listImages(externalId: string): Promise<RemoteProductImage[]> {
+    const res = await this.http.json<{ images: RemoteProductImage[] }>(
+      "GET",
+      `/products/${encodeURIComponent(externalId)}/images/`,
+    );
+    return res?.images ?? [];
   }
 
   async pushStock(moves: StockPush[]): Promise<StockPushResult[]> {
@@ -358,10 +386,14 @@ export class MyTownCartConnector implements MarketplaceConnector {
     });
   }
 
-  async pullStock(cursor: number): Promise<{ moves: StockPull[]; nextCursor: number }> {
+  async pullStock(
+    cursor: number,
+    opts: { force?: boolean } = {},
+  ): Promise<{ moves: StockPull[]; nextCursor: number }> {
+    const forceQs = opts.force ? "&force=1" : "";
     const body = await this.http.json<StockFeedResponse>(
       "GET",
-      `/stock/?cursor=${cursor}&limit=500`,
+      `/stock/?cursor=${cursor}&limit=500${forceQs}`,
     );
     return {
       moves: body.movements.map((m) => ({
@@ -375,8 +407,14 @@ export class MyTownCartConnector implements MarketplaceConnector {
     };
   }
 
-  async pullOrders(after?: string): Promise<{ orders: RemoteOrder[]; next?: string }> {
-    const qs = after ? `?after=${encodeURIComponent(after)}` : "";
+  async pullOrders(
+    after?: string,
+    opts: { force?: boolean } = {},
+  ): Promise<{ orders: RemoteOrder[]; next?: string }> {
+    const params = new URLSearchParams();
+    if (after) params.set("after", after);
+    if (opts.force) params.set("force", "1");
+    const qs = params.toString() ? `?${params.toString()}` : "";
     const body = await this.http.json<OrdersResponse>("GET", `/orders/${qs}`);
     return {
       orders: body.orders.map((o) => ({

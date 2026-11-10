@@ -33,6 +33,7 @@ import type { HeldBill, Item } from "@mytowncart-billing/storage";
 import { UpiQrCode } from "../components/UpiQrCode";
 import { EmptyState } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
+import { triggerImmediateSync } from "../lib/autoSync";
 import { getRepository } from "../lib/repository";
 import { useAppStore } from "../store/appStore";
 
@@ -407,6 +408,7 @@ export function PosScreen() {
       }
       resetBill(true);
       bumpDataVersion();
+      triggerImmediateSync();
       if (print) requestPrint({ billId: created.billId, variant: "receipt-80" });
     } catch (err: unknown) {
       setNotice({
@@ -554,7 +556,12 @@ export function PosScreen() {
                     }}
                   >
                     <div>
-                      <p className="font-medium">{item.name}</p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="font-medium">{item.name}</p>
+                        {item.brand ? (
+                          <span className="text-xs text-gray-500 font-normal">({item.brand})</span>
+                        ) : null}
+                      </div>
                       {item.barcode ? (
                         <p className="text-xs text-gray-600 font-mono">{item.barcode}</p>
                       ) : null}

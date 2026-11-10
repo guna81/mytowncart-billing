@@ -73,7 +73,7 @@ function UserDialog({
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">{t("users.role")}</label>
           <select
-            className="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm"
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-2xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             data-testid="user-role"
             value={role}
             onChange={(e) => setRole(e.target.value as UserRole)}

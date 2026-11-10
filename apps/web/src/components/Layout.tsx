@@ -13,6 +13,8 @@ import { Button, Modal } from "./ui";
 import { getRepository } from "../lib/repository";
 import { isOwnerOnlyPath, refreshLoginState, useIsOwner } from "../lib/roles";
 
+const SIDEBAR_KEY = "mtc.sidebar";
+
 interface NavItem {
   to: string;
   key: I18nKey;
@@ -66,6 +68,15 @@ const NAV_GROUPS: NavGroup[] = [
         icon: (active) => (
           <svg className={`h-5 w-5 ${active ? "text-blue-600" : "text-gray-500"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={active ? 2.2 : 1.8} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+          </svg>
+        ),
+      },
+      {
+        to: "/categories",
+        key: "nav.categories",
+        icon: (active) => (
+          <svg className={`h-5 w-5 ${active ? "text-blue-600" : "text-gray-500"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={active ? 2.2 : 1.8} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
           </svg>
         ),
       },
@@ -178,12 +189,23 @@ export function Layout({ children }: { children: ReactNode }) {
   const setIsLocked = useAppStore((s) => s.setIsLocked);
   const currentUser = useAppStore((s) => s.currentUser);
   const setCurrentUser = useAppStore((s) => s.setCurrentUser);
-  const [collapsed, setCollapsed] = useState(() => {
-    if (typeof window !== "undefined") {
-      return window.innerWidth < 1280;
+  // First launch: always open. After that, restore whatever the user last chose.
+  const [collapsed, setCollapsedState] = useState<boolean>(() => {
+    try {
+      const saved = window.localStorage.getItem(SIDEBAR_KEY);
+      return saved === "collapsed";
+    } catch {
+      return false;
     }
-    return false;
   });
+  const setCollapsed = (value: boolean) => {
+    setCollapsedState(value);
+    try {
+      window.localStorage.setItem(SIDEBAR_KEY, value ? "collapsed" : "open");
+    } catch {
+      /* storage unavailable — keep in-memory state only */
+    }
+  };
   const isOwner = useIsOwner();
   const [showShortcuts, setShowShortcuts] = useState(false);
 
@@ -210,15 +232,6 @@ export function Layout({ children }: { children: ReactNode }) {
     }
   };
 
-  useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth < 1280) {
-        setCollapsed(true);
-      }
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

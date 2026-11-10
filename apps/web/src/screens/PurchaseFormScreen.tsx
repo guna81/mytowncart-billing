@@ -188,7 +188,7 @@ export function PurchaseFormScreen() {
               {t("purchases.supplier")} *
             </label>
             <select
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm"
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-2xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               data-testid="purchase-supplier"
               value={supplierId}
               onChange={(e) => setSupplierId(e.target.value ? Number(e.target.value) : "")}
@@ -228,7 +228,7 @@ export function PurchaseFormScreen() {
                 {t("print.item")}
               </label>
               <select
-                className="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-2xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 data-testid="purchase-item-select"
                 value={selectedItemId}
                 onChange={(e) =>

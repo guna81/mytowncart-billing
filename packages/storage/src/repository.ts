@@ -37,6 +37,7 @@ import type {
   Item,
   ItemBarcode,
   ItemBatch,
+  ItemImage,
   ItemInput,
   LoyaltyTransaction,
   NewCreditNotePayload,
@@ -137,6 +138,12 @@ export interface BillingRepository {
   clearItemPhoto(itemId: number): Promise<void>;
   /** Bytes of an item's photo, or null when it has none. */
   readItemPhoto(itemId: number): Promise<{ bytes: Uint8Array; imageHash: string | null } | null>;
+  /** Multi-image support for items */
+  listItemImages(itemId: number): Promise<ItemImage[]>;
+  addItemImage(itemId: number, bytes: Uint8Array, imageHash: string, isMain?: boolean): Promise<ItemImage>;
+  deleteItemImage(imageId: number): Promise<void>;
+  setItemImageMain(imageId: number): Promise<void>;
+  readItemImage(imageId: number): Promise<{ bytes: Uint8Array; imageHash: string } | null>;
   /** Acknowledge uploaded photos (matched by hash; stale acks are ignored). */
   recordImageUploads(
     uploads: readonly { itemId: number; imageHash: string; uploadedAt: string }[],

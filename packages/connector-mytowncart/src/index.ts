@@ -49,6 +49,9 @@ export interface PublishItem {
   isActive: boolean;
   /** Skipped by the server when unchanged since last publish. */
   contentHash: string;
+  description?: string;
+  brand?: string;
+  customAttributes?: Record<string, string>;
 }
 
 export interface UpsertResult {
@@ -117,6 +120,13 @@ export interface ConnectionToken {
   scopes: string[];
 }
 
+export interface RemoteProductImage {
+  id: string;
+  image: string;
+  thumbnail?: string;
+  isMain: boolean;
+}
+
 /**
  * The marketplace-agnostic connector contract (D6). MyTownCart is the first
  * implementation; every request sends `X-App-Version` (§8.4).
@@ -126,12 +136,22 @@ export interface MarketplaceConnector {
   me(): Promise<MarketplaceProfile>;
   listCategories(): Promise<MarketplaceCategory[]>;
   upsertItems(items: PublishItem[]): Promise<UpsertResult[]>;
-  uploadImage(externalId: string, file: Blob, isMain?: boolean): Promise<void>;
+  uploadImage(
+    externalId: string,
+    file: Blob,
+    isMain?: boolean,
+  ): Promise<{ imageId?: string; isMain?: boolean; isActive?: boolean } | void>;
+  deleteImage?(externalId: string, imageId?: string): Promise<void>;
+  listImages?(externalId: string): Promise<RemoteProductImage[]>;
   pushStock(moves: StockPush[]): Promise<StockPushResult[]>;
   pullStock(
     cursor: number,
+    opts?: { force?: boolean },
   ): Promise<{ moves: StockPull[]; nextCursor: number }>;
-  pullOrders(after?: string): Promise<{ orders: RemoteOrder[]; next?: string }>;
+  pullOrders(
+    after?: string,
+    opts?: { force?: boolean },
+  ): Promise<{ orders: RemoteOrder[]; next?: string }>;
   listRemoteItems(): Promise<RemoteItem[]>;
 }
 

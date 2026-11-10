@@ -14,7 +14,7 @@ import { getRepository } from "../lib/repository";
 import { processLogoFile, SHOP_LOGO_KEY } from "../lib/shopLogo";
 import { useAppStore } from "../store/appStore";
 
-const inputCls = "mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm";
+const inputCls = "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-2xs";
 const labelCls = "block text-sm font-medium text-gray-700";
 
 export function SettingsScreen() {

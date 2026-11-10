@@ -19,7 +19,7 @@ function getDefaultBaseUrl(): string {
 const KEY_STORAGE = "mtc.lan.key";
 
 /** The LAN access key arrives as `?key=` in the URL shown by the desktop app; keep it for the tab. */
-function resolveAccessKey(): string {
+export function resolveAccessKey(): string {
   const g = globalThis as {
     location?: { search?: string; pathname?: string; hash?: string };
     sessionStorage?: Storage;

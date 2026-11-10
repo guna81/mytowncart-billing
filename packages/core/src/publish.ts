@@ -25,6 +25,9 @@ export interface PublishItemInput {
   marketplaceCategoryId: string | null;
   /** Hash of the content last published successfully; null = never. */
   lastPublishedHash: string | null;
+  description?: string;
+  brand?: string;
+  customAttributes?: Record<string, string>;
 }
 
 export type BlockedReason =
@@ -85,6 +88,9 @@ export function contentHash(input: {
   barcode: string;
   marketplaceCategoryId: string;
   isActive: boolean;
+  description?: string;
+  brand?: string;
+  customAttributes?: Record<string, string>;
 }): string {
   const payload = [
     input.name,
@@ -94,6 +100,9 @@ export function contentHash(input: {
     input.barcode,
     input.marketplaceCategoryId,
     input.isActive ? "1" : "0",
+    input.description ?? "",
+    input.brand ?? "",
+    JSON.stringify(input.customAttributes ?? {}),
   ].join("\u0001");
   let hash = 0x811c9dc5;
   for (let i = 0; i < payload.length; i++) {
@@ -162,6 +171,9 @@ export function planPublish(
         barcode: item.barcode,
         marketplaceCategoryId: category,
         isActive: true,
+        description: item.description,
+        brand: item.brand,
+        customAttributes: item.customAttributes,
       }),
       needsPhoto: item.photoPath === "",
     });
