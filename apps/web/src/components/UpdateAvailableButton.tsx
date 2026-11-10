@@ -8,6 +8,7 @@ export interface UpdateAvailableButtonProps {
   className?: string;
   label?: string;
   url?: string;
+  variant?: "banner" | "pill";
 }
 
 /**
@@ -20,6 +21,7 @@ export function UpdateAvailableButton({
   className = "",
   label,
   url = DOWNLOAD_PAGE_URL,
+  variant = "banner",
 }: UpdateAvailableButtonProps) {
   const updateInfo = useAppStore((s) => s.updateInfo);
 
@@ -61,6 +63,25 @@ export function UpdateAvailableButton({
     );
   }
 
+  if (variant === "pill") {
+    return (
+      <button
+        type="button"
+        data-testid="update-available-btn"
+        onClick={handleClick}
+        title={buttonTitle}
+        aria-label={buttonAria}
+        className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300 text-[11px] font-medium whitespace-nowrap transition-colors focus:outline-hidden focus:ring-2 focus:ring-amber-500 shadow-xs cursor-pointer ${className}`}
+      >
+        <span className="relative flex h-1.5 w-1.5 shrink-0">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500" />
+        </span>
+        <span className="truncate">{displayText}</span>
+      </button>
+    );
+  }
+
   return (
     <button
       type="button"
@@ -68,13 +89,30 @@ export function UpdateAvailableButton({
       onClick={handleClick}
       title={buttonTitle}
       aria-label={buttonAria}
-      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300 text-[11px] font-medium transition-colors focus:outline-hidden focus:ring-2 focus:ring-amber-500 shadow-xs cursor-pointer ${className}`}
+      className={`group flex items-center justify-between w-full px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 transition-colors focus:outline-hidden focus:ring-2 focus:ring-amber-500 shadow-xs cursor-pointer text-left ${className}`}
     >
-      <span className="relative flex h-1.5 w-1.5">
-        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500" />
-      </span>
-      <span>{displayText}</span>
+      <div className="flex items-center gap-1.5 min-w-0">
+        <span className="relative flex h-2 w-2 shrink-0">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+        </span>
+        <span className="text-[11px] font-medium text-amber-900 truncate">
+          {displayText}
+        </span>
+      </div>
+      <svg
+        className="h-3.5 w-3.5 shrink-0 text-amber-700 group-hover:translate-y-0.5 transition-transform"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+        />
+      </svg>
     </button>
   );
 }

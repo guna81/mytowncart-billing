@@ -431,11 +431,9 @@ export function Layout({ children }: { children: ReactNode }) {
                   </button>
                 </div>
               </div>
-              <div className="flex items-center justify-between gap-1 text-[10px] text-gray-600 font-mono">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span>v{APP_VERSION}</span>
-                  <UpdateAvailableButton />
-                </div>
+              <UpdateAvailableButton />
+              <div className="flex items-center justify-between text-[10px] text-gray-500 font-mono">
+                <span>v{APP_VERSION}</span>
                 <span className="inline-flex items-center gap-1 text-green-600 font-sans font-medium shrink-0">
                   <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
                   Online

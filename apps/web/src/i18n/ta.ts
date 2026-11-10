@@ -337,6 +337,7 @@ export const ta: Record<I18nKey, string> = {
   "settings.updates": "செயலி புதுப்பிப்புகள்",
   "update.available": "புதிய பதிப்பு கிடைக்கிறது ({version})",
   "update.available_hint": "புதிய பதிப்பு பதிவிறக்கத்திற்கு கிடைக்கிறது",
+  "update.download": "பதிவிறக்குக",
   "update.check": "புதுப்பிப்புகளைச் சரிபார்",
   "update.checking": "புதுப்பிப்புகள் சரிபார்க்கப்படுகின்றன…",
   "update.up_to_date": "நீங்கள் புதிய பதிப்பைப் பயன்படுத்துகிறீர்கள் ({version})",

@@ -337,6 +337,7 @@ export const hi: Record<I18nKey, string> = {
   "settings.updates": "सॉफ्टवेयर अपडेट्स",
   "update.available": "अपडेट उपलब्ध है ({version})",
   "update.available_hint": "डाउनलोड के लिए एक नया संस्करण उपलब्ध है",
+  "update.download": "डाउनलोड करें",
   "update.check": "अपडेट्स जांचें",
   "update.checking": "अपडेट्स की जांच की जा रही है…",
   "update.up_to_date": "आप नवीनतम संस्करण चला रहे हैं ({version})",

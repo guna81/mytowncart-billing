@@ -337,6 +337,7 @@ export const en = {
   "settings.updates": "Updates",
   "update.available": "Update available ({version})",
   "update.available_hint": "A newer version is available for download",
+  "update.download": "Download",
   "update.check": "Check for updates",
   "update.checking": "Checking for updates…",
   "update.up_to_date": "You're up to date ({version})",

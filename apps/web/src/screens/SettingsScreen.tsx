@@ -281,7 +281,7 @@ export function SettingsScreen() {
                 <span className="text-xs font-medium text-amber-700">
                   {t("update.available", { version: updateInfo.tag })}
                 </span>
-                <UpdateAvailableButton />
+                <UpdateAvailableButton variant="pill" label={t("update.download")} />
               </div>
             ) : updateCheckResult?.failed ? (
               <p className="text-xs text-amber-700">
