@@ -110,6 +110,29 @@ export interface RemoteItem {
   stockUnits: number;
   pricePaise: number;
   isActive: boolean;
+  /** Product name on MyTownCart; absent from older connectors. */
+  name?: string;
+}
+
+/** A product that lives only on MyTownCart (not managed by this app). Read-only. */
+export interface PlatformProduct {
+  productId: string;
+  variantId: string | null;
+  name: string;
+  categoryName: string;
+  pricePaise: number;
+  stockUnits: number;
+  isActive: boolean;
+}
+
+/** Outcome of linking one MyTownCart-only product to a local item ("pull"). */
+export interface AdoptResult {
+  externalId: string;
+  productId: string | null;
+  variantId: string | null;
+  status: "adopted" | "already_linked" | "error";
+  visible: boolean;
+  error: string | null;
 }
 
 /** Persisted connection state; the secret itself lives in the OS keychain. */
@@ -153,6 +176,10 @@ export interface MarketplaceConnector {
     opts?: { force?: boolean },
   ): Promise<{ orders: RemoteOrder[]; next?: string }>;
   listRemoteItems(): Promise<RemoteItem[]>;
+  /** The seller's products created on MyTownCart itself, for a read-only list. */
+  listPlatformProducts(): Promise<PlatformProduct[]>;
+  /** Link MyTownCart-only products to local items so later syncs update them. */
+  adoptProducts(entries: { productId: string; externalId: string }[]): Promise<AdoptResult[]>;
 }
 
 export { MyTownCartConnector, CLIENT_NAME, CONNECT_SCOPES, DEFAULT_API_BASE_URL, DEFAULT_WEB_BASE_URL, paiseToDecimal, decimalToPaise, scopeNames } from "./myTownCart";

@@ -49,6 +49,8 @@ function fakeConnector(overrides: ConnectorOverrides = {}): MarketplaceConnector
     pullOrders: (): Promise<{ orders: RemoteOrder[]; next?: string }> =>
       Promise.resolve({ orders: [] }),
     listRemoteItems: (): Promise<RemoteItem[]> => Promise.resolve([]),
+    listPlatformProducts: () => Promise.resolve([]),
+    adoptProducts: () => Promise.resolve([]),
   };
   return { ...base, ...rest };
 }
@@ -132,7 +134,96 @@ describe("runSync", () => {
     expect(await repo.listOutbox("pending")).toEqual([]);
   });
 
-  it("records the marketplace catalog snapshot and orders", async () => {
+  it("with details off, sends and pulls no stock or edits to linked items", async () => {
+    const { repo, itemId } = await fixture();
+    await repo.setItemPhoto(itemId, new Uint8Array([0xff, 0xd8, 0xff]), "h1");
+    await repo.adjustStock(itemId, -1000, "adjustment");
+    const pushes: StockPush[][] = [];
+    let upserts = 0;
+    let pulls = 0;
+    const connector = fakeConnector({
+      pushes,
+      upsertItems: (items) => {
+        upserts += items.length;
+        return Promise.resolve([]);
+      },
+      pullStock: () => {
+        pulls += 1;
+        return Promise.resolve({ moves: [], nextCursor: 0 });
+      },
+    });
+    await runSync({ repo, connector, now, isApproved: () => true }, { details: false });
+    expect(pushes).toHaveLength(0);
+    expect(upserts).toBe(0);
+    expect(pulls).toBe(0);
+  });
+
+  it("with the list off, linked items are still updated", async () => {
+    const { repo, itemId } = await fixture();
+    await repo.setItemPhoto(itemId, new Uint8Array([0xff, 0xd8, 0xff]), "h1");
+    let upserts = 0;
+    const connector = fakeConnector({
+      upsertItems: (items) => {
+        upserts += items.length;
+        return Promise.resolve([]);
+      },
+    });
+    await runSync({ repo, connector, now, isApproved: () => true }, { list: false });
+    expect(upserts).toBe(1);
+  });
+
+  it("takes a price changed on MyTownCart, but never overwrites a local edit", async () => {
+    const { repo, itemId } = await fixture();
+    const remote = (price: number): RemoteItem => ({
+      externalId: `itm_${itemId}`,
+      productId: "p-1",
+      variantId: "v-1",
+      stockUnits: 10,
+      pricePaise: price,
+      isActive: true,
+    });
+    const run = (price: number) =>
+      runSync(
+        { repo, connector: fakeConnector({ listRemoteItems: () => Promise.resolve([remote(price)]) }), now, isApproved: () => true },
+        { list: false },
+      );
+    await run(1000); // first look: remote 1000 == local 1000
+    const out = await run(1500); // edited on MyTownCart
+    expect(out.pulledPrices).toBe(1);
+    expect((await repo.listItems({ activeOnly: false }))[0]?.pricePaise).toBe(1500);
+    await repo.upsertItem({ id: itemId, name: "Parle-G", barcode: "", categoryId: null, unitKind: "count", pricePaise: 1800, mrpPaise: 1200, taxRateBp: 0, openingStockMilli: 10_000, isActive: true });
+    const out2 = await run(2000); // both changed → local wins
+    expect(out2.pulledPrices).toBeUndefined();
+    expect((await repo.listItems({ activeOnly: false }))[0]?.pricePaise).toBe(1800);
+  });
+
+  it("takes a name changed on MyTownCart unless it was also edited here", async () => {
+    const { repo, itemId } = await fixture();
+    const remote = (name: string): RemoteItem => ({
+      externalId: `itm_${itemId}`,
+      productId: "p-1",
+      variantId: "v-1",
+      stockUnits: 10,
+      pricePaise: 1000,
+      isActive: true,
+      name,
+    });
+    const run = (name: string) =>
+      runSync(
+        { repo, connector: fakeConnector({ listRemoteItems: () => Promise.resolve([remote(name)]) }), now, isApproved: () => true },
+        { list: false },
+      );
+    await run("Parle-G"); // first look records the name
+    const out = await run("Parle-G Gold"); // renamed on MyTownCart
+    expect(out.pulledNames).toBe(1);
+    expect((await repo.listItems({ activeOnly: false }))[0]?.name).toBe("Parle-G Gold");
+    await repo.upsertItem({ id: itemId, name: "Parle Biscuit", barcode: "", categoryId: null, unitKind: "count", pricePaise: 1000, mrpPaise: 1200, taxRateBp: 0, openingStockMilli: 10_000, isActive: true });
+    const out2 = await run("Parle Other"); // both changed → local wins
+    expect(out2.pulledNames).toBeUndefined();
+    expect((await repo.listItems({ activeOnly: false }))[0]?.name).toBe("Parle Biscuit");
+  });
+
+  it("records the marketplace catalog snapshot", async () => {
     const { repo } = await fixture();
     const outcome = await runSync({
       repo,
@@ -141,29 +232,11 @@ describe("runSync", () => {
           Promise.resolve([
             { externalId: "itm_1", productId: "p", variantId: "v", stockUnits: 9, pricePaise: 1000, isActive: true },
           ]),
-        pullOrders: () =>
-          Promise.resolve({
-            orders: [
-              {
-                id: "ORD-1",
-                status: "confirmed",
-                paymentStatus: "paid",
-                paymentMethod: "online",
-                totalPaise: 2050,
-                placedAt: "2026-11-05T09:00:00Z",
-                updatedAt: "2026-11-05T09:00:00Z",
-                lines: [{ externalId: "itm_1", productName: "Parle-G", qtyUnits: 2, unitPricePaise: 1000 }],
-              },
-            ],
-          }),
       }),
       now,
       isApproved: () => true,
     });
-    expect(outcome.orders).toBe(1);
     expect(outcome.problems).toEqual([]);
-    const orders = await repo.listRemoteOrders();
-    expect(orders[0]).toMatchObject({ id: "ORD-1", totalPaise: 2050 });
   });
 
   it("reports a failing step without losing the others", async () => {
@@ -179,10 +252,9 @@ describe("runSync", () => {
     expect(outcome.problems).toEqual(["catalog read: boom"]);
   });
 
-  it("passes force option to pullStock and pullOrders", async () => {
+  it("passes force option to pullStock", async () => {
     const { repo } = await fixture();
     let pullStockOpts: { force?: boolean } | undefined;
-    let pullOrdersOpts: { force?: boolean } | undefined;
     await runSync(
       {
         repo,
@@ -191,10 +263,6 @@ describe("runSync", () => {
             pullStockOpts = opts;
             return Promise.resolve({ moves: [], nextCursor: 0 });
           },
-          pullOrders: (_a, opts) => {
-            pullOrdersOpts = opts;
-            return Promise.resolve({ orders: [] });
-          },
         }),
         now,
         isApproved: () => true,
@@ -202,7 +270,6 @@ describe("runSync", () => {
       { force: true },
     );
     expect(pullStockOpts).toEqual({ force: true });
-    expect(pullOrdersOpts).toEqual({ force: true });
   });
 
   it("generates non-empty remoteHash when recording remote catalog items", async () => {
@@ -228,5 +295,22 @@ describe("runSync", () => {
     const items = await repo.listItems({ activeOnly: false });
     const item = items.find((i) => i.id === itemId);
     expect(item?.remoteHash).toBe("1200:5:1");
+  });
+
+  it("reads the MyTownCart-only products only when asked, and reports a failed read", async () => {
+    const { repo } = await fixture();
+    let reads = 0;
+    const connector = fakeConnector({
+      listPlatformProducts: () => {
+        reads += 1;
+        return Promise.reject(new Error("boom"));
+      },
+    });
+    const quiet = await runSync({ repo, connector, now, isApproved: () => true });
+    expect(reads).toBe(0);
+    expect(quiet.problems).toEqual([]);
+    const asked = await runSync({ repo, connector, now, isApproved: () => true }, { platformOnly: true });
+    expect(reads).toBe(1);
+    expect(asked.problems).toEqual(["platform read: boom"]);
   });
 });

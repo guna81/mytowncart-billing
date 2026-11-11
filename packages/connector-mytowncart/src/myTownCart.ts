@@ -16,6 +16,8 @@ import type {
   MarketplaceConnector,
   MarketplaceProfile,
   PublishItem,
+  AdoptResult,
+  PlatformProduct,
   RemoteItem,
   RemoteOrder,
   RemoteProductImage,
@@ -103,12 +105,26 @@ interface ProductPage {
   has_next: boolean;
   results: {
     external_id: string;
+    external_source?: string;
+    name?: string;
+    category_name?: string;
     product_id: string;
     variant_id: string | null;
     price: string | null;
     stock: number | null;
     is_active: boolean;
     has_image: boolean;
+  }[];
+}
+
+interface AdoptResponse {
+  results: {
+    external_id: string;
+    status: AdoptResult["status"];
+    product_id: string | null;
+    variant_id: string | null;
+    visible: boolean;
+    error: string | null;
   }[];
 }
 
@@ -449,9 +465,64 @@ export class MyTownCartConnector implements MarketplaceConnector {
           stockUnits: p.stock ?? 0,
           pricePaise: decimalToPaise(p.price) ?? 0,
           isActive: p.is_active,
+          name: p.name ?? "",
         });
       }
       if (!body.has_next) break;
+    }
+    return out;
+  }
+
+  async listPlatformProducts(): Promise<PlatformProduct[]> {
+    const out: PlatformProduct[] = [];
+    for (let page = 1; page <= 20; page++) {
+      const body = await this.http.json<ProductPage>(
+        "GET",
+        `/products/?include=all&page=${page}&page_size=100`,
+      );
+      for (const p of body.results) {
+        // An older server ignores ?include=all and omits external_source; without it
+        // we can't tell our own products apart. Say so rather than report "none".
+        if (p.external_source === undefined) {
+          throw new Error("this MyTownCart server doesn't support listing your other products yet");
+        }
+        if (p.external_source === "billing") continue;
+        out.push({
+          productId: p.product_id,
+          variantId: p.variant_id,
+          name: p.name ?? "",
+          categoryName: p.category_name ?? "",
+          pricePaise: decimalToPaise(p.price) ?? 0,
+          stockUnits: p.stock ?? 0,
+          isActive: p.is_active,
+        });
+      }
+      if (!body.has_next) break;
+    }
+    return out;
+  }
+
+  async adoptProducts(
+    entries: { productId: string; externalId: string }[],
+  ): Promise<AdoptResult[]> {
+    const out: AdoptResult[] = [];
+    for (let i = 0; i < entries.length; i += 100) {
+      const body = await this.http.json<AdoptResponse>("POST", "/products/adopt/", {
+        items: entries.slice(i, i + 100).map((e) => ({
+          product_id: e.productId,
+          external_id: e.externalId,
+        })),
+      });
+      for (const r of body.results) {
+        out.push({
+          externalId: r.external_id,
+          productId: r.product_id,
+          variantId: r.variant_id,
+          status: r.status,
+          visible: r.visible,
+          error: r.error,
+        });
+      }
     }
     return out;
   }

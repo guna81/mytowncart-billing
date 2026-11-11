@@ -44,8 +44,6 @@ export interface ReadyItem {
   input: PublishItemInput;
   /** Content fingerprint of billing-owned fields (see `contentHash`). */
   hash: string;
-  /** D9: the marketplace publishes it hidden until a photo arrives. */
-  needsPhoto: boolean;
 }
 
 export interface BlockedItem {
@@ -175,7 +173,6 @@ export function planPublish(
         brand: item.brand,
         customAttributes: item.customAttributes,
       }),
-      needsPhoto: item.photoPath === "",
     });
   }
   return { ready, blocked };
@@ -221,4 +218,88 @@ export function suggestCategories(
         b.score - a.score || a.name.length - b.name.length || a.name.localeCompare(b.name),
     )
     .slice(0, limit);
+}
+
+/** Items already mapped to a marketplace category: hints for the next suggestion. */
+export interface MappedItemHint {
+  name: string;
+  marketplaceCategoryId: string;
+}
+
+/**
+ * Best marketplace category for one item. A similarly named item the seller
+ * has already mapped wins (the seller's own choice), otherwise the closest
+ * marketplace category name. Null when nothing overlaps. Deterministic.
+ */
+export function suggestCategoryForItem(
+  itemName: string,
+  marketplace: readonly { id: string; name: string }[],
+  mapped: readonly MappedItemHint[] = [],
+): { id: string; name: string } | null {
+  const known = new Map(marketplace.map((c) => [c.id, c.name]));
+  const tokens = (s: string) =>
+    new Set(
+      s
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter((x) => x.length > 1),
+    );
+  const want = tokens(itemName);
+  let best: { id: string; score: number } | null = null;
+  for (const hint of mapped) {
+    if (!known.has(hint.marketplaceCategoryId) || want.size === 0) continue;
+    const have = tokens(hint.name);
+    let shared = 0;
+    for (const x of want) if (have.has(x)) shared++;
+    const score = shared / want.size;
+    if (score >= 0.5 && (best === null || score > best.score)) {
+      best = { id: hint.marketplaceCategoryId, score };
+    }
+  }
+  if (best) return { id: best.id, name: known.get(best.id) as string };
+  const byName = suggestCategories(itemName, marketplace, 1)[0];
+  return byName ? { id: byName.id, name: byName.name } : null;
+}
+
+export interface CategoryGroup {
+  /** Parent name, or null for categories shown without a heading. */
+  label: string | null;
+  options: { id: string; name: string }[];
+}
+
+/**
+ * Groups a flat marketplace category list by parent for a dropdown: a parent
+ * with children becomes a heading (and stays pickable as its first option);
+ * categories without children are listed together under no heading.
+ */
+export function groupMarketplaceCategories(
+  marketplace: readonly { id: string; name: string; parentId: string | null }[],
+): CategoryGroup[] {
+  const byId = new Map(marketplace.map((c) => [c.id, c]));
+  const children = new Map<string, { id: string; name: string }[]>();
+  for (const c of marketplace) {
+    if (c.parentId !== null && byId.has(c.parentId)) {
+      const list = children.get(c.parentId) ?? [];
+      list.push({ id: c.id, name: c.name });
+      children.set(c.parentId, list);
+    }
+  }
+  const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
+  const groups: CategoryGroup[] = [];
+  const loose: { id: string; name: string }[] = [];
+  for (const c of marketplace) {
+    if (c.parentId !== null && byId.has(c.parentId)) continue;
+    const kids = children.get(c.id);
+    if (kids && kids.length > 0) {
+      groups.push({
+        label: c.name,
+        options: [{ id: c.id, name: c.name }, ...kids.sort(byName)],
+      });
+    } else {
+      loose.push({ id: c.id, name: c.name });
+    }
+  }
+  groups.sort((a, b) => (a.label as string).localeCompare(b.label as string));
+  if (loose.length > 0) groups.unshift({ label: null, options: loose.sort(byName) });
+  return groups;
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
- * MyTownCart tab (roadmap §8.5, work package B2): connect with a device code,
+ * MyTownCart page (roadmap §8.5, work package B2; tabs: Overview / Settings): connect with a device code,
  * map local categories once, review what can be published, then publish the
  * whole catalog. Item states are shown honestly — a hidden item or unapproved
  * store is never presented as "live".
@@ -10,8 +10,10 @@ import { Link } from "react-router-dom";
 
 import {
   formatPaise,
+  groupMarketplaceCategories,
   planPublish,
   suggestCategories,
+  suggestCategoryForItem,
   type PublishItemInput,
 } from "@mytowncart-billing/core";
 import {
@@ -26,12 +28,14 @@ import {
 import type { Category, Item } from "@mytowncart-billing/storage";
 import { Modal, PageHeader } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
+import { assignMarketplaceCategory } from "../lib/categoryAssign";
 import { clearConnection, loadConnection, saveConnection } from "../lib/connection";
 import { getConnector } from "../lib/marketplace";
 import { openReleasePage } from "../lib/tauri";
 import { getRepository } from "../lib/repository";
 import { useAppStore } from "../store/appStore";
 import { SyncPanel } from "./SyncPanel";
+import { SyncSettingsPanel } from "./SyncSettingsPanel";
 
 type Phase = "boot" | "disconnected" | "connecting" | "connected";
 
@@ -447,7 +451,7 @@ export function MyTownCartScreen() {
   const setSellerIsApproved = useAppStore((s) => s.setSellerIsApproved);
 
   const [phase, setPhase] = useState<Phase>("boot");
-  const [tab, setTab] = useState<"catalog" | "sync">("catalog");
+  const [tab, setTab] = useState<"overview" | "settings">("overview");
   const [connectError, setConnectError] = useState<string | null>(null);
   const [profile, setProfile] = useState<MarketplaceProfile | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -569,8 +573,8 @@ export function MyTownCartScreen() {
           <div className="flex gap-1 border-b border-gray-200" role="tablist">
             {(
               [
-                ["catalog", "mtc.tab.catalog"],
-                ["sync", "mtc.tab.sync"],
+                ["overview", "mtc.tab.overview"],
+                ["settings", "mtc.tab.settings"],
               ] as const
             ).map(([key, label]) => (
               <button
@@ -591,40 +595,36 @@ export function MyTownCartScreen() {
             ))}
           </div>
 
-          {tab === "sync" ? <SyncPanel /> : null}
-
-          {tab === "catalog" && marketplace === null ? (
-            <p className="text-sm text-gray-500">{t("common.loading")}</p>
+          {tab === "overview" ? (
+            <SyncPanel
+              categoryMapping={
+                marketplace === null ? null : (
+                  <CategoryMapping
+                    categories={categories}
+                    marketplace={marketplace}
+                    onSave={() => bumpDataVersion()}
+                  />
+                )
+              }
+              itemStatus={
+                marketplace === null ? null : (
+                  <ReviewTable
+                    items={items}
+                    blocked={plan.blocked}
+                    marketplace={marketplace}
+                    categories={categories}
+                    onChanged={() => bumpDataVersion()}
+                  />
+                )
+              }
+            />
           ) : null}
-          {tab === "catalog" && marketplace !== null ? (
-            <>
-              <CategoryMapping
-                categories={categories}
-                marketplace={marketplace}
-                onSave={() => bumpDataVersion()}
-              />
-              <section
-                className="rounded-lg border border-blue-200 bg-blue-50/60 p-4"
-                data-testid="mtc-catalog-banner"
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                  <div>
-                    <h3 className="font-semibold text-blue-950">{t("mtc.catalog_nav_title")}</h3>
-                    <p className="mt-1 text-sm text-blue-800">
-                      {t("mtc.catalog_nav_desc")}
-                    </p>
-                  </div>
-                  <Link
-                    to="/items"
-                    className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 whitespace-nowrap shadow-xs transition-colors"
-                    data-testid="mtc-goto-items"
-                  >
-                    {t("mtc.catalog_nav_cta")} →
-                  </Link>
-                </div>
-              </section>
-              <ReviewTable items={items} blocked={plan.blocked} />
-            </>
+
+          {tab === "settings" ? (
+            <div className="space-y-4">
+              <SyncPanel part="sync" />
+              <SyncSettingsPanel />
+            </div>
           ) : null}
         </>
       )}
@@ -636,16 +636,46 @@ export function MyTownCartScreen() {
 function ReviewTable({
   items,
   blocked,
+  marketplace,
+  categories,
+  onChanged,
 }: {
   items: Item[];
   blocked: ReturnType<typeof planPublish>["blocked"];
+  marketplace: MarketplaceCategory[];
+  categories: Category[];
+  onChanged(): void;
 }) {
   const reasonByItem = new Map(blocked.map((b) => [b.id, b.reason.code]));
-  const rows = items.filter((i) => i.publishState !== "local_only" || reasonByItem.has(i.id));
-  if (rows.length === 0) return null;
+  const groups = useMemo(() => groupMarketplaceCategories(marketplace), [marketplace]);
+  // Names of items already mapped, so a suggestion can follow the seller's own choices.
+  const mappedHints = useMemo(() => {
+    const mapped = new Map(categories.map((c) => [c.id, c.marketplaceCategoryId]));
+    return items.flatMap((i) => {
+      const id = i.categoryId === null ? null : (mapped.get(i.categoryId) ?? null);
+      return id === null ? [] : [{ name: i.name, marketplaceCategoryId: id }];
+    });
+  }, [items, categories]);
+  const choose = async (item: Item, choice: { id: string; name: string }) => {
+    await assignMarketplaceCategory(getRepository(), item, categories, choice);
+    onChanged();
+  };
+  // Only what still needs the seller's action; live items collapse into one summary line.
+  const rows = items.filter(
+    (i) => reasonByItem.has(i.id) || (i.publishState !== "local_only" && i.publishState !== "live"),
+  );
+  const liveCount = items.filter((i) => i.publishState === "live" && !reasonByItem.has(i.id)).length;
+  if (rows.length === 0 && liveCount === 0) return null;
   return (
     <section className="rounded border border-gray-200 bg-white p-4" data-testid="mtc-states">
-      <h2 className="font-semibold">{t("mtc.published_title")}</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="font-semibold">
+          {rows.length > 0 ? t("mtc.pending_title", { count: rows.length }) : t("mtc.published_title")}
+        </h2>
+        <Link to="/items" className="text-sm text-blue-700 hover:underline" data-testid="mtc-goto-items">
+          {t("mtc.manage_items")}
+        </Link>
+      </div>
       <table className="mt-2 w-full text-sm">
         <tbody>
           {rows.map((item) => {
@@ -663,13 +693,90 @@ function ReviewTable({
                 <td
                   className={`py-1 pl-4 text-right ${reason ? "text-amber-800" : "text-gray-700"}`}
                 >
-                  {label}
+                  {reason === "no_category" || reason === "no_category_mapping" ? (
+                    <CategoryPicker
+                      itemId={item.id}
+                      groups={groups}
+                      suggestion={suggestCategoryForItem(item.name, marketplace, mappedHints)}
+                      onPick={(choice) => void choose(item, choice)}
+                    />
+                  ) : (
+                    label
+                  )}
+                  {!reason && item.publishState === "hidden" ? (
+                    <Link
+                      to={`/items/${item.id}/edit`}
+                      className="ml-2 text-blue-700 hover:underline"
+                      data-testid={`mtc-add-photo-${item.id}`}
+                    >
+                      {t("mtc.add_photo")}
+                    </Link>
+                  ) : null}
                 </td>
               </tr>
             );
           })}
         </tbody>
       </table>
+      {liveCount > 0 || rows.length === 0 ? (
+        <p className="mt-2 text-sm text-gray-500" data-testid="mtc-live-count">
+          {rows.length === 0 ? t("mtc.all_live") : t("mtc.live_count", { count: liveCount })}
+        </p>
+      ) : null}
     </section>
+  );
+}
+
+/** Inline MyTownCart category choice for one item, with a one-click suggestion. */
+function CategoryPicker({
+  itemId,
+  groups,
+  suggestion,
+  onPick,
+}: {
+  itemId: number;
+  groups: ReturnType<typeof groupMarketplaceCategories>;
+  suggestion: { id: string; name: string } | null;
+  onPick(choice: { id: string; name: string }): void;
+}) {
+  const names = new Map(groups.flatMap((g) => g.options).map((o) => [o.id, o.name]));
+  const pick = (id: string) => {
+    const name = names.get(id);
+    if (name !== undefined) onPick({ id, name });
+  };
+  return (
+    <span className="inline-flex flex-wrap items-center justify-end gap-2">
+      {suggestion ? (
+        <button
+          type="button"
+          className="rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs text-blue-800 hover:bg-blue-100"
+          data-testid={`mtc-suggest-${itemId}`}
+          onClick={() => onPick(suggestion)}
+        >
+          {t("mtc.use_suggestion", { name: suggestion.name })}
+        </button>
+      ) : null}
+      <select
+        className="rounded-lg border border-amber-300 bg-white px-2 py-1 text-sm text-gray-900"
+        data-testid={`mtc-pick-category-${itemId}`}
+        value=""
+        aria-label={t("mtc.pick_category")}
+        onChange={(e) => pick(e.target.value)}
+      >
+        <option value="">{t("mtc.pick_category")}</option>
+        {groups.map((g) => {
+          const opts = g.options.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.name}
+            </option>
+          ));
+          return g.label === null ? opts : (
+            <optgroup key={g.label} label={g.label}>
+              {opts}
+            </optgroup>
+          );
+        })}
+      </select>
+    </span>
   );
 }

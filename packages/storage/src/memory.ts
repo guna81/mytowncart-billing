@@ -589,6 +589,7 @@ export class MemoryRepository implements BillingRepository {
       bytes[0] === 0xff && bytes[1] === 0xd8 ? "jpg" : bytes[1] === 0x50 ? "png" : "webp";
     this.photos.set(itemId, { bytes: new Uint8Array(bytes), imageHash });
     item.photoFile = `${itemId}.${kind}`;
+    item.photoPath = item.photoFile;
     item.imageHash = imageHash;
     item.imageUploadedAt = null;
     item.updatedAt = localIsoTimestamp(new Date());
@@ -599,6 +600,7 @@ export class MemoryRepository implements BillingRepository {
     if (!item) throw new Error(`no item with id ${itemId}`);
     this.photos.delete(itemId);
     item.photoFile = "";
+    item.photoPath = item.photoFile;
     item.imageHash = null;
     item.imageUploadedAt = null;
     item.updatedAt = localIsoTimestamp(new Date());
@@ -638,6 +640,7 @@ export class MemoryRepository implements BillingRepository {
         if (img.isMain) img.isMain = false;
       }
       item.photoFile = fileName;
+      item.photoPath = item.photoFile;
       item.imageHash = imageHash;
       item.imageUploadedAt = null;
       item.updatedAt = now;
@@ -676,6 +679,7 @@ export class MemoryRepository implements BillingRepository {
         nextMain.isMain = true;
         if (item) {
           item.photoFile = nextMain.fileName;
+          item.photoPath = item.photoFile;
           item.imageHash = nextMain.imageHash;
           item.imageUploadedAt = nextMain.imageUploadedAt;
           item.updatedAt = now;
@@ -686,6 +690,7 @@ export class MemoryRepository implements BillingRepository {
         }
       } else if (item) {
         item.photoFile = "";
+        item.photoPath = item.photoFile;
         item.imageHash = null;
         item.imageUploadedAt = null;
         item.updatedAt = now;
@@ -705,6 +710,7 @@ export class MemoryRepository implements BillingRepository {
     const now = localIsoTimestamp(new Date());
     if (item) {
       item.photoFile = img.fileName;
+      item.photoPath = item.photoFile;
       item.imageHash = img.imageHash;
       item.imageUploadedAt = img.imageUploadedAt;
       item.updatedAt = now;

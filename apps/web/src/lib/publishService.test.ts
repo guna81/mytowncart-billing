@@ -30,6 +30,8 @@ function mockConnector(overrides: Partial<MarketplaceConnector> = {}): Marketpla
     pullStock: () => Promise.resolve({ moves: [], nextCursor: 0 }),
     pullOrders: () => Promise.resolve({ orders: [] }),
     listRemoteItems: () => Promise.resolve([]),
+    listPlatformProducts: () => Promise.resolve([]),
+    adoptProducts: () => Promise.resolve([]),
   };
   return { ...base, ...overrides };
 }
@@ -51,6 +53,7 @@ describe("publishService", () => {
       openingStockMilli: 10000,
       isActive: true,
     });
+    await repo.setItemPhoto(itemId, new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1]), "h");
 
     const items = await repo.listItems({ activeOnly: false });
     const item = items.find((i) => i.id === itemId)!;
@@ -121,7 +124,7 @@ describe("publishService", () => {
     const catId = await repo.upsertCategory({ name: "Groceries" });
     await repo.setCategoryMarketplaceId(catId, "cat-1");
 
-    await repo.upsertItem({
+    const id1 = await repo.upsertItem({
       name: "Item 1",
       barcode: "111",
       categoryId: catId,
@@ -132,7 +135,7 @@ describe("publishService", () => {
       openingStockMilli: 2000,
       isActive: true,
     });
-    await repo.upsertItem({
+    const id2 = await repo.upsertItem({
       name: "Item 2",
       barcode: "222",
       categoryId: catId,
@@ -143,6 +146,8 @@ describe("publishService", () => {
       openingStockMilli: 3000,
       isActive: true,
     });
+    await repo.setItemPhoto(id1, new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1]), "h");
+    await repo.setItemPhoto(id2, new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1]), "h");
 
     const items = await repo.listItems({ activeOnly: false });
     const connector = mockConnector();
@@ -191,7 +196,11 @@ describe("publishService", () => {
     expect(getItemPublishStatus(unmappedItem, false).status).toBe("blocked");
     expect(getItemPublishStatus(unmappedItem, false).reason).toBe("no_category_mapping");
 
-    const readyItem = { ...unmappedItem };
+    // No photo is no longer a blocker: the server publishes it hidden until a photo arrives.
+    const unphotographed = { ...unmappedItem };
+    expect(getItemPublishStatus(unphotographed, true).status).toBe("not_published");
+
+    const readyItem = { ...unmappedItem, photoFile: "1.jpg", photoPath: "1.jpg" };
     expect(getItemPublishStatus(readyItem, true).status).toBe("not_published");
 
     const liveItem = { ...readyItem, publishState: "live", contentHash: "hash123" };

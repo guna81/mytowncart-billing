@@ -5,9 +5,11 @@ import {
   changedSinceLastPublish,
   contentHash,
   externalIdOf,
+  groupMarketplaceCategories,
   planPublish,
   stockUnitsOf,
   suggestCategories,
+  suggestCategoryForItem,
   type PublishItemInput,
 } from "../src/publish";
 
@@ -41,18 +43,18 @@ describe("stockUnitsOf", () => {
 });
 
 describe("planPublish", () => {
-  it("marks a complete item ready with its external id and photo state", () => {
+  it("marks a complete item ready with its external id", () => {
     const plan = planPublish([item()], [{ id: CAT }]);
     expect(plan.blocked).toEqual([]);
     expect(plan.ready).toHaveLength(1);
     expect(plan.ready[0]!.externalId).toBe("itm_1");
-    expect(plan.ready[0]!.needsPhoto).toBe(false);
     expect(externalIdOf(42)).toBe("itm_42");
   });
 
-  it("flags an item without a photo as needing one (publishes hidden, D9)", () => {
+  it("publishes an item without a photo (the server keeps it hidden until one is added)", () => {
     const plan = planPublish([item({ photoPath: "" })], [{ id: CAT }]);
-    expect(plan.ready[0]!.needsPhoto).toBe(true);
+    expect(plan.blocked).toEqual([]);
+    expect(plan.ready).toHaveLength(1);
   });
 
   it.each([
@@ -148,5 +150,55 @@ describe("suggestCategories", () => {
   it("respects the limit", () => {
     const many = Array.from({ length: 10 }, (_, i) => ({ id: String(i), name: `Food ${i}` }));
     expect(suggestCategories("food", many, 3)).toHaveLength(3);
+  });
+});
+
+describe("suggestCategoryForItem", () => {
+  const market = [
+    { id: "a", name: "Earphones & Headphones" },
+    { id: "b", name: "Cables & Chargers" },
+  ];
+
+  it("prefers the category of a similarly named item the seller already mapped", () => {
+    const hit = suggestCategoryForItem("USB Data Cable", market, [
+      { name: "Type C Data Cable", marketplaceCategoryId: "b" },
+    ]);
+    expect(hit).toEqual({ id: "b", name: "Cables & Chargers" });
+  });
+
+  it("falls back to the closest marketplace category name", () => {
+    expect(suggestCategoryForItem("Wired Earphones", market)).toEqual({
+      id: "a",
+      name: "Earphones & Headphones",
+    });
+  });
+
+  it("returns null when nothing overlaps or the hint points at a missing category", () => {
+    expect(suggestCategoryForItem("Neck Band", market)).toBeNull();
+    expect(
+      suggestCategoryForItem("Neck Band", market, [{ name: "Neck Band", marketplaceCategoryId: "gone" }]),
+    ).toBeNull();
+  });
+});
+
+describe("groupMarketplaceCategories", () => {
+  it("groups children under their parent and lists childless categories first", () => {
+    const groups = groupMarketplaceCategories([
+      { id: "p", name: "Electronics", parentId: null },
+      { id: "c1", name: "Cables", parentId: "p" },
+      { id: "c2", name: "Audio", parentId: "p" },
+      { id: "z", name: "Toys", parentId: null },
+    ]);
+    expect(groups).toEqual([
+      { label: null, options: [{ id: "z", name: "Toys" }] },
+      {
+        label: "Electronics",
+        options: [
+          { id: "p", name: "Electronics" },
+          { id: "c2", name: "Audio" },
+          { id: "c1", name: "Cables" },
+        ],
+      },
+    ]);
   });
 });

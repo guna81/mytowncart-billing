@@ -13,7 +13,7 @@
  *   transaction as the applied moves, so a crash can neither replay nor
  *   skip a page.
  * - snapshot: the marketplace's current values are cached for the reconcile
- *   view and the read-only online orders list.
+ *   view. (Online orders are handled in the MyTownCart seller app.)
  */
 import type {
   MarketplaceConnector,
@@ -38,10 +38,13 @@ import type {
   Category,
   Item,
   OutboxRow,
+  ReconcileFix,
   RemoteItemLink,
 } from "@mytowncart-billing/storage";
 
 import { isInTauri, isLanServer } from "./repository";
+import { pullPlatformProducts } from "./pullService";
+import { loadPlatformOnly, removeFromPlatformOnly, savePlatformOnly } from "./platformOnly";
 import { loadRemoteSeen, saveRemoteSeen } from "./remoteSeen";
 
 /** Server cap from `me/`; never ask for more. */
@@ -56,7 +59,11 @@ export interface SyncOutcome {
   restocked: number;
   catalogSent: number;
   catalogFailed: number;
-  orders: number;
+  /** Items created here from MyTownCart-only products, and prices taken from MyTownCart. */
+  pulledItems?: number;
+  pulledPrices?: number;
+  /** Names taken from MyTownCart. */
+  pulledNames?: number;
   /** Problems phrased for the seller, one line per failed step. */
   problems: string[];
 }
@@ -110,7 +117,15 @@ function newKey(externalId: string, now: Date): string {
 
 export async function runSync(
   deps: SyncDeps,
-  options: { bulkMax?: number; force?: boolean } = {},
+  options: {
+    bulkMax?: number;
+    force?: boolean;
+    platformOnly?: boolean;
+    /** Keep items already on MyTownCart up to date: name, description, price, stock. Default on. */
+    details?: boolean;
+    /** Publish eligible items (a photo is optional: without one the server keeps it hidden) that are not on MyTownCart yet. Default on. */
+    list?: boolean;
+  } = {},
 ): Promise<SyncOutcome> {
   const { repo, connector } = deps;
   const now = deps.now();
@@ -121,17 +136,25 @@ export async function runSync(
     restocked: 0,
     catalogSent: 0,
     catalogFailed: 0,
-    orders: 0,
     problems: [],
   };
 
   const pending = await repo.listOutbox("pending");
   const bulkMax = Math.min(Math.max(1, options.bulkMax ?? DEFAULT_BULK_MAX), DEFAULT_BULK_MAX);
-  const deltas = await pushStock(repo, connector, pending, now, outcome, bulkMax);
-  await pushCatalog(repo, connector, deltas, outcome);
-  await pullStock(repo, connector, outcome, options.force);
-  await recordSnapshot(repo, connector, now, outcome);
-  await pullOrders(repo, connector, now, outcome, options.force);
+  const details = options.details !== false;
+  const list = options.list !== false;
+  // Stock rides with details: when details are off nothing is lost — the outbox
+  // and the stock cursor stay put and catch up when it is switched back on.
+  const deltas = details
+    ? await pushStock(repo, connector, pending, now, outcome, bulkMax)
+    : new Map<string, number>();
+  if (details || list) await pushCatalog(repo, connector, deltas, outcome, { details, list });
+  if (details) await pullStock(repo, connector, outcome, options.force);
+  await recordSnapshot(repo, connector, now, outcome, details);
+  if (options.platformOnly) {
+    await recordPlatformOnly(connector, now, outcome);
+    if (list) await autoPullNew(repo, connector, outcome);
+  }
   return outcome;
 }
 
@@ -214,6 +237,7 @@ async function pushCatalog(
   connector: MarketplaceConnector,
   restock: ReadonlyMap<string, number>,
   outcome: SyncOutcome,
+  scope: { details: boolean; list: boolean },
 ): Promise<void> {
   const [items, categories, marketplace] = await Promise.all([
     repo.listItems({ activeOnly: false }),
@@ -232,9 +256,13 @@ async function pushCatalog(
 
   const plan = planPublish(toPlanInputs(itemsWithRestock, categories), marketplace);
   // Items the seller unpublished locally are sent as inactive, not skipped.
-  const changed = plan.ready.filter(
-    (r) => r.input.lastPublishedHash === null || r.input.lastPublishedHash !== r.hash,
+  const linkedIds = new Set(
+    items.filter((i) => i.remoteProductId !== null || i.contentHash !== null).map((i) => i.id),
   );
+  const changed = plan.ready
+    .filter((r) => r.input.lastPublishedHash === null || r.input.lastPublishedHash !== r.hash)
+    // Already on MyTownCart → "details"; not there yet → "the list".
+    .filter((r) => (linkedIds.has(r.input.id) ? scope.details : scope.list));
   if (changed.length === 0) return;
 
   try {
@@ -370,7 +398,9 @@ async function pullStock(
 }
 
 function remoteItemHash(r: RemoteItem): string {
-  return `${r.pricePaise}:${r.stockUnits}:${r.isActive ? 1 : 0}`;
+  // The name goes last: it may itself contain ":".
+  const base = `${r.pricePaise}:${r.stockUnits}:${r.isActive ? 1 : 0}`;
+  return r.name === undefined ? base : `${base}:${r.name}`;
 }
 
 function toLinks(remote: readonly RemoteItem[]): RemoteItemLink[] {
@@ -387,9 +417,12 @@ async function recordSnapshot(
   connector: MarketplaceConnector,
   now: Date,
   outcome: SyncOutcome,
+  details = false,
 ): Promise<void> {
   try {
-    const links = toLinks(await connector.listRemoteItems());
+    const remoteItems = await connector.listRemoteItems();
+    if (details) await pullFromRemote(repo, remoteItems, outcome);
+    const links = toLinks(remoteItems);
     await saveRemoteSeen(links, now);
     await repo.recordRemoteCatalog(links);
   } catch (err) {
@@ -397,37 +430,118 @@ async function recordSnapshot(
   }
 }
 
-async function pullOrders(
+/**
+ * A price or name edited on MyTownCart comes here, but only when this app has
+ * not changed it since the last look (so a local edit is never overwritten; it
+ * is pushed instead by the catalog step). The last look is `item.remoteHash`
+ * ("price:stock:active:name"); with no recorded name there is nothing to compare.
+ */
+async function pullFromRemote(
   repo: BillingRepository,
+  remote: readonly RemoteItem[],
+  outcome: SyncOutcome,
+): Promise<void> {
+  const byExternal = new Map(remote.map((r) => [r.externalId, r]));
+  const priceFixes: ReconcileFix[] = [];
+  const renames: Item[] = [];
+  const renamedTo = new Map<number, string>();
+  for (const item of await repo.listItems({ activeOnly: false })) {
+    const r =
+      byExternal.get(externalIdOf(item.id)) ??
+      (item.remoteProductId === null ? undefined : byExternal.get(item.remoteProductId));
+    if (!r || item.remoteHash === null) continue;
+    const parts = item.remoteHash.split(":");
+    const before = Number(parts[0]);
+    // Remote changed since last look; local unchanged since then → take the remote value.
+    if (Number.isFinite(before) && r.pricePaise !== before && item.pricePaise === before && r.pricePaise > 0) {
+      priceFixes.push({
+        itemId: item.id,
+        externalId: r.externalId,
+        kind: "price",
+        pricePaise: r.pricePaise,
+        pullToLocal: true,
+      });
+    }
+    const nameBefore = parts.length >= 4 ? parts.slice(3).join(":") : null;
+    const nameNow = (r.name ?? "").trim();
+    if (nameBefore !== null && nameNow !== "" && nameNow !== nameBefore && item.name === nameBefore) {
+      renames.push(item);
+      renamedTo.set(item.id, nameNow);
+    }
+  }
+  if (priceFixes.length > 0) {
+    await repo.applyReconcileFixes(priceFixes);
+    outcome.pulledPrices = priceFixes.length;
+  }
+  for (const item of renames) {
+    await repo.upsertItem({
+      id: item.id,
+      name: renamedTo.get(item.id) ?? item.name,
+      barcode: item.barcode,
+      categoryId: item.categoryId,
+      unitKind: item.unitKind,
+      pricePaise: item.pricePaise,
+      mrpPaise: item.mrpPaise,
+      taxRateBp: item.taxRateBp,
+      openingStockMilli: 0,
+      isActive: item.isActive,
+      hsnCode: item.hsnCode,
+      costPricePaise: item.costPricePaise,
+      description: item.description,
+      brand: item.brand,
+      customAttributes: item.customAttributes,
+    });
+  }
+  if (renames.length > 0) outcome.pulledNames = renames.length;
+}
+
+const PULL_SKIP_KEY = "sync.pull_skip";
+
+/**
+ * Products made on MyTownCart become local items, linked so later syncs update
+ * them. A product whose link failed is remembered and left for the manual Pull
+ * button, so one bad product cannot create a new local item on every run.
+ */
+async function autoPullNew(
+  repo: BillingRepository,
+  connector: MarketplaceConnector,
+  outcome: SyncOutcome,
+): Promise<void> {
+  try {
+    const snapshot = await loadPlatformOnly();
+    if (snapshot === null) return;
+    let skip: string[] = [];
+    try {
+      skip = JSON.parse((await repo.getAppSetting(PULL_SKIP_KEY)) ?? "[]") as string[];
+    } catch {
+      skip = [];
+    }
+    const todo = snapshot.items.filter((p) => !skip.includes(p.productId) && p.variantId !== null);
+    if (todo.length === 0) return;
+    const result = await pullPlatformProducts(repo, connector, todo, await connector.listCategories());
+    if (result.pulled.length > 0) {
+      await removeFromPlatformOnly(result.pulled);
+      outcome.pulledItems = result.pulled.length;
+    }
+    if (result.failed.length > 0) {
+      const failedIds = todo.filter((p) => result.failed.some((f) => f.name === p.name)).map((p) => p.productId);
+      await repo.setAppSetting(PULL_SKIP_KEY, JSON.stringify([...skip, ...failedIds]));
+      for (const f of result.failed) outcome.problems.push(`pull ${f.name}: ${f.error}`);
+    }
+  } catch (err) {
+    outcome.problems.push(`pull: ${message(err)}`);
+  }
+}
+
+async function recordPlatformOnly(
   connector: MarketplaceConnector,
   now: Date,
   outcome: SyncOutcome,
-  force = false,
 ): Promise<void> {
   try {
-    const after = await repo.getSyncCursor("orders");
-    const page = await connector.pullOrders(after ?? undefined, { force });
-    outcome.orders = await repo.recordRemoteOrders(
-      page.orders.map((o) => ({
-        id: o.id,
-        status: o.status,
-        paymentStatus: o.paymentStatus,
-        paymentMethod: o.paymentMethod,
-        totalPaise: o.totalPaise,
-        placedAt: o.placedAt,
-        updatedAt: o.updatedAt,
-        lines: o.lines.map((l) => ({
-          externalId: l.externalId,
-          productName: l.productName,
-          qtyUnits: l.qtyUnits,
-          unitPricePaise: l.unitPricePaise,
-        })),
-        syncedAt: now.toISOString(),
-      })),
-    );
-    if (page.next) await repo.setSyncCursor("orders", page.next);
+    await savePlatformOnly(await connector.listPlatformProducts(), now);
   } catch (err) {
-    outcome.problems.push(`orders: ${message(err)}`);
+    outcome.problems.push(`platform read: ${message(err)}`);
   }
 }
 
@@ -438,7 +552,10 @@ export async function listReconcileRows(
 ): Promise<ReconcileRow[]> {
   const [items, seen] = await Promise.all([repo.listItems({ activeOnly: false }), loadRemoteSeen(now)]);
   const remote = new Map<string, RemoteItemRef>();
-  for (const link of seen.values()) remote.set(link.externalId, { ...link, isActive: true });
+  // remoteHash is "price:stock:active:name"; a snapshot without it counts as active.
+  for (const link of seen.values()) {
+    remote.set(link.externalId, { ...link, isActive: link.remoteHash.split(":")[2] !== "0" });
+  }
   return reconcile(
     items.map(
       (item): ReconcileInput => ({

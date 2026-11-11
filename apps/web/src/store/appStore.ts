@@ -56,6 +56,13 @@ interface AppState {
   /** Auto sync products and stock */
   autoSyncEnabled: boolean;
   setAutoSyncEnabled(enabled: boolean): void;
+  syncIntervalMin: number;
+  setSyncIntervalMin(minutes: number): void;
+  /** What a sync does: update linked products / publish eligible new items. */
+  syncDetails: boolean;
+  setSyncDetails(enabled: boolean): void;
+  syncList: boolean;
+  setSyncList(enabled: boolean): void;
   isSyncing: boolean;
   setIsSyncing(isSyncing: boolean): void;
 }
@@ -103,6 +110,12 @@ export const useAppStore = create<AppState>((set) => ({
   updateCheckResult: null,
   autoSyncEnabled: true,
   setAutoSyncEnabled: (autoSyncEnabled) => set({ autoSyncEnabled }),
+  syncIntervalMin: 2,
+  setSyncIntervalMin: (syncIntervalMin) => set({ syncIntervalMin }),
+  syncDetails: true,
+  setSyncDetails: (syncDetails) => set({ syncDetails }),
+  syncList: true,
+  setSyncList: (syncList) => set({ syncList }),
   isSyncing: false,
   setIsSyncing: (isSyncing) => set({ isSyncing }),
   runUpdateCheck: async (force?: boolean) => {

@@ -4,6 +4,9 @@ import { MemoryRepository } from "@mytowncart-billing/storage";
 import {
   AUTO_SYNC_SETTING_KEY,
   isAutoSyncConfigured,
+  loadSyncSettings,
+  normaliseIntervalMin,
+  setSyncIntervalSetting,
   runAutoSync,
   setAutoSyncSetting,
   triggerImmediateSync,
@@ -110,11 +113,31 @@ describe("autoSync", () => {
       vi.advanceTimersByTime(2900);
       expect(runSyncCalled).toBe(false);
 
-      vi.advanceTimersByTime(200);
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(200);
       expect(runSyncCalled).toBe(true);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("sync settings default to 2 minutes and persist changes", async () => {
+    expect(await loadSyncSettings()).toEqual({ intervalMin: 2, details: true, list: true });
+    await setSyncIntervalSetting(15);
+    expect(await loadSyncSettings()).toEqual({ intervalMin: 15, details: true, list: true });
+    expect(useAppStore.getState().syncIntervalMin).toBe(15);
+  });
+
+  it("never allows an interval below the server's 2 minute floor", () => {
+    expect(normaliseIntervalMin(1)).toBe(2);
+    expect(normaliseIntervalMin("junk")).toBe(2);
+    expect(normaliseIntervalMin("5")).toBe(5);
+  });
+
+  it("a background run is skipped when auto-sync is off, but a manual run still works", async () => {
+    useAppStore.getState().setAutoSyncEnabled(false);
+    expect(await runAutoSync()).toBeNull();
+    expect(runSyncCalled).toBe(false);
+    expect(await runAutoSync({ force: true, manual: true })).not.toBeNull();
+    expect(runSyncCalled).toBe(true);
   });
 });
