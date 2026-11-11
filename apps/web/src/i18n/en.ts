@@ -179,6 +179,7 @@ export const en = {
   "pos.tendered": "Tendered (₹)",
   "pos.change": "Change: ₹{amount}",
   "pos.customer": "Customer (optional)",
+  "pos.customer_added": "Customer \"{name}\" added and selected.",
   "pos.subtotal": "Subtotal",
   "pos.tax": "GST",
   "pos.total": "Total",

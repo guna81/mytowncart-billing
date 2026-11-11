@@ -30,6 +30,7 @@ import {
   type PaymentMode,
 } from "@mytowncart-billing/core";
 import type { HeldBill, Item } from "@mytowncart-billing/storage";
+import { CustomerDialog } from "../components/CustomerDialog";
 import { UpiQrCode } from "../components/UpiQrCode";
 import { EmptyState } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
@@ -72,7 +73,8 @@ export function PosScreen() {
   const [customerId, setCustomerId] = useState<number | null>(null);
   const [customerLoyaltyBalance, setCustomerLoyaltyBalance] = useState(0);
   const [redeemedPoints, setRedeemedPoints] = useState(0);
-  const [customers, setCustomers] = useState<{ id: number; name: string }[]>([]);
+  const [customers, setCustomers] = useState<{ id: number; name: string; phone?: string }[]>([]);
+  const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -84,6 +86,33 @@ export function PosScreen() {
     scanRef.current?.select();
   }, []);
 
+  const refreshCustomers = useCallback(async () => {
+    try {
+      const rows = await getRepository().listCustomers();
+      setCustomers(rows.map((c) => ({ id: c.id, name: c.name, phone: c.phone })));
+      return rows;
+    } catch (err: unknown) {
+      setNotice({ kind: "error", text: errMsg(err) });
+      return [];
+    }
+  }, []);
+
+  const handleCustomerSaved = async (newId?: number) => {
+    setShowAddCustomer(false);
+    const rows = await refreshCustomers();
+    if (newId) {
+      setCustomerId(newId);
+      const added = rows.find((c) => c.id === newId);
+      if (added) {
+        setNotice({
+          kind: "ok",
+          text: t("pos.customer_added", { name: added.name }),
+        });
+      }
+    }
+    focusScan();
+  };
+
   const refreshHeld = useCallback(async () => {
     try {
       setHeld(await getRepository().listHeldBills());
@@ -94,11 +123,9 @@ export function PosScreen() {
 
   useEffect(() => {
     focusScan();
-    void getRepository()
-      .listCustomers()
-      .then((rows) => setCustomers(rows.map((c) => ({ id: c.id, name: c.name }))));
+    void refreshCustomers();
     void refreshHeld();
-  }, [focusScan, refreshHeld]);
+  }, [focusScan, refreshCustomers, refreshHeld]);
 
   // Load loyalty balance when customer selected
   useEffect(() => {
@@ -992,22 +1019,50 @@ export function PosScreen() {
 
             {/* Section 3: Customer & Loyalty */}
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700">
-                {t("pos.customer")}
-                <select
-                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-normal"
-                  data-testid="pos-customer"
-                  value={customerId ?? ""}
-                  onChange={(e) => setCustomerId(e.target.value === "" ? null : Number(e.target.value))}
+              <div className="flex items-center justify-between">
+                <label htmlFor="pos-customer" className="block text-xs font-semibold uppercase tracking-wider text-gray-700">
+                  {t("pos.customer")}
+                </label>
+                <button
+                  type="button"
+                  data-testid="pos-add-customer-btn"
+                  onClick={() => setShowAddCustomer(true)}
+                  className="text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-0.5 cursor-pointer"
                 >
-                  <option value="">{t("common.none")}</option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  <span>+</span> {t("customers.add")}
+                </button>
+              </div>
+              <select
+                id="pos-customer"
+                className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-normal"
+                data-testid="pos-customer"
+                value={customerId ?? ""}
+                onChange={(e) => {
+                  if (e.target.value === "__add_new__") {
+                    setShowAddCustomer(true);
+                  } else {
+                    setCustomerId(e.target.value === "" ? null : Number(e.target.value));
+                  }
+                }}
+              >
+                <option value="">{t("common.none")}</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+                <option value="__add_new__">+ {t("customers.add")}...</option>
+              </select>
+
+              {showAddCustomer && (
+                <CustomerDialog
+                  onClose={() => {
+                    setShowAddCustomer(false);
+                    focusScan();
+                  }}
+                  onSaved={(newId) => void handleCustomerSaved(newId)}
+                />
+              )}
 
               {customerId && customerLoyaltyBalance > 0 && (
                 <div className="mt-2 rounded-lg border border-purple-200 bg-purple-50 p-2 text-xs shadow-xs" data-testid="pos-loyalty-panel">

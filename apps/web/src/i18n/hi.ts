@@ -179,6 +179,7 @@ export const hi: Record<I18nKey, string> = {
   "pos.tendered": "प्राप्त राशि (₹)",
   "pos.change": "वापसी राशि: ₹{amount}",
   "pos.customer": "ग्राहक (वैकल्पिक)",
+  "pos.customer_added": "ग्राहक \"{name}\" जोड़ा गया और चुना गया।",
   "pos.subtotal": "उप-योग",
   "pos.tax": "जीएसटी (GST)",
   "pos.total": "कुल योग",

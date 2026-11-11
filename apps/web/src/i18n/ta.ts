@@ -179,6 +179,7 @@ export const ta: Record<I18nKey, string> = {
   "pos.tendered": "பெற்ற தொகை (₹)",
   "pos.change": "மீதித் தொகை: ₹{amount}",
   "pos.customer": "வாடிக்கையாளர்",
+  "pos.customer_added": "\"{name}\" வாடிக்கையாளர் சேர்க்கப்பட்டு தேர்வு செய்யப்பட்டார்.",
   "pos.subtotal": "கூட்டுத்தொகை",
   "pos.tax": "GST வரி",
   "pos.total": "மொத்தத் தொகை",
