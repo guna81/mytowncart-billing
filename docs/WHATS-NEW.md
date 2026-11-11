@@ -4,7 +4,14 @@ Reviewed against the working source on November 6, 2026.
 
 ## Release status
 
-The latest published installer is [v0.1.3](https://github.com/guna81/mytowncart-billing/releases/tag/v0.1.3).
+The latest published installer is [v0.1.4](https://github.com/guna81/mytowncart-billing/releases/tag/v0.1.4).
+
+### New in v0.1.4
+
+- **Master backup path and folder controls:** Automatic default path provisioning (`Documents/MyTownCart Backups`), native folder browsing dialog, Open Folder button to inspect backup archives in system file manager, and automatic folder persistence.
+- **Customer creation from billing:** Direct customer addition from the POS counter billing screen with phone number validation.
+- **Update available notifications:** Clearer update checks and release notice controls in Settings.
+- **Website improvements:** Improved layout and responsive presentation for billing documentation and downloads.
 
 ### New in v0.1.3
 
