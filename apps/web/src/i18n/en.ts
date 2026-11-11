@@ -384,6 +384,8 @@ export const en = {
   "backup.folder_ph": "/Volumes/MyBackup or D:\\Backups",
   "backup.folder_save": "Remember folder",
   "backup.folder_saved": "Folder saved.",
+  "backup.open_folder": "Open folder",
+  "backup.default_path": "Use default",
   "backup.same_drive":
     "Careful: this folder is on the same disk as the app. If that disk fails, both copies are lost — use a USB drive.",
   "backup.saved_now": "Back up now",

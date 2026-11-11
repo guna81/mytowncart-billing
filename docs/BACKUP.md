@@ -91,18 +91,22 @@ of every byte is covered by the AES-GCM tag. Code: `backup.rs`
 
 ## Creating a backup
 
-1. The seller enters the folder path (text field — the app has no native
-   folder picker) and optionally ticks *remember this folder*. Remembering
-   stores `backup.local` = `{folder, lastSuccessAt, sameDrive}` in
-   `app_settings` and checks `same_volume`; a same-drive folder shows a
-   warning because it does not protect against disk failure.
+1. The app provides a sensible default backup folder under the user's
+   Documents (`Documents/MyTownCart Backups`) which is created automatically if
+   missing. The seller can keep this default, type a custom path, or click
+   **Browse…** to choose any folder (e.g. a USB drive) using the native folder
+   dialog. The selected folder is remembered in `app_settings` (`backup.local`
+   = `{folder, lastSuccessAt, sameDrive}`). An **Open folder** button lets the
+   seller browse and inspect the backups directly in their operating system's
+   file manager (Finder/Explorer). A same-drive folder shows a warning because
+   it does not protect against disk failure.
 2. *Back up now*:
    - `db_snapshot` runs `VACUUM INTO` a temporary file under the app-data dir
      and gzips it (`backup.rs::snapshot`);
    - the web layer encrypts it with the recovery key
      (`encryptCurrentDatabase`, records `schema_version` 5 and `APP_VERSION`
      in the header);
-   - `write_backup_file` writes to `<folder>/mytowncart-YYYY-MM-DD-HHmm.mtcb`
+   - `write_backup_raw` writes to `<folder>/mytowncart-YYYY-MM-DD-HHmm.mtcb`
      via a temp file + rename (atomic on the same filesystem);
    - `lastSuccessAt` is updated.
 3. The panel shows the last backup time and warns when the newest backup is

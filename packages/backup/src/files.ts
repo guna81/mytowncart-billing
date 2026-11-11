@@ -72,6 +72,22 @@ export async function sameVolume(invoke: Invoke, path: string): Promise<boolean 
   return invoke<boolean | null>("same_volume", { path });
 }
 
+export async function defaultBackupDir(invoke: Invoke): Promise<string> {
+  return invoke<string>("default_backup_dir");
+}
+
+export async function openFolder(invoke: Invoke, path: string): Promise<void> {
+  await invoke("open_folder", { path });
+}
+
+export async function folderExists(invoke: Invoke, path: string): Promise<boolean> {
+  try {
+    return await invoke<boolean>("folder_exists", { path });
+  } catch {
+    return false;
+  }
+}
+
 export async function snapshotDatabase(invoke: Invoke): Promise<Uint8Array> {
   return new Uint8Array(await invoke<number[]>("db_snapshot"));
 }

@@ -14,13 +14,23 @@ export const invokeRaw: InvokeRaw = async (command, args, options) => {
 };
 
 /** Native folder / file chooser; null when cancelled. */
-export async function pickPath(opts: { directory: boolean; title: string }): Promise<string | null> {
-  const { open } = await import("@tauri-apps/plugin-dialog");
-  const chosen = await open({
-    directory: opts.directory,
-    multiple: false,
-    title: opts.title,
-    filters: opts.directory ? undefined : [{ name: "MyTownCart backup", extensions: ["mtcb"] }],
-  });
-  return typeof chosen === "string" ? chosen : null;
+export async function pickPath(opts: {
+  directory: boolean;
+  title: string;
+  defaultPath?: string;
+}): Promise<string | null> {
+  try {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const chosen = await open({
+      directory: opts.directory,
+      multiple: false,
+      title: opts.title,
+      defaultPath: opts.defaultPath,
+      filters: opts.directory ? undefined : [{ name: "MyTownCart backup", extensions: ["mtcb"] }],
+    });
+    return typeof chosen === "string" ? chosen : null;
+  } catch (err) {
+    console.warn("pickPath failed:", err);
+    return null;
+  }
 }

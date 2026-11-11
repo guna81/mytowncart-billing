@@ -11,7 +11,15 @@ import {
   parseRecoveryKey,
   RECOVERY_KEY_GROUPS,
 } from "../src/crypto";
-import { backupFileName, joinPath, parseBackupSettings } from "../src/files";
+import {
+  backupFileName,
+  defaultBackupDir,
+  folderExists,
+  joinPath,
+  openFolder,
+  parseBackupSettings,
+  type Invoke,
+} from "../src/files";
 
 const meta = { schemaVersion: 5, appVersion: "0.1.0", createdAt: "2026-11-05T10:00:00.000Z" };
 const payload = new TextEncoder().encode("SQLite format 3\0pretend database bytes");
@@ -121,5 +129,41 @@ describe("file helpers", () => {
       lastSuccessAt: "2026-11-05T10:00:00.000Z",
       sameDrive: null,
     });
+  });
+
+  it("invokes default_backup_dir command", async () => {
+    const mockInvoke: Invoke = async <T>(cmd: string): Promise<T> => {
+      if (cmd === "default_backup_dir") return "/Users/test/Documents/MyTownCart Backups" as T;
+      throw new Error(`unexpected command ${cmd}`);
+    };
+    const dir = await defaultBackupDir(mockInvoke);
+    expect(dir).toBe("/Users/test/Documents/MyTownCart Backups");
+  });
+
+  it("invokes open_folder command", async () => {
+    let invokedCmd: string | null = null;
+    let invokedArgs: Record<string, unknown> | undefined;
+    const mockInvoke: Invoke = async <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
+      invokedCmd = cmd;
+      invokedArgs = args;
+      return undefined as T;
+    };
+    await openFolder(mockInvoke, "/Users/test/Documents/MyTownCart Backups");
+    expect(invokedCmd).toBe("open_folder");
+    expect(invokedArgs).toEqual({ path: "/Users/test/Documents/MyTownCart Backups" });
+  });
+
+  it("invokes folder_exists command", async () => {
+    let checkedPath: string | null = null;
+    const mockInvoke: Invoke = async <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
+      if (cmd === "folder_exists") {
+        checkedPath = args?.path as string;
+        return (checkedPath === "/existing/folder") as T;
+      }
+      throw new Error(`unexpected command ${cmd}`);
+    };
+    expect(await folderExists(mockInvoke, "/existing/folder")).toBe(true);
+    expect(checkedPath).toBe("/existing/folder");
+    expect(await folderExists(mockInvoke, "/nonexistent/folder")).toBe(false);
   });
 });

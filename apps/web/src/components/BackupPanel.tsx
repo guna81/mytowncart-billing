@@ -11,7 +11,10 @@ import { APP_VERSION } from "@mytowncart-billing/core";
 import {
   backupFileName,
   BACKUP_SETTINGS_KEY,
+  defaultBackupDir,
+  folderExists,
   joinPath,
+  openFolder,
   parseBackupSettings,
   sameVolume,
   writeBackupRaw,
@@ -56,6 +59,7 @@ export function BackupPanel() {
   const [copied, setCopied] = useState(false);
   const [settings, setSettings] = useState<LocalBackupSettings | null>(null);
   const [folder, setFolder] = useState("");
+  const [defaultPath, setDefaultPath] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,8 +73,35 @@ export function BackupPanel() {
     if (!supported) return;
     const repo = getRepository();
     const loaded = parseBackupSettings(await repo.getAppSetting(BACKUP_SETTINGS_KEY));
-    setSettings(loaded);
-    if (loaded) setFolder(loaded.folder);
+    let def = "";
+    try {
+      def = await defaultBackupDir(invoke);
+      setDefaultPath(def);
+    } catch {
+      // non-fatal if default directory cannot be resolved
+    }
+
+    if (loaded && loaded.folder.trim()) {
+      const exists = await folderExists(invoke, loaded.folder.trim());
+      if (exists) {
+        setSettings(loaded);
+        setFolder(loaded.folder.trim());
+        return;
+      }
+    }
+
+    // If no setting, or the previously configured folder no longer exists on disk:
+    if (def) {
+      setFolder(def);
+      const onSameDrive = await sameVolume(invoke, def);
+      const initial: LocalBackupSettings = {
+        folder: def,
+        lastSuccessAt: loaded?.lastSuccessAt ?? null,
+        sameDrive: onSameDrive,
+      };
+      await repo.setAppSetting(BACKUP_SETTINGS_KEY, JSON.stringify(initial));
+      setSettings(initial);
+    }
   }, [supported]);
 
   useEffect(() => {
@@ -91,29 +122,86 @@ export function BackupPanel() {
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const saveFolder = async () => {
+  const saveFolder = async (folderToSave?: string) => {
     setError(null);
-    if (folder.trim() === "") return;
-    const onSameDrive = await sameVolume(invoke, folder.trim());
+    const target = (folderToSave ?? folder).trim();
+    if (target === "") return false;
+    const exists = await folderExists(invoke, target);
+    if (!exists) return false;
+    const onSameDrive = await sameVolume(invoke, target);
     const next: LocalBackupSettings = {
-      folder: folder.trim(),
+      folder: target,
       lastSuccessAt: settings?.lastSuccessAt ?? null,
       sameDrive: onSameDrive,
     };
     await getRepository().setAppSetting(BACKUP_SETTINGS_KEY, JSON.stringify(next));
     setSettings(next);
-    setMessage(t("backup.folder_saved"));
+    setFolder(target);
+    return true;
+  };
+
+  const onFolderChange = (val: string) => {
+    setFolder(val);
+    const trimmed = val.trim();
+    if (trimmed) {
+      void folderExists(invoke, trimmed).then((exists) => {
+        if (exists) {
+          void saveFolder(trimmed);
+        }
+      });
+    }
+  };
+
+  const onFolderBlur = async () => {
+    const trimmed = folder.trim();
+    if (!trimmed && defaultPath) {
+      setFolder(defaultPath);
+      await saveFolder(defaultPath);
+      return;
+    }
+    if (trimmed) {
+      const exists = await folderExists(invoke, trimmed);
+      if (exists) {
+        await saveFolder(trimmed);
+      }
+    }
   };
 
   const browseFolder = async () => {
-    const chosen = await pickPath({ directory: true, title: t("backup.folder") });
-    if (chosen) setFolder(chosen);
+    setError(null);
+    const chosen = await pickPath({
+      directory: true,
+      title: t("backup.folder"),
+      defaultPath: folder.trim() || defaultPath || undefined,
+    });
+    if (chosen) {
+      setFolder(chosen);
+      await saveFolder(chosen);
+    }
+  };
+
+  const handleOpenFolder = async () => {
+    const target = (folder || settings?.folder || defaultPath || "").trim();
+    if (!target) return;
+    try {
+      await openFolder(invoke, target);
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
+  const handleUseDefault = async () => {
+    if (defaultPath) {
+      setFolder(defaultPath);
+      await saveFolder(defaultPath);
+    }
   };
 
   const backupNow = async () => {
     setError(null);
     setMessage(null);
-    if (settings === null) return;
+    const targetFolder = (folder || settings?.folder || defaultPath || "").trim();
+    if (!targetFolder) return;
     setBusy(true);
     try {
       const createdAt = new Date();
@@ -123,18 +211,19 @@ export function BackupPanel() {
         createdAt: createdAt.toISOString(),
       });
       const file = backupFileName(createdAt);
-      const target = joinPath(settings.folder, file);
+      const target = joinPath(targetFolder, file);
       await writeBackupRaw(invokeRaw, target, bytes);
       // Read it straight back and decrypt it, so a "saved" backup is known good.
       const check = await verifyWrittenBackup(invoke, invokeRaw, target);
       if (!check.ok) throw new Error(t("backup.verify_failed"));
       const next: LocalBackupSettings = {
-        ...settings,
+        folder: targetFolder,
         lastSuccessAt: createdAt.toISOString(),
-        sameDrive: await sameVolume(invoke, settings.folder),
+        sameDrive: await sameVolume(invoke, targetFolder),
       };
       await getRepository().setAppSetting(BACKUP_SETTINGS_KEY, JSON.stringify(next));
       setSettings(next);
+      setFolder(targetFolder);
       setMessage(
         check.summary.photoCount !== null
           ? t("backup.save_done_full", {
@@ -232,34 +321,45 @@ export function BackupPanel() {
               <input
                 className={inputCls}
                 data-testid="backup-folder"
-                placeholder={t("backup.folder_ph")}
+                placeholder={defaultPath || t("backup.folder_ph")}
                 value={folder}
-                onChange={(e) => setFolder(e.target.value)}
+                onChange={(e) => onFolderChange(e.target.value)}
+                onBlur={() => void onFolderBlur()}
               />
             </label>
-            <div className="mt-2 flex items-center gap-2">
+            <div className="mt-2 flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm"
+                className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50 cursor-pointer"
                 data-testid="backup-folder-browse"
                 onClick={() => void browseFolder()}
               >
                 {t("backup.browse")}
               </button>
+              {defaultPath && folder.trim() !== defaultPath.trim() ? (
+                <button
+                  type="button"
+                  className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 hover:text-gray-900 cursor-pointer"
+                  data-testid="backup-folder-default"
+                  onClick={() => void handleUseDefault()}
+                >
+                  {t("backup.default_path")}
+                </button>
+              ) : null}
               <button
                 type="button"
-                className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm"
-                data-testid="backup-folder-save"
-                disabled={folder.trim() === ""}
-                onClick={() => void saveFolder()}
+                className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                data-testid="backup-folder-open"
+                disabled={!folder.trim()}
+                onClick={() => void handleOpenFolder()}
               >
-                {t("backup.folder_save")}
+                {t("backup.open_folder")}
               </button>
               <button
                 type="button"
                 className={btnPrimary}
                 data-testid="backup-now"
-                disabled={busy || settings === null || keyState !== "ready"}
+                disabled={busy || !folder.trim() || keyState !== "ready"}
                 onClick={() => void backupNow()}
               >
                 {busy ? t("backup.saving") : t("backup.saved_now")}

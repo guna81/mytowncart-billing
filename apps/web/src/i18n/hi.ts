@@ -380,6 +380,8 @@ export const hi: Record<I18nKey, string> = {
   "backup.folder_ph": "/Volumes/MyBackup या D:\\Backups",
   "backup.folder_save": "फ़ोल्डर याद रखें",
   "backup.folder_saved": "फ़ोल्डर सुरक्षित हो गया।",
+  "backup.open_folder": "फ़ोल्डर खोलें",
+  "backup.default_path": "डिफ़ॉल्ट इस्तेमाल करें",
   "backup.same_drive": "चेतावनी: यह उसी हार्ड ड्राइव पर है जहां ऐप है। सुरक्षित रखने हेतु पेनड्राइव का प्रयोग करें।",
   "backup.saved_now": "अभी बैकअप लें",
   "backup.saving": "बैकअप लिया जा रहा है…",

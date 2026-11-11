@@ -6,7 +6,12 @@
  */
 import { useState } from "react";
 
-import { restoreBackup } from "@mytowncart-billing/backup";
+import {
+  BACKUP_SETTINGS_KEY,
+  defaultBackupDir,
+  parseBackupSettings,
+  restoreBackup,
+} from "@mytowncart-billing/backup";
 
 import { t } from "../i18n";
 import {
@@ -16,6 +21,7 @@ import {
   type BackupOpenResult,
 } from "../lib/cryptoStore";
 import { invoke, invokeRaw, pickPath } from "../lib/shell";
+import { getRepository } from "../lib/repository";
 import { isInTauri } from "../lib/tauri";
 
 /** Newest database schema this app can open. */
@@ -50,7 +56,24 @@ export function RestoreFlow() {
   };
 
   const browse = async () => {
-    const chosen = await pickPath({ directory: false, title: t("backup.restore_path") });
+    let defPath: string | undefined;
+    try {
+      const repo = getRepository();
+      const raw = await repo.getAppSetting(BACKUP_SETTINGS_KEY);
+      const s = parseBackupSettings(raw);
+      if (s?.folder) {
+        defPath = s.folder;
+      } else {
+        defPath = await defaultBackupDir(invoke);
+      }
+    } catch {
+      // non-fatal if path resolution fails
+    }
+    const chosen = await pickPath({
+      directory: false,
+      title: t("backup.restore_path"),
+      defaultPath: defPath,
+    });
     if (chosen) {
       setPath(chosen);
       reset();

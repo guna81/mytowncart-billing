@@ -3,6 +3,7 @@ import { APP_VERSION } from "@mytowncart-billing/core";
 import {
   backupFileName,
   BACKUP_SETTINGS_KEY,
+  defaultBackupDir,
   joinPath,
   parseBackupSettings,
   sameVolume,
@@ -26,10 +27,18 @@ export async function checkAndRunAutoBackup(): Promise<boolean> {
     const repo = getRepository();
     const raw = await repo.getAppSetting(BACKUP_SETTINGS_KEY);
     const settings = parseBackupSettings(raw);
-    if (!settings || !settings.folder.trim()) return false;
+    let folder = settings?.folder?.trim();
+    if (!folder) {
+      try {
+        folder = await defaultBackupDir(invoke);
+      } catch {
+        return false;
+      }
+    }
+    if (!folder) return false;
 
     // Check if > 24 hours since last backup
-    if (settings.lastSuccessAt) {
+    if (settings?.lastSuccessAt) {
       const msSince = Date.now() - Date.parse(settings.lastSuccessAt);
       if (msSince < 86_400_000) {
         return false; // Up to date
@@ -47,7 +56,7 @@ export async function checkAndRunAutoBackup(): Promise<boolean> {
     });
 
     const file = backupFileName(createdAt);
-    const target = joinPath(settings.folder, file);
+    const target = joinPath(folder, file);
     await writeBackupRaw(invokeRaw, target, bytes);
     const check = await verifyWrittenBackup(invoke, invokeRaw, target);
     if (!check.ok) {
@@ -56,9 +65,9 @@ export async function checkAndRunAutoBackup(): Promise<boolean> {
     }
 
     const next = {
-      ...settings,
+      folder,
       lastSuccessAt: createdAt.toISOString(),
-      sameDrive: await sameVolume(invoke, settings.folder),
+      sameDrive: await sameVolume(invoke, folder),
     };
     await repo.setAppSetting(BACKUP_SETTINGS_KEY, JSON.stringify(next));
     console.info(`[auto-backup] Automated daily backup saved: ${file}`);

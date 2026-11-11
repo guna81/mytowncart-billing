@@ -655,6 +655,58 @@ fn data_dir(state: tauri::State<'_, AppState>) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn default_backup_dir(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let base = app
+        .path()
+        .document_dir()
+        .or_else(|_| app.path().download_dir())
+        .or_else(|_| app.path().home_dir())
+        .unwrap_or_else(|_| state.data_dir.clone());
+    let backup_dir = base.join("MyTownCart Backups");
+    let _ = std::fs::create_dir_all(&backup_dir);
+    Ok(backup_dir.display().to_string())
+}
+
+#[tauri::command]
+fn open_folder(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        let _ = std::fs::create_dir_all(p);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("cannot open folder: {e}"))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("cannot open folder: {e}"))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("cannot open folder: {e}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn folder_exists(path: String) -> Result<bool, String> {
+    let p = std::path::Path::new(&path);
+    Ok(p.is_dir())
+}
+
+#[tauri::command]
 fn db_snapshot(state: tauri::State<'_, AppState>) -> Result<Vec<u8>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     drop(conn);
@@ -1063,6 +1115,9 @@ pub fn run(driver_script: Option<String>) {
             record_orders,
             apply_reconcile_fixes,
             data_dir,
+            default_backup_dir,
+            open_folder,
+            folder_exists,
             db_snapshot,
             write_backup_file,
             read_backup_file,

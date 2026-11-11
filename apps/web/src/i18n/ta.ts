@@ -380,6 +380,8 @@ export const ta: Record<I18nKey, string> = {
   "backup.folder_ph": "/Volumes/MyBackup அல்லது D:\\Backups",
   "backup.folder_save": "கோப்புறை சேமி",
   "backup.folder_saved": "கோப்புறை சேமிக்கப்பட்டது.",
+  "backup.open_folder": "கோப்புறையைத் திற",
+  "backup.default_path": "இயல்புநிலையைப் பயன்படுத்து",
   "backup.same_drive": "எச்சரிக்கை: செயலி உள்ள அதே வட்டில் இது உள்ளது. பென்டிரைவ் பயன்படுத்துவது சிறந்தது.",
   "backup.saved_now": "உடனே பேக்கப் எடு",
   "backup.saving": "பேக்கப் எடுக்கப்படுகிறது…",
