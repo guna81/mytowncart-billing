@@ -24,6 +24,7 @@ import { useAppStore } from "../store/appStore";
 
 export function DashboardScreen() {
   const profile = useAppStore((s) => s.profile);
+  const dataVersion = useAppStore((s) => s.dataVersion);
   const [loading, setLoading] = useState(true);
   const [bills, setBills] = useState<ReportBill[]>([]);
   const [lowStockItems, setLowStockItems] = useState<Item[]>([]);
@@ -32,7 +33,6 @@ export function DashboardScreen() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      setLoading(true);
       const repo = getRepository();
       const today = isoDateOf(new Date());
 
@@ -55,7 +55,7 @@ export function DashboardScreen() {
     return () => {
       cancelled = true;
     };
-  }, [profile?.lowStockThresholdMilli]);
+  }, [profile?.lowStockThresholdMilli, dataVersion]);
 
   const activeBills = bills.filter((b) => b.status === "active");
   const totalSalesPaise = activeBills.reduce((s, b) => s + b.totalPaise, 0);
@@ -147,7 +147,7 @@ export function DashboardScreen() {
             {t("dashboard.today_sales")}
           </p>
           <p className="mt-2 text-2xl font-bold text-blue-700">₹{formatPaise(totalSalesPaise)}</p>
-          <p className="mt-1 text-xs text-gray-600">Net revenue today</p>
+          <p className="mt-1 text-xs text-gray-600">{t("dashboard.net_revenue")}</p>
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm" data-testid="dashboard-today-bills">
@@ -155,7 +155,7 @@ export function DashboardScreen() {
             {t("dashboard.today_bills")}
           </p>
           <p className="mt-2 text-2xl font-bold text-gray-900">{billCount}</p>
-          <p className="mt-1 text-xs text-gray-600">Total completed orders</p>
+          <p className="mt-1 text-xs text-gray-600">{t("dashboard.completed_bills")}</p>
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm" data-testid="dashboard-average-bill">
@@ -163,7 +163,7 @@ export function DashboardScreen() {
             {t("dashboard.average_bill")}
           </p>
           <p className="mt-2 text-2xl font-bold text-gray-900">₹{formatPaise(avgBillPaise)}</p>
-          <p className="mt-1 text-xs text-gray-600">Average ticket size</p>
+          <p className="mt-1 text-xs text-gray-600">{t("dashboard.avg_ticket")}</p>
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm" data-testid="dashboard-today-credit">
@@ -173,7 +173,7 @@ export function DashboardScreen() {
           <p className={`mt-2 text-2xl font-bold ${creditDuePaise > 0 ? "text-amber-600" : "text-gray-900"}`}>
             ₹{formatPaise(creditDuePaise)}
           </p>
-          <p className="mt-1 text-xs text-gray-600">Outstanding credit issued</p>
+          <p className="mt-1 text-xs text-gray-600">{t("dashboard.credit_note")}</p>
         </div>
       </div>
 
@@ -249,7 +249,7 @@ export function DashboardScreen() {
       {/* Hourly Sales Activity */}
       <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm" data-testid="dashboard-hourly-activity">
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-bold text-gray-800">Hourly Store Traffic & Sales Velocity</h2>
+          <h2 className="text-sm font-bold text-gray-800">{t("dashboard.hourly_title")}</h2>
           <span className="text-xs text-gray-600 font-mono">00:00 - 23:59</span>
         </div>
         <HourlyHeatmap buckets={hourlyBuckets} height={120} />
@@ -285,7 +285,7 @@ export function DashboardScreen() {
                     <p className="text-gray-600 font-mono text-xs">{item.barcode || "—"}</p>
                   </div>
                   <span className="rounded bg-red-50 px-2 py-0.5 font-bold text-red-600">
-                    {formatQty(item.stockMilli)} left
+                    {t("dashboard.left", { qty: formatQty(item.stockMilli) })}
                   </span>
                 </div>
               ))}

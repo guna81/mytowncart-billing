@@ -92,6 +92,36 @@ export class Http {
     return payload as T;
   }
 
+  /**
+   * Download a public media file (a product photo). Sent WITHOUT the bearer
+   * token: the media host is not the API and must never see the secret.
+   */
+  async download(url: string, maxBytes: number): Promise<Uint8Array> {
+    const parsed = new URL(url);
+    const local = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+    if (parsed.protocol !== "https:" && !(local && parsed.protocol === "http:")) {
+      throw new MarketplaceError("validation_error", "Photo address is not secure.", 0);
+    }
+    let response: Response;
+    try {
+      response = await this.opts.fetch(url, { method: "GET" });
+    } catch (err) {
+      throw new MarketplaceError(
+        "network_error",
+        err instanceof Error ? err.message : "Network request failed.",
+        0,
+      );
+    }
+    if (!response.ok) {
+      throw new MarketplaceError("server_error", `Photo download failed (${response.status}).`, response.status);
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > maxBytes) {
+      throw new MarketplaceError("file_too_large", "Photo is too large.", 0);
+    }
+    return bytes;
+  }
+
   async upload<T = void>(path: string, file: Blob, filename: string, extra?: Record<string, string>): Promise<T> {
     const form = new FormData();
     form.append("image", file, filename);

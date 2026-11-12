@@ -28,17 +28,25 @@ function AdjustDialog({
   const [delta, setDelta] = useState("");
   const [reason, setReason] = useState<AdjustReason>("adjustment");
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (saving) return;
     const parsed = parseQty(delta);
     if (parsed === null || parsed === 0) {
-      setError(t("stock.delta"));
+      setError(t("stock.delta_invalid"));
       return;
     }
-    await getRepository().adjustStock(item.id, parsed, reason);
-    triggerImmediateSync();
-    onSaved();
+    setSaving(true);
+    try {
+      await getRepository().adjustStock(item.id, parsed, reason);
+      triggerImmediateSync();
+      onSaved();
+    } catch (err) {
+      setError(t("common.error", { message: err instanceof Error ? err.message : String(err) }));
+      setSaving(false);
+    }
   };
 
   return (
@@ -86,6 +94,7 @@ function AdjustDialog({
           <button
             type="submit"
             data-testid="stock-adjust-save"
+            disabled={saving}
             className="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
           >
             {t("common.save")}
@@ -110,7 +119,7 @@ function MovementHistory({ item }: { item: Item }) {
       {batches.length > 0 && (
         <div className="mb-3 border-b border-gray-200 pb-3">
           <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-gray-600">
-            Batches & Expiry (FIFO):
+            {t("stock.batches_title")}
           </p>
           <div className="space-y-1 text-xs font-mono">
             {batches.map((b) => {
@@ -118,11 +127,11 @@ function MovementHistory({ item }: { item: Item }) {
               const near = isBatchNearExpiry(b.expiryDate);
               return (
                 <div key={b.id} className="flex items-center justify-between">
-                  <span>Batch: {b.batchNo} · Exp: {b.expiryDate}</span>
+                  <span>{t("stock.batch_line", { batch: b.batchNo, expiry: b.expiryDate })}</span>
                   <span>
-                    {formatQty(b.stockMilli)} units
-                    {expired && <span className="ml-2 text-red-600 font-bold">EXPIRED</span>}
-                    {near && !expired && <span className="ml-2 text-amber-600 font-bold">NEAR EXPIRY</span>}
+                    {t("stock.units", { qty: formatQty(b.stockMilli) })}
+                    {expired && <span className="ml-2 text-red-600 font-bold">{t("stock.expired")}</span>}
+                    {near && !expired && <span className="ml-2 text-amber-600 font-bold">{t("stock.near_expiry")}</span>}
                   </span>
                 </div>
               );
@@ -208,7 +217,7 @@ export function StockScreen() {
                     : "text-gray-600 hover:text-gray-900"
                 }`}
               >
-                Current Stock
+                {t("stock.tab_current")}
               </button>
               <button
                 type="button"
@@ -220,7 +229,7 @@ export function StockScreen() {
                     : "text-gray-600 hover:text-gray-900"
                 }`}
               >
-                <span>Expiring Batches</span>
+                <span>{t("stock.tab_expiring")}</span>
                 {expiringBatches.length > 0 && (
                   <span className="rounded-full bg-amber-500 px-1.5 py-0.2 text-[10px] text-white font-bold">
                     {expiringBatches.length}
@@ -248,17 +257,17 @@ export function StockScreen() {
         <div data-testid="expiring-batches-table">
           {expiringBatches.length === 0 ? (
             <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-gray-500 text-sm">
-              No batches expiring within the next 60 days. All inventory is fresh.
+              {t("stock.none_expiring")}
             </div>
           ) : (
             <table className="w-full rounded border border-gray-200 bg-white text-sm">
               <thead>
                 <tr className="border-b border-gray-200 text-left text-gray-600 font-semibold">
                   <th className="px-3 py-2">{t("print.item")}</th>
-                  <th className="px-3 py-2">Batch No</th>
-                  <th className="px-3 py-2">Expiry Date</th>
-                  <th className="px-3 py-2 text-right">Available Units</th>
-                  <th className="px-3 py-2 text-center">Status</th>
+                  <th className="px-3 py-2">{t("stock.col_batch")}</th>
+                  <th className="px-3 py-2">{t("stock.col_expiry")}</th>
+                  <th className="px-3 py-2 text-right">{t("stock.col_available")}</th>
+                  <th className="px-3 py-2 text-center">{t("stock.col_status")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -278,11 +287,11 @@ export function StockScreen() {
                       <td className="px-3 py-2 text-center">
                         {expired ? (
                           <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700">
-                            EXPIRED
+                            {t("stock.expired")}
                           </span>
                         ) : (
                           <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800">
-                            Expiring Soon
+                            {t("stock.expiring_soon")}
                           </span>
                         )}
                       </td>
@@ -316,7 +325,7 @@ export function StockScreen() {
                   >
                     {item.name}
                   </button>
-                  {isLowStock(item.stockMilli, threshold) ? (
+                  {threshold > 0 && isLowStock(item.stockMilli, threshold) ? (
                     <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
                       {t("items.low_stock")}
                     </span>

@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 
 import type {
   MarketplaceConnector,
-  RemoteOrder,
   RemoteItem,
   StockPush,
   StockPushResult,
@@ -46,8 +45,6 @@ function fakeConnector(overrides: ConnectorOverrides = {}): MarketplaceConnector
       );
     },
     pullStock: () => Promise.resolve({ moves: [], nextCursor: 0 }),
-    pullOrders: (): Promise<{ orders: RemoteOrder[]; next?: string }> =>
-      Promise.resolve({ orders: [] }),
     listRemoteItems: (): Promise<RemoteItem[]> => Promise.resolve([]),
     listPlatformProducts: () => Promise.resolve([]),
     adoptProducts: () => Promise.resolve([]),
@@ -195,6 +192,73 @@ describe("runSync", () => {
     const out2 = await run(2000); // both changed → local wins
     expect(out2.pulledPrices).toBeUndefined();
     expect((await repo.listItems({ activeOnly: false }))[0]?.pricePaise).toBe(1800);
+  });
+
+  it("takes a description changed on MyTownCart unless it was also edited here", async () => {
+    const { repo, itemId } = await fixture();
+    const remote = (description: string): RemoteItem => ({
+      externalId: `itm_${itemId}`,
+      productId: "p-1",
+      variantId: "v-1",
+      stockUnits: 10,
+      pricePaise: 1000,
+      isActive: true,
+      description,
+    });
+    const run = (description: string) =>
+      runSync(
+        { repo, connector: fakeConnector({ listRemoteItems: () => Promise.resolve([remote(description)]) }), now, isApproved: () => true },
+        { list: false },
+      );
+    const local = async () => (await repo.listItems({ activeOnly: false }))[0]?.description;
+    await run("<p>Crisp</p>"); // first look records it, nothing is pulled
+    expect(await local()).not.toBe("<p>Crisp</p>");
+    const out = await run("<p>Crisp <strong>and sweet</strong></p>"); // edited on MyTownCart
+    expect(out.pulledDescriptions).toBe(1);
+    expect(await local()).toBe("<p>Crisp <strong>and sweet</strong></p>");
+    const out2 = await run("<p>Crisp <strong>and sweet</strong></p>"); // nothing new
+    expect(out2.pulledDescriptions).toBeUndefined();
+    await repo.upsertItem({ id: itemId, name: "Parle-G", barcode: "", categoryId: null, unitKind: "count", pricePaise: 1000, mrpPaise: 1200, taxRateBp: 0, openingStockMilli: 10_000, isActive: true, description: "<p>Mine</p>" });
+    const out3 = await run("<p>Theirs</p>"); // both changed → local wins
+    expect(out3.pulledDescriptions).toBeUndefined();
+    expect(await local()).toBe("<p>Mine</p>");
+  });
+
+  it("sends an explicit clear only when a description that had text was emptied here", async () => {
+    const { repo, itemId } = await fixture();
+    await repo.setItemPhoto(itemId, new Uint8Array([0xff, 0xd8, 0xff]), "h1");
+    const sent: { description?: string; clearDescription?: boolean }[] = [];
+    const remote: RemoteItem = {
+      externalId: `itm_${itemId}`,
+      productId: "p-1",
+      variantId: "v-1",
+      stockUnits: 10,
+      pricePaise: 1000,
+      isActive: true,
+      description: "<p>Crisp</p>",
+    };
+    const connector = fakeConnector({
+      listRemoteItems: () => Promise.resolve([remote]),
+      upsertItems: (items) => {
+        sent.push(...items);
+        return Promise.resolve(
+          items.map((i) => ({ externalId: i.externalId, productId: "p-1", variantId: "v-1", status: "updated" as const, visible: true, error: null })),
+        );
+      },
+    });
+    const run = () => runSync({ repo, connector, now, isApproved: () => true }, { list: false });
+    const edit = async (description: string) => {
+      const cur = (await repo.listItems({ activeOnly: false }))[0]!;
+      await repo.upsertItem({ id: itemId, name: cur.name, barcode: cur.barcode, categoryId: cur.categoryId, unitKind: cur.unitKind, pricePaise: cur.pricePaise, mrpPaise: cur.mrpPaise, taxRateBp: cur.taxRateBp, openingStockMilli: 0, isActive: cur.isActive, description });
+    };
+    await run(); // first look: records the remote text, local is empty
+    expect(sent.every((i) => !i.clearDescription)).toBe(true); // never had text here → no clear
+    await edit("<p>Mine</p>");
+    await run();
+    sent.length = 0;
+    await edit("");
+    await run();
+    expect(sent.some((i) => i.clearDescription === true)).toBe(true);
   });
 
   it("takes a name changed on MyTownCart unless it was also edited here", async () => {

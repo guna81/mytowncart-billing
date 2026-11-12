@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -11,15 +11,22 @@ import {
   isUnitKind,
   parsePaise,
   parseQty,
+  groupMarketplaceCategories,
+  suggestCategoryForItem,
   UNIT_KINDS,
   type UnitKind,
 } from "@mytowncart-billing/core";
-import type { Category, ItemBarcode } from "@mytowncart-billing/storage";
+import type { Category, Item, ItemBarcode } from "@mytowncart-billing/storage";
 import { PageHeader } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
+import { looksLikeHtml, plainToHtml, richTextToPlain } from "../lib/richText";
 import { triggerImmediateSync } from "../lib/autoSync";
+import { loadConnection } from "../lib/connection";
+import { getConnector } from "../lib/marketplace";
 import { getRepository } from "../lib/repository";
 import { useAppStore } from "../store/appStore";
+import { VariantEditor } from "./itemForm/VariantEditor";
+import { baseNameOf, newVariantGroup, variantItemName, type VariantRow } from "./itemForm/variants";
 
 const inputCls = "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-2xs";
 const labelCls = "block text-sm font-semibold text-gray-800";
@@ -35,8 +42,12 @@ export function ItemFormScreen() {
   const [barcode, setBarcode] = useState("");
   const [brand, setBrand] = useState("");
   const [description, setDescription] = useState("");
+  const originalDescription = useRef({ stored: "", text: "" });
   const [categoryId, setCategoryId] = useState<number | null>(null);
   const [newCategory, setNewCategory] = useState("");
+  // MyTownCart categories (only when this shop is connected) and the seller's pick.
+  const [mtcCategories, setMtcCategories] = useState<{ id: string; name: string; parentId: string | null }[]>([]);
+  const [mtcChoice, setMtcChoice] = useState<string>("");
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
   const [unitKind, setUnitKind] = useState<UnitKind>("count");
   const [price, setPrice] = useState("");
@@ -47,6 +58,15 @@ export function ItemFormScreen() {
   const [openingStock, setOpeningStock] = useState("0");
   const [isActive, setIsActive] = useState(true);
   const [customAttributes, setCustomAttributes] = useState<{ key: string; value: string }[]>([]);
+  // Sizes/options: more than one row means this product is sold as variants.
+  const [variantRows, setVariantRows] = useState<VariantRow[]>([]);
+  const [variantGroup, setVariantGroup] = useState("");
+  const [loadedIsPlain, setLoadedIsPlain] = useState(false);
+  // A plain item already on MyTownCart can't become a group without a duplicate listing there.
+  const [loadedPublished, setLoadedPublished] = useState(false);
+  const [plainStock, setPlainStock] = useState("0");
+  const originalSiblings = useRef<Item[]>([]);
+  const hasVariants = variantRows.length > 1;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [photos, setPhotos] = useState<
@@ -161,6 +181,16 @@ export function ItemFormScreen() {
 
   useEffect(() => {
     void (async () => {
+      try {
+        if ((await loadConnection()) !== null) setMtcCategories(await getConnector().listCategories());
+      } catch {
+        setMtcCategories([]); // offline or not connected: the picker simply stays hidden
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
       const repo = getRepository();
       setCategories(await repo.listCategories());
       if (editId !== null) {
@@ -168,10 +198,35 @@ export function ItemFormScreen() {
         await loadPhotos(editId);
         const item = await repo.getItem(editId);
         if (item) {
-          setName(item.name);
+          if (item.variantGroup) {
+            const siblings = (await repo.listItems({})).filter((i) => i.variantGroup === item.variantGroup);
+            siblings.sort((a, b) => a.id - b.id);
+            originalSiblings.current = siblings;
+            setVariantGroup(item.variantGroup);
+            setVariantRows(
+              siblings.map((i) => ({
+                id: i.id,
+                options: i.variantOptions,
+                price: formatPaise(i.pricePaise),
+                mrp: formatPaise(i.mrpPaise),
+                cost: i.costPricePaise ? formatPaise(i.costPricePaise) : "",
+                stock: formatQty(i.stockMilli),
+                barcode: i.barcode,
+              })),
+            );
+            setName(baseNameOf(item.name, item.variantOptions));
+          } else {
+            setLoadedIsPlain(true);
+            setLoadedPublished(item.remoteProductId !== null);
+            setPlainStock(formatQty(item.stockMilli));
+            setName(item.name);
+          }
           setBarcode(item.barcode);
           setBrand(item.brand ?? "");
-          setDescription(item.description ?? "");
+          const stored = item.description ?? "";
+          const text = looksLikeHtml(stored) ? richTextToPlain(stored) : stored;
+          originalDescription.current = { stored, text };
+          setDescription(text);
           setCategoryId(item.categoryId);
           setUnitKind(item.unitKind);
           setPrice(formatPaise(item.pricePaise));
@@ -191,6 +246,17 @@ export function ItemFormScreen() {
     })();
   }, [editId]);
 
+  const mtcGroups = useMemo(() => groupMarketplaceCategories(mtcCategories), [mtcCategories]);
+  // What the chosen local category is already mapped to, shown as the empty option.
+  const mappedMtcName = useMemo(() => {
+    const mappedId = categories.find((c) => c.id === categoryId)?.marketplaceCategoryId;
+    return mtcCategories.find((c) => c.id === mappedId)?.name ?? null;
+  }, [categories, categoryId, mtcCategories]);
+  const mtcSuggestion = useMemo(
+    () => (name.trim() === "" || mappedMtcName !== null ? null : suggestCategoryForItem(name, mtcCategories)),
+    [name, mappedMtcName, mtcCategories],
+  );
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -199,10 +265,19 @@ export function ItemFormScreen() {
     const taxBp = Math.round(Number(taxPercent || "0") * 100);
     const openingMilli = parseQty(openingStock || "0");
     if (name.trim() === "") return setError(t("items.row", { row: "—", message: "name is required" }));
-    if (pricePaise === null || pricePaise < 0) return setError(`price: ${price}`);
+    if (!hasVariants && (pricePaise === null || pricePaise < 0)) return setError(`price: ${price}`);
     if (mrpPaise === null || mrpPaise < 0) return setError(`mrp: ${mrp}`);
     if (!Number.isFinite(taxBp) || taxBp < 0 || taxBp > 10_000) return setError(`tax: ${taxPercent}`);
-    if (openingMilli === null) return setError(`opening stock: ${openingStock}`);
+    if (!hasVariants && openingMilli === null) return setError(`opening stock: ${openingStock}`);
+    if (hasVariants) {
+      const bad = variantRows.some((r) => {
+        const p = parsePaise(r.price || "");
+        const m = parsePaise(r.mrp || "0");
+        const c = parsePaise(r.cost || "0");
+        return p === null || p < 0 || m === null || m < 0 || c === null || c < 0 || (r.id === undefined && parseQty(r.stock || "0") === null);
+      });
+      if (bad) return setError(t("item_form.variants.error_price"));
+    }
 
     setBusy(true);
     try {
@@ -210,6 +285,18 @@ export function ItemFormScreen() {
       let finalCategoryId = categoryId;
       if (finalCategoryId === null && newCategory.trim() !== "") {
         finalCategoryId = await repo.upsertCategory({ name: newCategory.trim() });
+      }
+      // A MyTownCart category was picked: reuse (or create) the local category of
+      // that name and map it, so the item can be published without a second step.
+      const mtcPick = mtcCategories.find((c) => c.id === mtcChoice);
+      if (mtcPick) {
+        if (finalCategoryId === null) {
+          const match =
+            categories.find((c) => c.marketplaceCategoryId === mtcPick.id) ??
+            categories.find((c) => c.name.trim().toLowerCase() === mtcPick.name.trim().toLowerCase());
+          finalCategoryId = match?.id ?? (await repo.upsertCategory({ name: mtcPick.name.trim() }));
+        }
+        await repo.setCategoryMarketplaceId(finalCategoryId, mtcPick.id);
       }
       const costPricePaise = costPrice ? (parsePaise(costPrice) ?? 0) : 0;
 
@@ -222,12 +309,68 @@ export function ItemFormScreen() {
         }
       }
 
+      if (hasVariants) {
+        const group = variantGroup || newVariantGroup();
+        const common = {
+          brand: brand.trim(),
+          description: description === originalDescription.current.text
+            ? originalDescription.current.stored
+            : plainToHtml(description),
+          customAttributes: finalAttributes,
+          categoryId: finalCategoryId,
+          unitKind,
+          taxRateBp: taxBp,
+          hsnCode: hsnCode.trim(),
+          costPricePaise,
+          variantGroup: group,
+        };
+        const keptIds = new Set<number>();
+        for (const r of variantRows) {
+          const id = await repo.upsertItem({
+            ...common,
+            id: r.id,
+            name: variantItemName(name, r.options),
+            barcode: r.barcode.trim(),
+            pricePaise: parsePaise(r.price) ?? 0,
+            mrpPaise: parsePaise(r.mrp || "0") ?? 0,
+            costPricePaise: r.cost.trim() ? (parsePaise(r.cost) ?? 0) : costPricePaise,
+            openingStockMilli: r.id === undefined ? (parseQty(r.stock || "0") ?? 0) : 0,
+            isActive,
+            variantOptions: r.options,
+          });
+          keptIds.add(id);
+        }
+        // Options taken off the list stop being sold; the items stay for bill history.
+        for (const old of originalSiblings.current) {
+          if (keptIds.has(old.id)) continue;
+          await repo.upsertItem({
+            ...common,
+            id: old.id,
+            name: old.name,
+            barcode: old.barcode,
+            pricePaise: old.pricePaise,
+            mrpPaise: old.mrpPaise,
+            costPricePaise: old.costPricePaise,
+            openingStockMilli: 0,
+            isActive: false,
+            variantOptions: old.variantOptions,
+          });
+        }
+        bumpDataVersion();
+        triggerImmediateSync();
+        navigate("/items");
+        return;
+      }
+
+      if (pricePaise === null || openingMilli === null) return; // unreachable: validated above
       const savedItemId = await repo.upsertItem({
         id: editId ?? undefined,
         name: name.trim(),
         barcode: barcode.trim(),
         brand: brand.trim(),
-        description: description.trim(),
+        description: description === originalDescription.current.text
+          ? originalDescription.current.stored
+          : plainToHtml(description),
         customAttributes: finalAttributes,
         categoryId: finalCategoryId,
         unitKind,
@@ -378,6 +521,7 @@ export function ItemFormScreen() {
               />
             </label>
 
+            {!hasVariants && (
             <label className={labelCls}>
               <span className="flex items-center justify-between">
                 <span>{t("item_form.barcode")}</span>
@@ -391,6 +535,7 @@ export function ItemFormScreen() {
               />
               <span className="text-xs text-gray-600 mt-1 block">{t("item_form.barcode_hint")}</span>
             </label>
+            )}
 
             <label className={labelCls}>
               <span className="flex items-center justify-between">
@@ -443,6 +588,40 @@ export function ItemFormScreen() {
               )}
             </label>
 
+            {mtcCategories.length > 0 && (
+              <label className={labelCls}>
+                <span className="flex items-center justify-between">
+                  <span>{t("item_form.mtc_category")}</span>
+                  {mtcSuggestion && mtcChoice === "" && (
+                    <button
+                      type="button"
+                      className="rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-normal text-blue-800 hover:bg-blue-100"
+                      onClick={() => setMtcChoice(mtcSuggestion.id)}
+                    >
+                      {t("mtc.use_suggestion", { name: mtcSuggestion.name })}
+                    </button>
+                  )}
+                </span>
+                <select
+                  data-testid="item-mtc-category"
+                  className={inputCls}
+                  value={mtcChoice}
+                  // A mapped local category keeps its mapping (it covers other items too).
+                  disabled={mappedMtcName !== null}
+                  onChange={(e) => setMtcChoice(e.target.value)}
+                >
+                  <option value="">{mappedMtcName ?? t("common.none")}</option>
+                  {mtcGroups.map((g) => {
+                    const opts = g.options.map((o) => (
+                      <option key={o.id} value={o.id}>{o.name}</option>
+                    ));
+                    return g.label === null ? opts : <optgroup key={g.label} label={g.label}>{opts}</optgroup>;
+                  })}
+                </select>
+                <span className="mt-1 block text-xs font-normal text-gray-600">{t("item_form.mtc_category_hint")}</span>
+              </label>
+            )}
+
             <label className={labelCls}>
               <span>{t("item_form.unit_kind")}</span>
               <select
@@ -466,12 +645,12 @@ export function ItemFormScreen() {
                 <span className="text-xs text-gray-600 font-normal">{t("item_form.optional")}</span>
               </span>
               <textarea
+                className={inputCls}
+                rows={4}
                 data-testid="item-description"
-                rows={3}
-                className={`${inputCls} resize-y`}
                 placeholder={t("item_form.description_hint")}
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                onChange={(event) => setDescription(event.target.value)}
               />
             </label>
           </div>
@@ -483,7 +662,11 @@ export function ItemFormScreen() {
             {t("item_form.section.pricing")}
           </h2>
 
+          {hasVariants ? (
+            <p className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-900">{t("item_form.variants.pricing_note")}</p>
+          ) : null}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {!hasVariants && (<>
             <label className={labelCls}>
               <span className="flex items-center gap-1">
                 {t("item_form.price")}
@@ -511,6 +694,7 @@ export function ItemFormScreen() {
                 onChange={(e) => setMrp(e.target.value)}
               />
             </label>
+            </>)}
 
             <label className={labelCls}>
               <span className="flex items-center justify-between">
@@ -555,6 +739,16 @@ export function ItemFormScreen() {
           </div>
         </section>
 
+        <VariantEditor
+          rows={variantRows}
+          setRows={setVariantRows}
+          canStart={editId === null || variantGroup !== "" || !loadedIsPlain || !loadedPublished}
+          plainItem={editId !== null && loadedIsPlain && variantGroup === "" ? { id: editId, stock: plainStock, barcode } : null}
+          sellPrice={price}
+          sellMrp={mrp}
+          sellCost={costPrice}
+        />
+
         {/* Card 3: Stock & status */}
         <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-xs space-y-4">
           <h2 className="text-base font-bold text-gray-900 border-b border-gray-100 pb-2.5">
@@ -562,7 +756,7 @@ export function ItemFormScreen() {
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-            {editId === null ? (
+            {editId === null && !hasVariants ? (
               <label className={labelCls}>
                 <span className="flex items-center justify-between">
                   <span>{t("item_form.opening_stock")}</span>

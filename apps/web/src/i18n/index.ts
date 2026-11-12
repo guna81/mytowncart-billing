@@ -30,6 +30,10 @@ export function t(key: I18nKey, vars?: Record<string, string | number>): string 
   const dict = dictionaries[currentLocale] || dictionaries.en;
   let out: string = dict[key] ?? dictionaries.en[key] ?? key;
   if (vars) {
+    // "{count?item|items}" picks the singular when the number is exactly 1.
+    out = out.replace(/\{(\w+)\?([^|{}]*)\|([^|{}]*)\}/g, (_m, k: string, one: string, many: string) =>
+      Number(vars[k]) === 1 ? one : many,
+    );
     for (const [k, v] of Object.entries(vars)) {
       out = out.replaceAll(`{${k}}`, String(v));
     }

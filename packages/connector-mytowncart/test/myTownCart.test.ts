@@ -359,101 +359,102 @@ describe("stock", () => {
   });
 });
 
-describe("orders", () => {
-  it("maps the M4 feed and keeps service lines with a null external id", async () => {
-    const { fetch, calls } = fakeFetch([
-      [
-        /orders\/\?after=abc$/,
-        () =>
-          jsonResponse({
-            orders: [
-              {
-                id: "o1",
-                status: "Pending",
-                payment_status: "Paid",
-                payment_method: "cod",
-                total_price: "130.00",
-                created_at: "2026-11-05T09:00:00+05:30",
-                updated_at: "2026-11-05T09:05:00+05:30",
-                items: [
-                  { external_id: "itm_1", product_name: "Milk", quantity: 2, price: "60.00" },
-                  { external_id: null, product_name: "Phone repair", quantity: 1, price: "10.00" },
-                ],
-              },
-            ],
-            next: "def",
-            has_more: false,
-          }),
-      ],
-    ]);
-    const out = await connector(fetch).pullOrders("abc");
-    expect(calls[0].url).toContain("after=abc");
-    expect(out.next).toBe("def");
-    expect(out.orders[0]).toMatchObject({
-      id: "o1",
-      status: "Pending",
-      paymentStatus: "Paid",
-      paymentMethod: "cod",
-      totalPaise: 13000,
-    });
-    expect(out.orders[0].lines).toEqual([
-      { externalId: "itm_1", productName: "Milk", qtyUnits: 2, unitPricePaise: 6000 },
-      { externalId: null, productName: "Phone repair", qtyUnits: 1, unitPricePaise: 1000 },
-    ]);
-  });
-
-  it("appends force=1 to orders request when force is true", async () => {
-    const { fetch, calls } = fakeFetch([
-      [
-        /orders\/\?after=abc&force=1$/,
-        () => jsonResponse({ orders: [] }),
-      ],
-    ]);
-    await connector(fetch).pullOrders("abc", { force: true });
-    expect(calls[0].url).toContain("force=1");
-  });
-
-  it("uploads, lists and deletes product images", async () => {
-    let callIndex = 0;
-    const { fetch, calls } = fakeFetch([
-      [
-        /products\/itm_1\/images\/(\?.*)?$/,
-        () => {
-          const reqMethod = calls[callIndex++]?.init?.method ?? "GET";
-          if (reqMethod === "POST") {
-            return jsonResponse({ image_id: "img-uuid-1", is_main: true, is_active: true }, 201);
-          }
-          if (reqMethod === "GET") {
-            return jsonResponse({
-              images: [
-                { id: "img-uuid-1", image: "https://cdn.example.com/1.webp", is_main: true },
-              ],
-            });
-          }
-          return jsonResponse({}, 200);
-        },
-      ],
-    ]);
-
-    const conn = connector(fetch);
-    const blob = new Blob(["image data"], { type: "image/jpeg" });
-    const uploaded = await conn.uploadImage("itm_1", blob, true);
-    expect(uploaded).toEqual({ imageId: "img-uuid-1", isMain: true, isActive: true });
-
-    const images = await conn.listImages("itm_1");
-    expect(images).toHaveLength(1);
-    expect(images[0].id).toBe("img-uuid-1");
-
-    await conn.deleteImage("itm_1", "img-uuid-1");
-    expect(calls[2].init?.method).toBe("DELETE");
-    expect(calls[2].url).toContain("image_id=img-uuid-1");
-  });
-});
-
 describe("network failures", () => {
   it("becomes a network_error, never an unhandled throw", async () => {
     const { fetch } = fakeFetch([]);
     const err = await connector(fetch).me().catch((e: unknown) => e);
     expect(err).toMatchObject({ code: "network_error", status: 0 });
+  });
+});
+
+describe("photos", () => {
+  it("maps the main photo of each product, null when none", async () => {
+    const { fetch } = fakeFetch([
+      [
+        /products\/\?page=1/,
+        () =>
+          jsonResponse({
+            has_next: false,
+            results: [
+              { external_id: "itm_1", product_id: "p1", variant_id: "v1", price: "10.00", stock: 1, is_active: true, main_image: { id: "i1", url: "https://m.test/a.webp", uploaded_at: "2026-11-11T10:00:00+05:30" } },
+              { external_id: "itm_2", product_id: "p2", variant_id: "v2", price: "10.00", stock: 1, is_active: true, main_image: null },
+              { external_id: "itm_3", product_id: "p3", variant_id: "v3", price: "10.00", stock: 1, is_active: true },
+            ],
+          }),
+      ],
+    ]);
+    const out = await connector(fetch).listRemoteItems();
+    expect(out[0]?.mainImage).toEqual({ id: "i1", url: "https://m.test/a.webp", uploadedAt: "2026-11-11T10:00:00+05:30" });
+    expect(out[1]?.mainImage).toBeNull();
+    expect(out[2]?.mainImage).toBeUndefined(); // older server
+  });
+
+  it("downloads a photo without sending the token, and refuses insecure addresses", async () => {
+    const { fetch, calls } = fakeFetch([[/m\.test\/a\.webp/, () => new Response(new Uint8Array([1, 2, 3]))]]);
+    const c = connector(fetch);
+    const bytes = await c.downloadImage("https://m.test/a.webp");
+    expect([...bytes]).toEqual([1, 2, 3]);
+    expect(calls[0]?.init?.headers).toBeUndefined();
+    await expect(c.downloadImage("http://m.test/a.webp")).rejects.toBeInstanceOf(MarketplaceError);
+  });
+});
+
+describe("upsertItems — item groups", () => {
+  const member = (id: string, size: string, price: number): PublishItem => ({
+    externalId: id,
+    name: `Tee – ${size}`,
+    pricePaise: price,
+    mrpPaise: 0,
+    stockUnits: 5,
+    barcode: null,
+    categoryId: "cat1",
+    isActive: true,
+    contentHash: "h",
+    group: { id: "grp_1", name: "Tee", options: { Size: size } },
+  });
+  const groupReply = () =>
+    jsonResponse({
+      results: [
+        {
+          external_id: "grp_1",
+          status: "created",
+          product_id: "p1",
+          variant_id: "v1",
+          variants: { itm_m: "v1", itm_l: "v2" },
+          visible: true,
+          error: null,
+        },
+      ],
+    });
+
+  it("sends a group as one product with variants and fans the result back out", async () => {
+    const { fetch, calls } = fakeFetch([[/bulk-upsert/, groupReply]]);
+    const c = new MyTownCartConnector({
+      apiBaseUrl: API + "/", webBaseUrl: WEB, appVersion: "0.1.0",
+      getToken: () => "tok", fetch, sleep: async () => {}, variantGroups: true,
+    });
+    const results = await c.upsertItems([member("itm_m", "M", 49900), member("itm_l", "L", 54900)]);
+    expect(calls).toHaveLength(1);
+    const sent = (bodyOf(calls[0]!).items as Record<string, unknown>[])[0]!;
+    expect(sent.external_id).toBe("grp_1");
+    expect(sent.name).toBe("Tee");
+    expect((sent.variants as unknown[]).length).toBe(2);
+    expect(results.map((r) => [r.externalId, r.productId, r.variantId])).toEqual([
+      ["itm_m", "p1", "v1"],
+      ["itm_l", "p1", "v2"],
+    ]);
+  });
+
+  it("keeps each option a separate product when the flag is off", async () => {
+    const { fetch, calls } = fakeFetch([
+      [/bulk-upsert/, () => jsonResponse({ results: [
+        { external_id: "itm_m", status: "created", product_id: "a", variant_id: "x", visible: true, error: null },
+        { external_id: "itm_l", status: "created", product_id: "b", variant_id: "y", visible: true, error: null },
+      ] })],
+    ]);
+    await connector(fetch).upsertItems([member("itm_m", "M", 49900), member("itm_l", "L", 54900)]);
+    const sent = bodyOf(calls[0]!).items as Record<string, unknown>[];
+    expect(sent.map((i) => i.external_id)).toEqual(["itm_m", "itm_l"]);
+    expect(sent[0]).not.toHaveProperty("variants");
   });
 });

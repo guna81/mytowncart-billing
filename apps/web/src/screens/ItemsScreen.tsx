@@ -15,8 +15,7 @@ import { EmptyState, PageHeader } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
 import { setAutoSyncSetting } from "../lib/autoSync";
 import { currentToken } from "../lib/connection";
-import { getConnector } from "../lib/marketplace";
-import { getItemPublishStatus, publishCatalogItems } from "../lib/publishService";
+import { getItemPublishStatus } from "../lib/publishService";
 import { getRepository } from "../lib/repository";
 import { effectiveLowStockThreshold } from "../lib/stockAlerts";
 import { useAppStore } from "../store/appStore";
@@ -72,14 +71,9 @@ export function ItemsScreen() {
   const dataVersion = useAppStore((s) => s.dataVersion);
   const bumpDataVersion = useAppStore((s) => s.bumpDataVersion);
   const autoSyncEnabled = useAppStore((s) => s.autoSyncEnabled);
-  const sellerIsApproved = useAppStore((s) => s.sellerIsApproved) !== false;
 
   const [items, setItems] = useState<Item[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [publishingIds, setPublishingIds] = useState<Set<number>>(new Set());
-  const [isBulkPublishing, setIsBulkPublishing] = useState(false);
-  const [publishNotice, setPublishNotice] = useState<{ kind: "success" | "error" | "info"; text: string } | null>(null);
 
   const [search, setSearch] = useState("");
   const [scan, setScan] = useState("");
@@ -110,15 +104,6 @@ export function ItemsScreen() {
     () => new Map(categories.map((c) => [c.id, c.marketplaceCategoryId])),
     [categories],
   );
-
-  const changedItems = useMemo(() => {
-    if (!isConnected) return [];
-    return items.filter((item) => {
-      const mId = item.categoryId ? categoryMap.get(item.categoryId) ?? null : null;
-      const st = getItemPublishStatus(item, Boolean(mId), mId).status;
-      return st === "changed" || st === "not_published";
-    });
-  }, [items, isConnected, categoryMap]);
 
   const onImportFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const input = e.target;
@@ -208,108 +193,6 @@ export function ItemsScreen() {
     downloadText("items.csv", csv);
   };
 
-  const toggleSelectAll = () => {
-    if (items.length > 0 && items.every((i) => selectedIds.has(i.id))) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(items.map((i) => i.id)));
-    }
-  };
-
-  const toggleSelectItem = (id: number) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const handlePublishOne = async (item: Item) => {
-    setPublishingIds((prev) => new Set(prev).add(item.id));
-    setPublishNotice(null);
-    try {
-      const res = await publishCatalogItems(
-        getRepository(),
-        getConnector(),
-        [item],
-        sellerIsApproved,
-      );
-      if (res.publishedCount > 0) {
-        setPublishNotice({
-          kind: "success",
-          text: t("items.publish_success", { name: item.name }),
-        });
-        bumpDataVersion();
-      } else if (res.blocked.length > 0) {
-        const reasonCode = res.blocked[0]?.reason.code ?? "inactive";
-        const reasonKey = `mtc.blocked.${reasonCode}` as I18nKey;
-        setPublishNotice({
-          kind: "error",
-          text: `${item.name}: ${t(reasonKey)}`,
-        });
-      } else if (res.errors.length > 0) {
-        setPublishNotice({ kind: "error", text: res.errors.join(", ") });
-      }
-    } catch (err) {
-      setPublishNotice({
-        kind: "error",
-        text: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setPublishingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(item.id);
-        return next;
-      });
-    }
-  };
-
-  const handlePublishBulk = async (targets: Item[]) => {
-    if (targets.length === 0) return;
-    setIsBulkPublishing(true);
-    setPublishNotice(null);
-    try {
-      const res = await publishCatalogItems(
-        getRepository(),
-        getConnector(),
-        targets,
-        sellerIsApproved,
-      );
-      if (res.publishedCount > 0 && res.failedCount === 0) {
-        setPublishNotice({
-          kind: "success",
-          text: t("items.bulk_publish_success", { count: res.publishedCount }),
-        });
-        setSelectedIds(new Set());
-        bumpDataVersion();
-      } else if (res.publishedCount > 0 && res.failedCount > 0) {
-        setPublishNotice({
-          kind: "info",
-          text: t("items.bulk_publish_partial", {
-            ok: res.publishedCount,
-            failed: res.failedCount,
-          }),
-        });
-        bumpDataVersion();
-      } else if (res.blocked.length > 0) {
-        setPublishNotice({
-          kind: "error",
-          text: t("items.bulk_publish_blocked", { count: res.blocked.length }),
-        });
-      } else if (res.errors.length > 0) {
-        setPublishNotice({ kind: "error", text: res.errors.join(", ") });
-      }
-    } catch (err) {
-      setPublishNotice({
-        kind: "error",
-        text: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setIsBulkPublishing(false);
-    }
-  };
-
   return (
     <div>
       <PageHeader
@@ -345,20 +228,6 @@ export function ItemsScreen() {
               </button>
             ) : null}
 
-            {isConnected && !autoSyncEnabled && changedItems.length > 0 ? (
-              <button
-                type="button"
-                disabled={isBulkPublishing}
-                onClick={() => void handlePublishBulk(changedItems)}
-                className="rounded-md bg-blue-600 px-3.5 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:bg-blue-300"
-                data-testid="items-publish-changed"
-              >
-                {isBulkPublishing
-                  ? t("items.publishing")
-                  : t("items.publish_changed", { count: changedItems.length })}
-              </button>
-            ) : null}
-
             <button
               type="button"
               className="rounded-md border border-gray-300 bg-white px-3.5 py-1.5 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50"
@@ -378,7 +247,7 @@ export function ItemsScreen() {
               data-testid="items-print-labels"
               className="rounded-md border border-gray-300 bg-white px-3.5 py-1.5 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50"
             >
-              🏷️ Barcode Labels
+              🏷️ {t("items.labels")}
             </Link>
             <Link
               to="/categories"
@@ -397,63 +266,6 @@ export function ItemsScreen() {
           </>
         }
       />
-
-      {/* Bulk action bar when rows are selected */}
-      {selectedIds.size > 0 ? (
-        <div
-          className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm"
-          data-testid="items-bulk-bar"
-        >
-          <div className="flex items-center gap-3">
-            <span className="font-semibold text-blue-900">
-              {t("items.selected_count", { count: selectedIds.size })}
-            </span>
-            <button
-              type="button"
-              onClick={() => setSelectedIds(new Set())}
-              className="text-xs font-medium text-blue-700 underline hover:text-blue-900"
-            >
-              {t("items.deselect_all")}
-            </button>
-          </div>
-          {isConnected ? (
-            <button
-              type="button"
-              disabled={isBulkPublishing}
-              onClick={() => void handlePublishBulk(items.filter((i) => selectedIds.has(i.id)))}
-              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-700 disabled:bg-blue-300"
-              data-testid="items-publish-selected"
-            >
-              {isBulkPublishing
-                ? t("items.publishing")
-                : t("items.publish_selected", { count: selectedIds.size })}
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-
-      {/* Publish Notice Toast */}
-      {publishNotice ? (
-        <div
-          className={`mb-3 flex items-center justify-between rounded-lg p-3 text-sm border ${
-            publishNotice.kind === "success"
-              ? "bg-green-50 border-green-200 text-green-800"
-              : publishNotice.kind === "info"
-                ? "bg-blue-50 border-blue-200 text-blue-800"
-                : "bg-red-50 border-red-200 text-red-800"
-          }`}
-          data-testid="items-publish-notice"
-        >
-          <span>{publishNotice.text}</span>
-          <button
-            type="button"
-            onClick={() => setPublishNotice(null)}
-            className="text-xs font-semibold underline ml-3"
-          >
-            {t("common.close")}
-          </button>
-        </div>
-      ) : null}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
@@ -518,18 +330,10 @@ export function ItemsScreen() {
           }
         />
       ) : (
-        <table className="w-full bg-white rounded-lg border border-gray-200 text-sm shadow-sm overflow-hidden">
+        <div className="overflow-x-auto rounded-lg">
+        <table className="w-full min-w-[56rem] bg-white rounded-lg border border-gray-200 text-sm shadow-sm overflow-hidden">
           <thead>
             <tr className="border-b border-gray-200 text-left text-gray-700 bg-gray-50 font-semibold">
-              <th className="px-3 py-2 w-10 text-center">
-                <input
-                  type="checkbox"
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                  checked={items.length > 0 && items.every((i) => selectedIds.has(i.id))}
-                  onChange={toggleSelectAll}
-                  data-testid="items-select-all"
-                />
-              </th>
               <th className="px-3 py-2 w-14"></th>
               <th className="px-3 py-2">{t("common.name")}</th>
               <th className="px-3 py-2">{t("items.barcode")}</th>
@@ -546,25 +350,13 @@ export function ItemsScreen() {
             {items.map((item) => {
               const mCategoryId = item.categoryId ? categoryMap.get(item.categoryId) ?? null : null;
               const statusInfo = getItemPublishStatus(item, Boolean(mCategoryId), mCategoryId);
-              const isItemPublishing = publishingIds.has(item.id);
 
               return (
                 <tr
                   key={item.id}
-                  className={`border-b border-gray-100 last:border-0 ${
-                    selectedIds.has(item.id) ? "bg-blue-50/40" : ""
-                  }`}
+                  className="border-b border-gray-100 last:border-0"
                   data-testid={`item-row-${item.id}`}
                 >
-                  <td className="px-3 py-2 text-center">
-                    <input
-                      type="checkbox"
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                      checked={selectedIds.has(item.id)}
-                      onChange={() => toggleSelectItem(item.id)}
-                      data-testid={`items-select-${item.id}`}
-                    />
-                  </td>
                   <td className="px-3 py-2">
                     <ItemThumb
                       itemId={item.id}
@@ -636,21 +428,6 @@ export function ItemsScreen() {
                       >
                         {t("common.edit")}
                       </Link>
-                      {isConnected ? (
-                        <button
-                          type="button"
-                          disabled={isItemPublishing || isBulkPublishing}
-                          onClick={() => void handlePublishOne(item)}
-                          className="text-xs font-semibold text-blue-600 hover:text-blue-800 disabled:opacity-50"
-                          data-testid={`items-publish-one-${item.id}`}
-                        >
-                          {isItemPublishing
-                            ? t("items.publishing")
-                            : statusInfo.status === "changed" || statusInfo.status === "live"
-                              ? t("items.republish")
-                              : t("items.publish")}
-                        </button>
-                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -658,6 +435,7 @@ export function ItemsScreen() {
             })}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );

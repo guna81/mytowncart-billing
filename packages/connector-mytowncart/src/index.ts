@@ -50,8 +50,16 @@ export interface PublishItem {
   /** Skipped by the server when unchanged since last publish. */
   contentHash: string;
   description?: string;
+  /** Send an empty description (the seller cleared it); otherwise empty is never sent. */
+  clearDescription?: boolean;
   brand?: string;
   customAttributes?: Record<string, string>;
+  /**
+   * Set for an option of an item group (sizes/colours). With the connector's
+   * `variantGroups` option on, all items sharing a `group.id` are sent as ONE
+   * marketplace product with a variant each; otherwise each is its own product.
+   */
+  group?: { id: string; name: string; options: Record<string, string> };
 }
 
 export interface UpsertResult {
@@ -91,18 +99,6 @@ export interface StockPull {
   createdAt: string;
 }
 
-export interface RemoteOrder {
-  id: string;
-  status: string;
-  paymentStatus: string;
-  paymentMethod: string;
-  totalPaise: number;
-  placedAt: string;
-  updatedAt: string;
-  /** `externalId` is null for marketplace services the billing app does not stock. */
-  lines: { externalId: string | null; productName: string | null; qtyUnits: number; unitPricePaise: number }[];
-}
-
 export interface RemoteItem {
   externalId: string;
   productId: string;
@@ -112,6 +108,10 @@ export interface RemoteItem {
   isActive: boolean;
   /** Product name on MyTownCart; absent from older connectors. */
   name?: string;
+  /** Description as rich-text HTML; absent when the server doesn't return it yet. */
+  description?: string;
+  /** Main photo: an object, null when there is none, undefined on an older server. */
+  mainImage?: RemoteMainImage | null;
 }
 
 /** A product that lives only on MyTownCart (not managed by this app). Read-only. */
@@ -123,6 +123,16 @@ export interface PlatformProduct {
   pricePaise: number;
   stockUnits: number;
   isActive: boolean;
+  /** Rich-text HTML description, when the server returns it. */
+  description?: string;
+}
+
+/** The photo customers see first. */
+export interface RemoteMainImage {
+  id: string;
+  url: string;
+  /** ISO time the photo was uploaded to MyTownCart. */
+  uploadedAt: string;
 }
 
 /** Outcome of linking one MyTownCart-only product to a local item ("pull"). */
@@ -166,15 +176,13 @@ export interface MarketplaceConnector {
   ): Promise<{ imageId?: string; isMain?: boolean; isActive?: boolean } | void>;
   deleteImage?(externalId: string, imageId?: string): Promise<void>;
   listImages?(externalId: string): Promise<RemoteProductImage[]>;
+  /** Fetch a product photo by its public address (no credentials are sent). */
+  downloadImage?(url: string): Promise<Uint8Array>;
   pushStock(moves: StockPush[]): Promise<StockPushResult[]>;
   pullStock(
     cursor: number,
     opts?: { force?: boolean },
   ): Promise<{ moves: StockPull[]; nextCursor: number }>;
-  pullOrders(
-    after?: string,
-    opts?: { force?: boolean },
-  ): Promise<{ orders: RemoteOrder[]; next?: string }>;
   listRemoteItems(): Promise<RemoteItem[]>;
   /** The seller's products created on MyTownCart itself, for a read-only list. */
   listPlatformProducts(): Promise<PlatformProduct[]>;

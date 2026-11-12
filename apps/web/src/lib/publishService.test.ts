@@ -28,7 +28,6 @@ function mockConnector(overrides: Partial<MarketplaceConnector> = {}): Marketpla
     uploadImage: () => Promise.resolve(),
     pushStock: () => Promise.resolve([]),
     pullStock: () => Promise.resolve({ moves: [], nextCursor: 0 }),
-    pullOrders: () => Promise.resolve({ orders: [] }),
     listRemoteItems: () => Promise.resolve([]),
     listPlatformProducts: () => Promise.resolve([]),
     adoptProducts: () => Promise.resolve([]),
@@ -186,6 +185,8 @@ describe("publishService", () => {
       description: "",
       brand: "",
       customAttributes: {},
+      variantGroup: "",
+      variantOptions: {},
       updatedAt: "",
     };
 

@@ -44,7 +44,6 @@ import type {
   Purchase,
   ReconcileFix,
   RemoteItemLink,
-  RemoteOrderRecord,
   ShopProfile,
   StockDiscrepancyInput,
   StockMovementRecord,
@@ -123,6 +122,8 @@ function rowToItem(r: Row): Item {
     description: str(r.description ?? ""),
     brand: str(r.brand ?? ""),
     customAttributes: parseJsonAttributes(r.custom_attributes),
+    variantGroup: str(r.variant_group ?? ""),
+    variantOptions: parseJsonAttributes(r.variant_options),
     updatedAt: str(r.updated_at),
   };
 }
@@ -152,7 +153,7 @@ const ITEM_SELECT =
   "i.price_paise, i.mrp_paise, i.tax_rate_bp, i.stock_milli, i.is_active, i.photo_path, " +
   "i.publish_state, i.remote_product_id, i.remote_variant_id, i.content_hash, " +
   "i.photo_path, i.image_hash, i.image_uploaded_at, i.remote_hash, i.hsn_code, i.cost_price_paise, " +
-  "i.description, i.brand, i.custom_attributes, i.updated_at " +
+  "i.description, i.brand, i.custom_attributes, i.variant_group, i.variant_options, i.updated_at " +
   "FROM items i LEFT JOIN categories c ON c.id = i.category_id";
 
 const BILL_SELECT =
@@ -178,6 +179,8 @@ function itemToPayload(input: ItemInput, now: string): Record<string, unknown> {
     description: input.description ?? "",
     brand: input.brand ?? "",
     customAttributes: JSON.stringify(input.customAttributes ?? {}),
+    variantGroup: input.variantGroup ?? "",
+    variantOptions: JSON.stringify(input.variantOptions ?? {}),
     now,
   };
 }
@@ -715,40 +718,6 @@ export class TauriRepository implements BillingRepository {
   async recordRemoteCatalog(items: readonly RemoteItemLink[]): Promise<number> {
     const invoke = await this.getInvoke();
     return invoke<number>("record_remote_catalog", { items });
-  }
-
-  async listRemoteOrders(): Promise<RemoteOrderRecord[]> {
-    const rows = await this.query(
-      "SELECT id, status, payment_status, payment_method, total_paise, placed_at, updated_at, lines_json, synced_at FROM remote_orders ORDER BY placed_at DESC LIMIT 200",
-    );
-    return rows.map((r) => ({
-      id: str(r.id),
-      status: str(r.status),
-      paymentStatus: str(r.payment_status),
-      paymentMethod: str(r.payment_method),
-      totalPaise: num(r.total_paise),
-      placedAt: str(r.placed_at),
-      updatedAt: str(r.updated_at),
-      lines: JSON.parse(str(r.lines_json)) as RemoteOrderRecord["lines"],
-      syncedAt: str(r.synced_at),
-    }));
-  }
-
-  async recordRemoteOrders(orders: readonly RemoteOrderRecord[]): Promise<number> {
-    const invoke = await this.getInvoke();
-    return invoke<number>("record_orders", {
-      orders: orders.map((o) => ({
-        id: o.id,
-        status: o.status,
-        paymentStatus: o.paymentStatus,
-        paymentMethod: o.paymentMethod,
-        totalPaise: o.totalPaise,
-        placedAt: o.placedAt,
-        updatedAt: o.updatedAt,
-        linesJson: JSON.stringify(o.lines),
-        syncedAt: o.syncedAt,
-      })),
-    });
   }
 
   async applyReconcileFixes(fixes: readonly ReconcileFix[]): Promise<void> {

@@ -331,6 +331,35 @@ fn handle_http_request(
 
 const MARKETPLACE_KEY: &str = "mytowncart.integration";
 
+const PROD_MARKETPLACE_API: &str = "https://api.mytowncart.com/api/v1/integrations";
+
+/// Where the LAN web view's marketplace calls are forwarded. Always production
+/// in release builds. Debug builds may point at a local backend with
+/// `MTC_DEV_API_URL`, but only a loopback http(s) address is honoured, so the
+/// stored token can never be redirected to another host.
+fn marketplace_api_base() -> String {
+    #[cfg(debug_assertions)]
+    if let Ok(url) = std::env::var("MTC_DEV_API_URL") {
+        if is_loopback_url(&url) {
+            return url.trim_end_matches('/').to_string();
+        }
+    }
+    PROD_MARKETPLACE_API.to_string()
+}
+
+#[cfg(any(debug_assertions, test))]
+fn is_loopback_url(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("http://").or_else(|| url.strip_prefix("https://")) else {
+        return false;
+    };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if host.contains('@') {
+        return false;
+    }
+    let name = host.rsplit_once(':').map(|(h, _)| h).unwrap_or(host);
+    matches!(name, "localhost" | "127.0.0.1")
+}
+
 fn marketplace_request(request: &mut Request, url: &str, path: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     fn error(status: u16, message: &str) -> Response<std::io::Cursor<Vec<u8>>> {
         Response::from_string(message).with_status_code(status)
@@ -365,7 +394,7 @@ fn marketplace_request(request: &mut Request, url: &str, path: &str) -> Response
         _ => return error(405, "Method not allowed"),
     };
     let query = url.split_once('?').map(|(_, q)| format!("?{q}")).unwrap_or_default();
-    let target = format!("https://api.mytowncart.com/api/v1/integrations{suffix}{query}");
+    let target = format!("{}{suffix}{query}", marketplace_api_base());
     let client = match reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30)).redirect(reqwest::redirect::Policy::none()).build() {
         Ok(c) => c,
@@ -770,6 +799,15 @@ pub fn dispatch_invoke(
             crate::auth::audit(&conn, actor, "apply_stock_audit", format!("{} items counted", discrepancies.len()));
             serde_json::to_value(count).map_err(|e| e.to_string())
         }
+        "record_publish" => {
+            let outcomes: Vec<repo::PublishOutcomePayload> =
+                get_arg(&args, "outcomes", "outcomes")?;
+            let category_mappings: Vec<repo::CategoryMappingPayload> =
+                get_arg(&args, "categoryMappings", "category_mappings")?;
+            let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+            repo::record_publish(&mut conn, &outcomes, &category_mappings)?;
+            Ok(serde_json::Value::Null)
+        }
         "set_item_photo" => {
             let item_id: i64 = get_arg(&args, "itemId", "item_id")?;
             let bytes: Vec<u8> = get_arg(&args, "bytes", "bytes")?;
@@ -954,6 +992,16 @@ pub fn dispatch_invoke(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dev_api_override_only_accepts_loopback_hosts() {
+        assert!(super::is_loopback_url("http://localhost:9000/api/v1/integrations"));
+        assert!(super::is_loopback_url("http://127.0.0.1:9000"));
+        assert!(!super::is_loopback_url("https://api.mytowncart.com"));
+        assert!(!super::is_loopback_url("http://localhost@evil.example/"));
+        assert!(!super::is_loopback_url("http://localhost.evil.example"));
+        assert!(!super::is_loopback_url("ftp://localhost"));
+    }
+
     use super::*;
 
     #[test]

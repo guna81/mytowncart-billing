@@ -45,7 +45,10 @@ import type {
 import { isInTauri, isLanServer } from "./repository";
 import { pullPlatformProducts } from "./pullService";
 import { loadPlatformOnly, removeFromPlatformOnly, savePlatformOnly } from "./platformOnly";
+import { groupOf } from "./variantSync";
+import { syncPhotos } from "./photoSync";
 import { loadRemoteSeen, saveRemoteSeen } from "./remoteSeen";
+import { descriptionFingerprint, toWireHtml } from "./richText";
 
 /** Server cap from `me/`; never ask for more. */
 export const DEFAULT_BULK_MAX = 100;
@@ -64,6 +67,10 @@ export interface SyncOutcome {
   pulledPrices?: number;
   /** Names taken from MyTownCart. */
   pulledNames?: number;
+  /** Descriptions (rich text) brought in from MyTownCart. */
+  pulledDescriptions?: number;
+  /** Main photos taken from MyTownCart (the later change wins). */
+  pulledPhotos?: number;
   /** Problems phrased for the seller, one line per failed step. */
   problems: string[];
 }
@@ -94,7 +101,7 @@ function toPlanInputs(items: readonly Item[], categories: readonly Category[]): 
     photoPath: item.photoPath,
     marketplaceCategoryId: item.categoryId === null ? null : (mapped.get(item.categoryId) ?? null),
     lastPublishedHash: item.contentHash,
-    description: item.description,
+    description: toWireHtml(item.description ?? ""),
     brand: item.brand,
     customAttributes: item.customAttributes,
   }));
@@ -265,6 +272,11 @@ async function pushCatalog(
     .filter((r) => (linkedIds.has(r.input.id) ? scope.details : scope.list));
   if (changed.length === 0) return;
 
+  // The seller emptied a description that had text at the last look → say so
+  // explicitly. An empty value is otherwise never sent, so a description written
+  // on MyTownCart is never blanked by accident.
+  const descBaseline = await loadDescBaseline(repo);
+  const emptyFp = descriptionFingerprint("");
   try {
     const results = await connector.upsertItems(
       changed.map((r) => ({
@@ -278,8 +290,13 @@ async function pushCatalog(
         isActive: r.input.isActive,
         contentHash: r.hash,
         description: r.input.description,
+        clearDescription:
+          descriptionFingerprint(r.input.description ?? "") === emptyFp &&
+          descBaseline[r.externalId] !== undefined &&
+          descBaseline[r.externalId]!.l !== emptyFp,
         brand: r.input.brand,
         customAttributes: r.input.customAttributes,
+        ...groupOf(items.find((i) => i.id === r.input.id)),
       })),
     );
     const byExternal = new Map(results.map((r) => [r.externalId, r]));
@@ -295,7 +312,7 @@ async function pushCatalog(
             (a, b) => (b.isMain ? 1 : 0) - (a.isMain ? 1 : 0) || a.position - b.position,
           );
           for (const img of sorted) {
-            if (img.imageUploadedAt !== img.imageHash) {
+            if (img.imageUploadedAt === null) {
               try {
                 const photo = await repo.readItemImage(img.id);
                 if (photo && photo.imageHash === img.imageHash) {
@@ -319,7 +336,7 @@ async function pushCatalog(
         } else if (
           item.photoFile !== "" &&
           item.imageHash !== null &&
-          item.imageUploadedAt !== item.imageHash
+          item.imageUploadedAt === null
         ) {
           const photo = await repo.readItemPhoto(item.id);
           if (photo && photo.imageHash === item.imageHash) {
@@ -421,7 +438,24 @@ async function recordSnapshot(
 ): Promise<void> {
   try {
     const remoteItems = await connector.listRemoteItems();
-    if (details) await pullFromRemote(repo, remoteItems, outcome);
+    if (details) {
+      await pullFromRemote(repo, remoteItems, outcome);
+      try {
+        const items = await repo.listItems({ activeOnly: false });
+        const byExternal = new Map(items.map((i) => [externalIdOf(i.id), i.id]));
+        const byProduct = new Map(items.filter((i) => i.remoteProductId !== null).map((i) => [i.remoteProductId as string, i.id]));
+        const photos = await syncPhotos(
+          repo,
+          connector,
+          remoteItems,
+          (externalId, productId) => byExternal.get(externalId) ?? byProduct.get(productId) ?? null,
+        );
+        if (photos.pulled > 0) outcome.pulledPhotos = photos.pulled;
+        outcome.problems.push(...photos.problems);
+      } catch (err) {
+        outcome.problems.push(`photos: ${message(err)}`);
+      }
+    }
     const links = toLinks(remoteItems);
     await saveRemoteSeen(links, now);
     await repo.recordRemoteCatalog(links);
@@ -445,11 +479,32 @@ async function pullFromRemote(
   const priceFixes: ReconcileFix[] = [];
   const renames: Item[] = [];
   const renamedTo = new Map<number, string>();
+  const descBaseline = await loadDescBaseline(repo);
+  const nextBaseline: DescBaseline = {};
+  const describedAs = new Map<number, string>();
   for (const item of await repo.listItems({ activeOnly: false })) {
     const r =
       byExternal.get(externalIdOf(item.id)) ??
       (item.remoteProductId === null ? undefined : byExternal.get(item.remoteProductId));
-    if (!r || item.remoteHash === null) continue;
+    if (!r) continue;
+    const remoteDesc = r.description;
+    if (remoteDesc !== undefined) {
+      const localFp = descriptionFingerprint(item.description ?? "");
+      const remoteFp = descriptionFingerprint(remoteDesc);
+      const seen = descBaseline[r.externalId];
+      // Changed on MyTownCart since the last look, untouched here → take theirs.
+      // Changed in both places → this app wins and pushes (the content hash differs).
+      if (seen !== undefined && seen.r !== remoteFp && seen.l === localFp) {
+        describedAs.set(item.id, remoteDesc);
+        nextBaseline[r.externalId] = { l: remoteFp, r: remoteFp };
+      } else if (seen !== undefined && seen.l !== localFp && localFp === descriptionFingerprint("") && seen.r === remoteFp) {
+        // Cleared here and not yet pushed: keep the baseline so the clear is retried.
+        nextBaseline[r.externalId] = seen;
+      } else {
+        nextBaseline[r.externalId] = { l: localFp, r: remoteFp };
+      }
+    }
+    if (item.remoteHash === null) continue;
     const parts = item.remoteHash.split(":");
     const before = Number(parts[0]);
     // Remote changed since last look; local unchanged since then → take the remote value.
@@ -493,6 +548,50 @@ async function pullFromRemote(
     });
   }
   if (renames.length > 0) outcome.pulledNames = renames.length;
+
+  // Pull descriptions (rich-text HTML, as stored on MyTownCart). A name rename
+  // above wrote the whole item, so re-read to avoid overwriting it.
+  if (describedAs.size > 0) {
+    for (const item of await repo.listItems({ activeOnly: false })) {
+      const html = describedAs.get(item.id);
+      if (html === undefined) continue;
+      await repo.upsertItem({
+        id: item.id,
+        name: item.name,
+        barcode: item.barcode,
+        categoryId: item.categoryId,
+        unitKind: item.unitKind,
+        pricePaise: item.pricePaise,
+        mrpPaise: item.mrpPaise,
+        taxRateBp: item.taxRateBp,
+        openingStockMilli: 0,
+        isActive: item.isActive,
+        hsnCode: item.hsnCode,
+        costPricePaise: item.costPricePaise,
+        description: html,
+        brand: item.brand,
+        customAttributes: item.customAttributes,
+      });
+    }
+    outcome.pulledDescriptions = describedAs.size;
+  }
+  if (remote.some((r) => r.description !== undefined)) await saveDescBaseline(repo, nextBaseline);
+}
+
+/** What each side's description looked like at the last look: fingerprints, never the text. */
+type DescBaseline = Record<string, { l: string; r: string }>;
+const DESC_BASELINE_KEY = "sync.desc_baseline";
+
+async function loadDescBaseline(repo: BillingRepository): Promise<DescBaseline> {
+  try {
+    return JSON.parse((await repo.getAppSetting(DESC_BASELINE_KEY)) ?? "{}") as DescBaseline;
+  } catch {
+    return {};
+  }
+}
+
+async function saveDescBaseline(repo: BillingRepository, baseline: DescBaseline): Promise<void> {
+  await repo.setAppSetting(DESC_BASELINE_KEY, JSON.stringify(baseline));
 }
 
 const PULL_SKIP_KEY = "sync.pull_skip";

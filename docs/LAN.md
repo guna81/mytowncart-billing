@@ -36,7 +36,15 @@ to the internet. This implementation does not provide encrypted transport,
 per-client authorization, or a separate offline database on each counter.
 
 Backups, recovery keys, marketplace connection and other native capabilities
-remain desktop workflows. Browser clients are not a replacement for host backups.
+remain desktop workflows.
+
+The browser can start the marketplace connection and read the catalog through the
+host's proxy (`/api/marketplace/proxy`, which attaches the stored token), but it
+**cannot run a sync**: the host's invoke table does not include the outbox, stock-pull,
+sync-cursor, catalog-record, image-upload or reconcile commands. Run *Sync now* in the
+desktop window. The connection is stored once in the host's keychain, so connecting from a
+browser replaces the desktop's. The proxy always targets production; debug builds can
+point it at a local backend with `MTC_DEV_API_URL` (loopback addresses only). Browser clients are not a replacement for host backups.
 
 If a device cannot connect, confirm that the server is running, both devices
 are on the same LAN, and the host firewall permits the selected port. Guest

@@ -138,15 +138,8 @@ missing from the queue.
 
 ### `sync_state`
 
-Key/value cursors: `stock` (feed cursor), `orders` (page token). Cursors
+Key/value cursors: `stock` (feed cursor). Cursors
 advance in the same transaction as the data they cover.
-
-### `remote_orders`
-
-`id` PRIMARY KEY (marketplace order id), `number`, `status`,
-`payment_status`, `payment_method`, `total_paise`, `placed_at`,
-`updated_at`, `lines_json`, `synced_at`. Upserted on every pull; keeps ids
-nullable per line when the marketplace sells a service the shop does not stock.
 
 ### `held_bills`
 
@@ -156,8 +149,7 @@ prices, names and tax rates are re-read from `items`, so a price change
 between hold and resume is honoured. Resuming and saving consumes the hold;
 *discard* deletes it.
 
-**Not modelled as tables:** photos are files, held-bill lines and remote-order
-lines live in `lines_json`, and the marketplace token is in the keychain.
+**Not modelled as tables:** photos are files, held-bill lines live in `lines_json`, and the marketplace token is in the keychain.
 
 ### `app_settings`
 
@@ -223,3 +215,18 @@ Recovery keys (the grouped base32 form), integration tokens, and anything
 the diagnostics report might otherwise copy: `redact()` in
 `apps/web/src/lib/diagnostics.ts` strips both shapes before an event is
 recorded.
+
+## Variants (migration 0014)
+
+`items.variant_group` (shared key, `''` = plain item) and `items.variant_options`
+(JSON, e.g. `{"Size":"M"}`). Each variant is its own item, so barcode, stock,
+price and bill lines work unchanged; names are stored as `Base – M / Red`.
+Removed options are set inactive, never deleted (bill history). Each option also
+has its own cost price (blank = the shared one).
+
+Marketplace sync: by default every variant is published as a separate product.
+With the client flag on (`VITE_VARIANT_SYNC=1` or `localStorage mtc.variantSync=1`)
+and a server running `INTEGRATIONS_VARIANTS_ENABLED`, a group is sent as ONE
+product (`external_id` = the group key) whose variants are linked by their own
+`external_id` (= the item id). Stock, orders and photos then resolve per variant.
+A plain item can become a group from its edit form only while it is unpublished.

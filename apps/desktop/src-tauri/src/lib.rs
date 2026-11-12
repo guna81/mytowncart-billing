@@ -628,15 +628,6 @@ fn record_remote_catalog(
 }
 
 #[tauri::command]
-fn record_orders(
-    state: tauri::State<'_, AppState>,
-    orders: Vec<sync::RemoteOrderPayload>,
-) -> Result<usize, String> {
-    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
-    sync::record_orders(&mut conn, &orders)
-}
-
-#[tauri::command]
 fn apply_reconcile_fixes(
     state: tauri::State<'_, AppState>,
     fixes: Vec<reconcile::ReconcileFixPayload>,
@@ -1112,7 +1103,6 @@ pub fn run(driver_script: Option<String>) {
             drop_outbox,
             apply_stock_pull,
             record_remote_catalog,
-            record_orders,
             apply_reconcile_fixes,
             data_dir,
             default_backup_dir,

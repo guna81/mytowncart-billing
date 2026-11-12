@@ -139,11 +139,9 @@ sync and ignored after 7 days.
 
 ## Online orders
 
-`pullOrders(after)` pages through orders that were placed online, newest
-after the saved cursor; `recordRemoteOrders` upserts them into
-`remote_orders` keyed by the marketplace id. The Sync panel shows recent
-orders with their status. Fulfilment stays in the marketplace; billing only
-keeps the stock effect (through the stock pull).
+Billing does not list online orders. Fulfilment stays in the MyTownCart seller
+app; billing only keeps the stock effect (through the stock pull). The old
+`remote_orders` cache and `pullOrders` were removed (migration 0013).
 
 ## Scheduling
 
@@ -151,6 +149,14 @@ The Sync panel runs an automatic sync every 5 minutes while open (in the
 desktop shell only) and offers *Sync now*. The outcome is stored as
 `sync.last` in `app_settings` and summarised: moves pushed, pulled,
 restocked, catalog sent/failed, orders, and a list of problems.
+
+## Rate limit and common messages
+
+`GET stock/` and `GET orders/` allow one poll per token every 120 s; *Sync now* sends `force=1` and
+bypasses it. If two clients share a token, the other gets "Couldn't fetch stock changes. Will retry."
+until the next interval or *Sync now*. New items are uploaded only when *Sync all items*
+(`sync.list_enabled`) is on; with it off only already-published items are kept up to date.
+"Couldn't read your MyTownCart catalog" in a browser (LAN) view means sync is not supported there.
 
 ## Failure rules
 

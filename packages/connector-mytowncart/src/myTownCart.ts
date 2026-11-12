@@ -19,7 +19,6 @@ import type {
   AdoptResult,
   PlatformProduct,
   RemoteItem,
-  RemoteOrder,
   RemoteProductImage,
   Scope,
   StockPull,
@@ -96,6 +95,8 @@ interface BulkResponse {
     status: UpsertResult["status"];
     product_id: string | null;
     variant_id: string | null;
+    /** Item groups only: billing variant external_id → marketplace variant id. */
+    variants?: Record<string, string>;
     visible: boolean;
     error: string | null;
   }[];
@@ -108,8 +109,18 @@ interface ProductPage {
     external_source?: string;
     name?: string;
     category_name?: string;
+    description?: string;
+    main_image?: { id: string; url: string; uploaded_at: string } | null;
     product_id: string;
     variant_id: string | null;
+    variant_count?: number;
+    variants?: {
+      variant_id: string;
+      external_id: string;
+      price: string;
+      stock: number;
+      is_active: boolean;
+    }[];
     price: string | null;
     stock: number | null;
     is_active: boolean;
@@ -149,25 +160,6 @@ interface StockFeedResponse {
   next_cursor: number;
 }
 
-interface OrdersResponse {
-  orders: {
-    id: string;
-    status: string;
-    payment_status: string;
-    payment_method: string;
-    total_price: string;
-    created_at: string;
-    updated_at: string;
-    items: {
-      external_id: string | null;
-      product_name: string | null;
-      quantity: number;
-      price: string;
-    }[];
-  }[];
-  next?: string;
-}
-
 export interface MyTownCartOptions {
   /** `.../api/v1/integrations` */
   apiBaseUrl: string;
@@ -180,6 +172,11 @@ export interface MyTownCartOptions {
   fetch?: FetchLike;
   /** Poll pacing override (tests); otherwise the server's `interval`/limits apply. */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Send item groups as one product with variants (needs a server with
+   * INTEGRATIONS_VARIANTS_ENABLED). Off = every option is its own product.
+   */
+  variantGroups?: boolean;
 }
 
 /** Client name the seller sees in the marketplace's connected-apps list. */
@@ -311,7 +308,65 @@ export class MyTownCartConnector implements MarketplaceConnector {
     }
   }
 
+  /** Wire shape of one item group: a product whose variants are its options. */
+  private groupWire(members: PublishItem[]) {
+    const first = members[0]!;
+    return {
+      external_id: first.group!.id,
+      name: first.group!.name,
+      category: first.categoryId,
+      is_active: members.some((m) => m.isActive),
+      ...(first.description ? { description: first.description } : {}),
+      ...(first.brand ? { brand: first.brand } : {}),
+      ...(first.customAttributes && Object.keys(first.customAttributes).length > 0
+        ? { attributes: first.customAttributes }
+        : {}),
+      variants: members.map((m) => ({
+        external_id: m.externalId,
+        price: paiseToDecimal(m.pricePaise),
+        ...(m.mrpPaise > m.pricePaise ? { old_price: paiseToDecimal(m.mrpPaise) } : {}),
+        stock: m.stockUnits,
+        ...(m.barcode ? { barcode: m.barcode } : {}),
+        is_active: m.isActive,
+        options: m.group!.options,
+      })),
+    };
+  }
+
   async upsertItems(items: PublishItem[]): Promise<UpsertResult[]> {
+    if (!this.opts.variantGroups || !items.some((i) => i.group)) return this.upsertPlain(items);
+    const groups = new Map<string, PublishItem[]>();
+    const plain: PublishItem[] = [];
+    for (const item of items) {
+      if (!item.group) plain.push(item);
+      else groups.set(item.group.id, [...(groups.get(item.group.id) ?? []), item]);
+    }
+    const out = await this.upsertPlain(plain);
+    const entries = [...groups.entries()];
+    for (let i = 0; i < entries.length; i += BULK_CHUNK) {
+      const chunk = entries.slice(i, i + BULK_CHUNK);
+      const body = await this.http.json<BulkResponse>("POST", "/products/bulk-upsert/", {
+        items: chunk.map(([, members]) => this.groupWire(members)),
+      });
+      const byGroup = new Map(body.results.map((r) => [r.external_id, r]));
+      for (const [groupId, members] of chunk) {
+        const r = byGroup.get(groupId);
+        for (const m of members) {
+          out.push({
+            externalId: m.externalId,
+            productId: r?.product_id ?? null,
+            variantId: r?.variants?.[m.externalId] ?? null,
+            status: r ? r.status : "error",
+            visible: r?.visible ?? false,
+            error: r ? r.error : "No result returned for this item group.",
+          });
+        }
+      }
+    }
+    return out;
+  }
+
+  private async upsertPlain(items: PublishItem[]): Promise<UpsertResult[]> {
     const out: UpsertResult[] = [];
     for (let i = 0; i < items.length; i += BULK_CHUNK) {
       const chunk = items.slice(i, i + BULK_CHUNK);
@@ -328,7 +383,11 @@ export class MyTownCartConnector implements MarketplaceConnector {
           stock: item.stockUnits,
           ...(item.barcode ? { barcode: item.barcode } : {}),
           is_active: item.isActive,
-          ...(item.description ? { description: item.description } : {}),
+          ...(item.description
+            ? { description: item.description }
+            : item.clearDescription
+              ? { description: "" }
+              : {}),
           ...(item.brand ? { brand: item.brand } : {}),
           ...(item.customAttributes && Object.keys(item.customAttributes).length > 0
             ? { attributes: item.customAttributes }
@@ -365,6 +424,10 @@ export class MyTownCartConnector implements MarketplaceConnector {
       isMain: Boolean(res?.is_main),
       isActive: Boolean(res?.is_active),
     };
+  }
+
+  async downloadImage(url: string): Promise<Uint8Array> {
+    return this.http.download(url, 10 * 1024 * 1024);
   }
 
   async deleteImage(externalId: string, imageId?: string): Promise<void> {
@@ -423,41 +486,28 @@ export class MyTownCartConnector implements MarketplaceConnector {
     };
   }
 
-  async pullOrders(
-    after?: string,
-    opts: { force?: boolean } = {},
-  ): Promise<{ orders: RemoteOrder[]; next?: string }> {
-    const params = new URLSearchParams();
-    if (after) params.set("after", after);
-    if (opts.force) params.set("force", "1");
-    const qs = params.toString() ? `?${params.toString()}` : "";
-    const body = await this.http.json<OrdersResponse>("GET", `/orders/${qs}`);
-    return {
-      orders: body.orders.map((o) => ({
-        id: o.id,
-        status: o.status,
-        paymentStatus: o.payment_status,
-        paymentMethod: o.payment_method,
-        totalPaise: decimalToPaise(o.total_price) ?? 0,
-        placedAt: o.created_at,
-        updatedAt: o.updated_at,
-        lines: o.items.map((i) => ({
-          externalId: i.external_id,
-          productName: i.product_name,
-          qtyUnits: i.quantity,
-          unitPricePaise: decimalToPaise(i.price) ?? 0,
-        })),
-      })),
-      next: body.next,
-    };
-  }
-
   async listRemoteItems(): Promise<RemoteItem[]> {
     const out: RemoteItem[] = [];
     for (let page = 1; page <= 100; page++) {
       const body = await this.http.json<ProductPage>("GET", `/products/?page=${page}&page_size=100`);
       for (const p of body.results) {
         if (p.variant_id === null) continue;
+        // Item group: each variant is a separate billing item, linked by its own id.
+        const linked = (p.variants ?? []).filter((v) => v.external_id !== "");
+        if (linked.length > 0) {
+          for (const v of linked) {
+            out.push({
+              externalId: v.external_id,
+              productId: p.product_id,
+              variantId: v.variant_id,
+              stockUnits: v.stock,
+              pricePaise: decimalToPaise(v.price) ?? 0,
+              isActive: p.is_active && v.is_active,
+              name: p.name ?? "",
+            });
+          }
+          continue;
+        }
         out.push({
           externalId: p.external_id,
           productId: p.product_id,
@@ -466,6 +516,15 @@ export class MyTownCartConnector implements MarketplaceConnector {
           pricePaise: decimalToPaise(p.price) ?? 0,
           isActive: p.is_active,
           name: p.name ?? "",
+          ...(p.description === undefined ? {} : { description: p.description }),
+          ...(p.main_image === undefined
+            ? {}
+            : {
+                mainImage:
+                  p.main_image === null
+                    ? null
+                    : { id: p.main_image.id, url: p.main_image.url, uploadedAt: p.main_image.uploaded_at },
+              }),
         });
       }
       if (!body.has_next) break;
@@ -495,6 +554,7 @@ export class MyTownCartConnector implements MarketplaceConnector {
           pricePaise: decimalToPaise(p.price) ?? 0,
           stockUnits: p.stock ?? 0,
           isActive: p.is_active,
+          ...(p.description === undefined ? {} : { description: p.description }),
         });
       }
       if (!body.has_next) break;

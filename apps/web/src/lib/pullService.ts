@@ -71,6 +71,7 @@ async function pullOne(
     taxRateBp: 0,
     openingStockMilli: product.stockUnits * 1000,
     isActive: product.isActive,
+    description: product.description ?? "",
   });
 
   const [adopted] = await connector.adoptProducts([

@@ -54,7 +54,6 @@ import type {
   PurchaseLine,
   ReconcileFix,
   RemoteItemLink,
-  RemoteOrderRecord,
   ShopProfile,
   StockDiscrepancyInput,
   StockMovementRecord,
@@ -103,7 +102,6 @@ export class MemoryRepository implements BillingRepository {
   private held = new Map<number, HeldBill>();
   private outbox: OutboxRow[] = [];
   private cursors = new Map<string, string>();
-  private remoteOrders = new Map<string, RemoteOrderRecord>();
   private appSettings = new Map<string, string>();
 
   async getShopProfile(): Promise<ShopProfile | null> {
@@ -220,6 +218,8 @@ export class MemoryRepository implements BillingRepository {
         brand: input.brand !== undefined ? input.brand : (existing.brand ?? ""),
         customAttributes:
           input.customAttributes !== undefined ? { ...input.customAttributes } : (existing.customAttributes ?? {}),
+        variantGroup: input.variantGroup ?? existing.variantGroup ?? "",
+        variantOptions: input.variantOptions ? { ...input.variantOptions } : (existing.variantOptions ?? {}),
         updatedAt: now,
       });
       return input.id;
@@ -258,6 +258,8 @@ export class MemoryRepository implements BillingRepository {
       description: input.description ?? "",
       brand: input.brand ?? "",
       customAttributes: input.customAttributes ? { ...input.customAttributes } : {},
+      variantGroup: input.variantGroup ?? "",
+      variantOptions: input.variantOptions ? { ...input.variantOptions } : {},
       updatedAt: now,
     });
     if (input.openingStockMilli !== 0) {
@@ -846,15 +848,6 @@ export class MemoryRepository implements BillingRepository {
       linked += 1;
     }
     return linked;
-  }
-
-  async listRemoteOrders(): Promise<RemoteOrderRecord[]> {
-    return [...this.remoteOrders.values()].sort((a, b) => b.placedAt.localeCompare(a.placedAt));
-  }
-
-  async recordRemoteOrders(orders: readonly RemoteOrderRecord[]): Promise<number> {
-    for (const order of orders) this.remoteOrders.set(order.id, { ...order });
-    return orders.length;
   }
 
   /**

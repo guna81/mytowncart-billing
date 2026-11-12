@@ -21,6 +21,8 @@ import type {
   UpsertResult,
 } from "@mytowncart-billing/connector-mytowncart";
 import type { BillingRepository, Category, Item, PublishOutcome } from "@mytowncart-billing/storage";
+import { toWireHtml } from "./richText";
+import { groupOf } from "./variantSync";
 
 export interface PublishResult {
   total: number;
@@ -51,7 +53,7 @@ export function toPlanInputs(
     photoPath: item.photoPath,
     marketplaceCategoryId: item.categoryId === null ? null : (mapped.get(item.categoryId) ?? null),
     lastPublishedHash: item.contentHash,
-    description: item.description,
+    description: toWireHtml(item.description ?? ""),
     brand: item.brand,
     customAttributes: item.customAttributes,
   }));
@@ -143,6 +145,7 @@ export async function publishCatalogItems(
         description: r.input.description,
         brand: r.input.brand,
         customAttributes: r.input.customAttributes,
+        ...groupOf(itemsToPublish.find((i) => i.id === r.input.id)),
       })),
     );
   } catch (err) {
@@ -171,7 +174,7 @@ export async function publishCatalogItems(
             (a, b) => (b.isMain ? 1 : 0) - (a.isMain ? 1 : 0) || a.position - b.position,
           );
           for (const img of sorted) {
-            if (img.imageUploadedAt !== img.imageHash) {
+            if (img.imageUploadedAt === null) {
               try {
                 const photo = await repo.readItemImage(img.id);
                 if (photo && photo.imageHash === img.imageHash) {
@@ -195,7 +198,7 @@ export async function publishCatalogItems(
         } else if (
           item.photoFile !== "" &&
           item.imageHash !== null &&
-          item.imageUploadedAt !== item.imageHash
+          item.imageUploadedAt === null
         ) {
           const photo = await repo.readItemPhoto(item.id);
           if (photo && photo.imageHash === item.imageHash) {

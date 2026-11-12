@@ -270,14 +270,18 @@ export function SyncPanel({
           ) : null}
           {(last?.outcome.pulledItems ?? 0) +
             (last?.outcome.pulledPrices ?? 0) +
-            (last?.outcome.pulledNames ?? 0) >
+            (last?.outcome.pulledNames ?? 0) +
+            (last?.outcome.pulledDescriptions ?? 0) +
+            (last?.outcome.pulledPhotos ?? 0) >
           0 ? (
             <p className="mt-1 text-sm" data-testid="sync-pulled">
               {t("sync.pulled_from_mtc", {
                 items: last?.outcome.pulledItems ?? 0,
                 prices:
                   (last?.outcome.pulledPrices ?? 0) +
-                  (last?.outcome.pulledNames ?? 0),
+                  (last?.outcome.pulledNames ?? 0) +
+                  (last?.outcome.pulledDescriptions ?? 0) +
+                  (last?.outcome.pulledPhotos ?? 0),
               })}
             </p>
           ) : null}

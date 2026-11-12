@@ -69,6 +69,10 @@ export interface Item {
   description: string;
   brand: string;
   customAttributes: Record<string, string>;
+  /** Items sharing a non-empty group are sizes/options of one product. "" = single item. */
+  variantGroup: string;
+  /** This item's own option values, e.g. { Size: "M" }. */
+  variantOptions: Record<string, string>;
   updatedAt: string;
 }
 
@@ -112,26 +116,6 @@ export interface OutboxRow {
   attempts: number;
   nextAttemptAt: string | null;
   status: OutboxStatus;
-}
-
-export interface RemoteOrderLine {
-  externalId: string | null;
-  productName: string | null;
-  qtyUnits: number;
-  unitPricePaise: number;
-}
-
-/** Read-only mirror of a marketplace order (stock already arrived via the feed). */
-export interface RemoteOrderRecord {
-  id: string;
-  status: string;
-  paymentStatus: string;
-  paymentMethod: string;
-  totalPaise: number;
-  placedAt: string;
-  updatedAt: string;
-  lines: RemoteOrderLine[];
-  syncedAt: string;
 }
 
 /** Remote catalogue entry observed for an item (reconcile + fingerprinting). */
@@ -183,6 +167,8 @@ export interface ItemInput {
   description?: string;
   brand?: string;
   customAttributes?: Record<string, string>;
+  variantGroup?: string;
+  variantOptions?: Record<string, string>;
 }
 
 export interface Customer {

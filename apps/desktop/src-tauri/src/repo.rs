@@ -377,6 +377,12 @@ pub struct ItemPayload {
     pub brand: String,
     #[serde(default)]
     pub custom_attributes: String,
+    /// Shared key of the items that are variants of one product; "" = single item.
+    #[serde(default)]
+    pub variant_group: String,
+    /// This item's own option values as JSON, e.g. {"Size":"M"}.
+    #[serde(default)]
+    pub variant_options: String,
     pub now: String,
 }
 
@@ -404,12 +410,14 @@ fn upsert_item_inner(conn: &Connection, p: &ItemPayload) -> RepoResult<i64> {
                     "UPDATE items SET name = ?2, barcode = ?3, category_id = ?4, unit_kind = ?5,
                        price_paise = ?6, mrp_paise = ?7, tax_rate_bp = ?8, is_active = ?9,
                        hsn_code = ?10, cost_price_paise = ?11, description = ?12, brand = ?13,
-                       custom_attributes = ?14, updated_at = ?15
+                       custom_attributes = ?14, updated_at = ?15,
+                       variant_group = ?16, variant_options = ?17
                      WHERE id = ?1",
                     rusqlite::params![
                         id, p.name, p.barcode, p.category_id, p.unit_kind, p.price_paise,
                         p.mrp_paise, p.tax_rate_bp, p.is_active as i64, p.hsn_code, p.cost_price_paise,
                         p.description, p.brand, p.custom_attributes, p.now,
+                        p.variant_group, if p.variant_options.is_empty() { "{}" } else { &p.variant_options },
                     ],
                 )
                 .map_err(err)?;
@@ -436,12 +444,13 @@ fn upsert_item_inner(conn: &Connection, p: &ItemPayload) -> RepoResult<i64> {
             conn.execute(
                 "INSERT INTO items (name, barcode, category_id, unit_kind, price_paise, mrp_paise,
                    tax_rate_bp, stock_milli, is_active, hsn_code, cost_price_paise,
-                   description, brand, custom_attributes, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                   description, brand, custom_attributes, updated_at, variant_group, variant_options)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                 rusqlite::params![
                     p.name, p.barcode, p.category_id, p.unit_kind, p.price_paise, p.mrp_paise,
                     p.tax_rate_bp, p.is_active as i64, p.hsn_code, p.cost_price_paise,
                     p.description, p.brand, p.custom_attributes, p.now,
+                    p.variant_group, if p.variant_options.is_empty() { "{}" } else { &p.variant_options },
                 ],
             )
             .map_err(err)?;
@@ -3093,6 +3102,8 @@ mod tests {
                 description: String::new(),
                 brand: String::new(),
                 custom_attributes: String::new(),
+                variant_group: String::new(),
+                variant_options: String::new(),
                 now: "2026-11-04T10:00:00Z".to_string(),
             },
         )
@@ -3655,6 +3666,8 @@ mod tests {
             description: String::new(),
             brand: String::new(),
             custom_attributes: String::new(),
+            variant_group: String::new(),
+            variant_options: String::new(),
             now: "2026-11-04T10:00:00Z".to_string(),
         };
         let bad = ItemPayload { name: String::new(), ..good.clone() };
@@ -3687,6 +3700,8 @@ mod tests {
             description: String::new(),
             brand: String::new(),
             custom_attributes: String::new(),
+            variant_group: String::new(),
+            variant_options: String::new(),
             now: "2026-11-04T10:00:00Z".to_string(),
         };
         import_items(&mut conn, std::slice::from_ref(&payload)).unwrap();
@@ -3724,6 +3739,8 @@ mod tests {
             description: "Premium rich dark chocolate with organic cocoa beans.".to_string(),
             brand: "ChocoDelight".to_string(),
             custom_attributes: r#"{"Weight":"100g","Cocoa":"70%"}"#.to_string(),
+            variant_group: String::new(),
+            variant_options: String::new(),
             now: "2026-11-04T10:00:00Z".to_string(),
         };
         let id = upsert_item(&mut conn, &payload).unwrap();
@@ -3744,6 +3761,8 @@ mod tests {
             brand: "ChocoDelight Reserve".to_string(),
             description: "Updated description".to_string(),
             custom_attributes: r#"{"Weight":"100g","Cocoa":"85%"}"#.to_string(),
+            variant_group: String::new(),
+            variant_options: String::new(),
             ..payload
         };
         upsert_item(&mut conn, &update_payload).unwrap();

@@ -152,3 +152,26 @@ generated and kept by the owner.
 - Never write history-rewriting git commands in automation; the maintainer
   commits manually.
 - Note spec deviations in `DECISIONS.md` in the same change.
+
+## Testing the marketplace sync against a local backend
+
+1. Start the MyTownCart backend (Docker dev compose, API on `localhost:9000`). For item groups set
+   `INTEGRATIONS_VARIANTS_ENABLED=true` in its `backend/.env` and recreate the container.
+2. From `apps/desktop`, run the desktop app with the local endpoints:
+
+   ```sh
+   MTC_DEV_API_URL=http://localhost:9000/api/v1/integrations \
+   VITE_MTC_API_URL=http://localhost:9000/api/v1/integrations \
+   VITE_MTC_WEB_URL=http://localhost:9000 \
+   VITE_VARIANT_SYNC=1 pnpm tauri dev
+   ```
+
+   `VITE_MTC_WEB_URL` is the **API origin** (it serves `/api/v1/products/categories/`), not the website.
+   `MTC_DEV_API_URL` only affects the LAN proxy and is ignored in release builds and for non-loopback hosts.
+3. Connect from *MyTownCart* and approve on `http://localhost:4000/seller/connect`. Check the
+   pairing code exists in the local database before approving; never approve a code on
+   `www.mytowncart.com` while testing locally.
+4. Test sync in the **desktop window**, not the LAN browser view (see `LAN.md`). Use one client per
+   connection: a second tab polling with the same token trips the 120 s stock-feed limit.
+5. New items upload only with *Sync all items* on, a mapped marketplace category, a price above zero and
+   whole-number stock. Remember to clean up test items and turn settings back.

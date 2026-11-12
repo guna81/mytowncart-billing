@@ -48,7 +48,6 @@ import type {
   PurchaseLine,
   ReconcileFix,
   RemoteItemLink,
-  RemoteOrderRecord,
   ShopProfile,
   StockDiscrepancyInput,
   StockMovementRecord,
@@ -198,8 +197,6 @@ export interface BillingRepository {
   ): Promise<{ externalId: string; itemId: number | null; deltaMilli: number }[]>;
   /** Store what the marketplace currently holds for each linked item. */
   recordRemoteCatalog(items: readonly RemoteItemLink[]): Promise<number>;
-  listRemoteOrders(): Promise<RemoteOrderRecord[]>;
-  recordRemoteOrders(orders: readonly RemoteOrderRecord[]): Promise<number>;
   /** Reconcile with "local wins": write local price/stock into the marketplace. */
   applyReconcileFixes(fixes: readonly ReconcileFix[]): Promise<void>;
 

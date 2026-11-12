@@ -13,6 +13,7 @@ import {
 import { currentToken } from "./connection";
 import { isLanServer } from "./repository";
 import { lanMarketplaceFetch } from "./lanMarketplace";
+import { variantSyncEnabled } from "./variantSync";
 
 const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
 
@@ -26,6 +27,7 @@ export function getConnector(): MyTownCartConnector {
       apiBaseUrl: env.VITE_MTC_API_URL || DEFAULT_API_BASE_URL,
       webBaseUrl: MARKETPLACE_WEB_URL,
       appVersion: APP_VERSION,
+      variantGroups: variantSyncEnabled(),
       getToken: currentToken,
       ...(isLanServer() ? { fetch: lanMarketplaceFetch } : {}),
     });
