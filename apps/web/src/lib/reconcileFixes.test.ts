@@ -157,6 +157,22 @@ describe("durable stock reconciliation active path", () => {
     expect(calls).toHaveLength(1);
     expect((await repo.listItems({ activeOnly: false }))[0]?.stockMilli).toBe(4000);
   });
+
+  it("ignores local-only items that merely carry a content hash (marketplace rejects them as unknown_item)", async () => {
+    const { repo, itemId, connector, remote } = await fixture();
+    const ghostId = await repo.upsertItem({ name: "Never published", barcode: "", categoryId: null, unitKind: "count", pricePaise: 100, mrpPaise: 100, taxRateBp: 0, openingStockMilli: 3000, isActive: true });
+    await repo.recordPublish([{ itemId: ghostId, state: "local_only", remoteProductId: null, remoteVariantId: null, contentHash: "stale-hash" }], new Map());
+    const requested: string[][] = [];
+    connector.stockSnapshot = async (ids: string[]) => {
+      requested.push(ids);
+      if (ids.some((id) => id !== remote.externalId)) throw new MarketplaceError("unknown_item", "unknown_item", 404);
+      return { epoch: "epoch", watermark: 10, items: [{ ...remote, stockUnits: 5 }] };
+    };
+    await bootstrapStock(repo, connector, false);
+    expect(requested).toEqual([[`itm_${itemId}`]]);
+    expect(await repo.getAppSetting("sync.stock_bootstrap_required")).toBeNull();
+    expect(await repo.getAppSetting("sync.stock_epoch")).toBe("epoch");
+  });
 });
 
 describe("explicit shortage recovery", () => {

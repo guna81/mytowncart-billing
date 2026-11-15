@@ -187,6 +187,16 @@ Before the first stock feed pull, explicitly bootstrap all linked items using th
 chosen local or marketplace stock baseline. Partial bootstrap remains visible and
 resumable; the global cursor changes epoch only after all linked items are covered.
 Ambiguous legacy outbox rows require this explicit decision, not blind replay.
+Only items with a marketplace link (a remote product or variant id) are
+bootstrapped; a `local_only` item that merely carries a content hash is skipped,
+because the marketplace answers `unknown_item` (404) for the whole snapshot batch
+if any requested id is not linked. The setup buttons ask for confirmation through
+the native Tauri dialog (`confirmAction` in `lib/shell.ts`; `window.confirm` is
+replaced by an async stub in the desktop shell and cannot be used for this), and
+setup progress and errors are shown on the Settings tab under the buttons. The
+Audited stock recovery form appears only when a quarantined source or an item
+needing review exists; completed baselines show as history only.
+
 Every stock push carries the item's epoch, variant and generation from its last snapshot; a push without a current fence is rejected by the marketplace.
 
 Metadata differences use `remote.seen`, refreshed on sync and ignored after seven

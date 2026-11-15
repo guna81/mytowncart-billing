@@ -34,3 +34,22 @@ export async function pickPath(opts: {
     return null;
   }
 }
+
+/**
+ * Yes/no confirmation. The Tauri dialog plugin replaces `window.confirm` with an
+ * async function, so `!window.confirm(...)` is always false inside the desktop
+ * app and the guarded action silently runs (or the call is denied). Use this
+ * awaited helper instead; it falls back to `window.confirm` in a plain browser.
+ */
+export async function confirmAction(message: string): Promise<boolean> {
+  if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+    try {
+      const { ask } = await import("@tauri-apps/plugin-dialog");
+      return await ask(message, { kind: "warning" });
+    } catch (err) {
+      console.warn("confirmAction failed:", err);
+      return false;
+    }
+  }
+  return window.confirm(message);
+}

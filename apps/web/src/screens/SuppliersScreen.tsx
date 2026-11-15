@@ -4,6 +4,7 @@ import type { Supplier } from "@mytowncart-billing/storage";
 import { t } from "../i18n";
 import { getRepository } from "../lib/repository";
 import { Button, Input, Modal, EmptyState, PageHeader } from "../components/ui";
+import { confirmAction } from "../lib/shell";
 
 function SupplierDialog({
   initial,
@@ -117,7 +118,7 @@ export function SuppliersScreen() {
   }, [search]);
 
   const onDelete = async (s: Supplier) => {
-    if (!window.confirm(t("suppliers.delete_confirm", { name: s.name }))) return;
+    if (!await confirmAction(t("suppliers.delete_confirm", { name: s.name }))) return;
     try {
       setError(null);
       await getRepository().deleteSupplier(s.id);

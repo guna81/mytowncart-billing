@@ -174,7 +174,9 @@ export async function bootstrapStock(
   requireStockProtocol(connector);
   await repo.setAppSetting("sync.stock_bootstrap_required", "true");
   await recoverStockReconciliations(repo, connector);
-  const items = (await repo.listItems({ activeOnly: false })).filter((item) => item.remoteProductId !== null || item.contentHash !== null);
+  // Linked = has a marketplace id. A bare content hash (local_only items) is not a link;
+  // the marketplace rejects the whole snapshot batch with unknown_item for such an item.
+  const items = (await repo.listItems({ activeOnly: false })).filter((item) => item.remoteProductId !== null || item.remoteVariantId !== null);
   let epoch: string | null = null;
   const completed = new Map((await repo.listStockProtocolStates()).map((state) => [state.externalId, state]));
   for (let index = 0; index < items.length; index += 200) {

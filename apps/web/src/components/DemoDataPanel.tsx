@@ -5,6 +5,7 @@ import { t } from "../i18n";
 import { getRepository } from "../lib/repository";
 import { refreshLoginState } from "../lib/roles";
 import { useAppStore } from "../store/appStore";
+import { confirmAction } from "../lib/shell";
 
 export function DemoDataPanel() {
   const [loading, setLoading] = useState(false);
@@ -15,7 +16,7 @@ export function DemoDataPanel() {
   const bumpDataVersion = useAppStore((s) => s.bumpDataVersion);
 
   const handleSeed = async () => {
-    if (!window.confirm(t("settings.demo_data_confirm"))) {
+    if (!await confirmAction(t("settings.demo_data_confirm"))) {
       return;
     }
     setLoading(true);

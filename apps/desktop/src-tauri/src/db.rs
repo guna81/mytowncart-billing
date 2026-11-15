@@ -104,7 +104,51 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "stock_recovery",
         sql: include_str!("../migrations/0016_stock_recovery.sql"),
     },
+    Migration {
+        version: 17,
+        name: "repair_missing_columns",
+        sql: include_str!("../migrations/0017_repair_missing_columns.sql"),
+    },
 ];
+
+/// Version whose application also runs [`repair_missing_columns`].
+const REPAIR_VERSION: u32 = 17;
+
+/// Columns that 0015/0016 add via `ALTER TABLE`; (table, column, definition).
+const REPAIRABLE_COLUMNS: &[(&str, &str, &str)] = &[
+    ("outbox", "quarantine_reason", "TEXT"),
+    ("stock_deliveries", "outcome_detail", "TEXT"),
+    (
+        "stock_reconciliations",
+        "parent_operation_id",
+        "TEXT REFERENCES stock_reconciliations(operation_id)",
+    ),
+    (
+        "stock_reconciliations",
+        "active",
+        "INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1))",
+    ),
+];
+
+/// Add any [`REPAIRABLE_COLUMNS`] missing from the schema. Idempotent.
+fn repair_missing_columns(conn: &Connection) -> rusqlite::Result<()> {
+    for (table, column, def) in REPAIRABLE_COLUMNS {
+        let present: i64 = conn.query_row(
+            &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1"),
+            [column],
+            |r| r.get(0),
+        )?;
+        let table_exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?1",
+            [table],
+            |r| r.get(0),
+        )?;
+        if table_exists > 0 && present == 0 {
+            conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {def};"))?;
+        }
+    }
+    Ok(())
+}
 
 #[derive(Debug, Error)]
 pub enum MigrateError {
@@ -210,6 +254,9 @@ pub fn migrate_with(db_path: &Path, migrations: &[Migration]) -> Result<Migratio
     for m in pending {
         let tx = conn.transaction()?;
         tx.execute_batch(m.sql)?;
+        if m.version == REPAIR_VERSION {
+            repair_missing_columns(&tx)?;
+        }
         tx.execute(
             "INSERT INTO schema_version (version, name, applied_at) VALUES (?1, ?2, ?3)",
             rusqlite::params![m.version, m.name, unix_ts().to_string()],
@@ -314,6 +361,30 @@ mod tests {
         assert_eq!(sum(2, "upi"), 30_000);
         assert_eq!(sum(2, "cash"), 8_000);
         assert_eq!(sum(3, "cash"), 38_000);
+    }
+
+    #[test]
+    fn migration_17_adds_columns_missing_from_a_hand_repaired_db() {
+        let dir = TempDir::new().unwrap();
+        let path = db_path(&dir);
+        migrate_with(&path, MIGRATIONS).unwrap();
+        {
+            // Simulate the broken state: v16 recorded but columns absent.
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(
+                "ALTER TABLE outbox DROP COLUMN quarantine_reason;
+                 ALTER TABLE stock_deliveries DROP COLUMN outcome_detail;
+                 DELETE FROM schema_version WHERE version = 17;",
+            )
+            .unwrap();
+        }
+        let out = migrate_with(&path, MIGRATIONS).unwrap();
+        assert_eq!((out.from_version, out.to_version), (16, 17));
+        let c = Connection::open(&path).unwrap();
+        c.execute_batch("SELECT quarantine_reason FROM outbox; SELECT outcome_detail FROM stock_deliveries;")
+            .unwrap();
+        // Re-running is a no-op.
+        assert_eq!(migrate_with(&path, MIGRATIONS).unwrap().from_version, 17);
     }
 
     #[test]

@@ -37,6 +37,7 @@ import { t, type I18nKey } from "../i18n";
 import { triggerImmediateSync } from "../lib/autoSync";
 import { getRepository } from "../lib/repository";
 import { useAppStore } from "../store/appStore";
+import { confirmAction } from "../lib/shell";
 
 type Line = BillLineInput & { key: string; batchNo?: string; expiryDate?: string };
 
@@ -504,7 +505,7 @@ export function PosScreen() {
   };
 
   const discardHeld = async (id: number) => {
-    if (!window.confirm(t("pos.discard_confirm"))) return;
+    if (!await confirmAction(t("pos.discard_confirm"))) return;
     try {
       await getRepository().takeHeldBill(id);
       if (heldItem?.id === id) setHeldItem(null);

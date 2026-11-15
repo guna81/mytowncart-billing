@@ -180,6 +180,16 @@ are the exact column/default/index reference.
 | `0007_phase2_daily_driver.sql` | `credit_notes`, `credit_note_lines`, `suppliers`, `purchases`, `purchase_lines`, `users`, `audit_logs` |
 | `0008_phase3_growth.sql` | `item_batches`, customer `loyalty_points`, `loyalty_transactions`, `item_barcodes` with pack quantities, `day_end_closures` |
 
+### Repair migration 0017
+
+`0017_repair_missing_columns.sql` is a marker (`SELECT 1;`); the real work is
+`repair_missing_columns` in `db.rs`, run in the same transaction. SQLite has no
+`ADD COLUMN IF NOT EXISTS`, so it checks `pragma_table_info` and adds only what is
+absent: `outbox.quarantine_reason`, `stock_deliveries.outcome_detail`,
+`stock_reconciliations.parent_operation_id` and `.active`. It heals databases that
+were recorded as v16 after a hand repair that skipped some `ALTER`s (symptom:
+`no such column: quarantine_reason` during sync) and is a no-op on healthy ones.
+
 Customer payments record amount, mode (`cash`, `upi`, `card`, `bank`), notes
 and timestamp. Credit notes retain a reference to the original bill plus
 snapshot lines. Purchases reference suppliers and retain cost/tax snapshots.

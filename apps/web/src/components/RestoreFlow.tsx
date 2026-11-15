@@ -20,7 +20,7 @@ import {
   saveRecoveryKey,
   type BackupOpenResult,
 } from "../lib/cryptoStore";
-import { invoke, invokeRaw, pickPath } from "../lib/shell";
+import { confirmAction, invoke, invokeRaw, pickPath } from "../lib/shell";
 import { getRepository } from "../lib/repository";
 import { isInTauri } from "../lib/tauri";
 
@@ -109,7 +109,7 @@ export function RestoreFlow() {
 
   const restore = async () => {
     if (opened === null) return;
-    if (!window.confirm(t("backup.restore_confirm"))) return;
+    if (!await confirmAction(t("backup.restore_confirm"))) return;
     setError(null);
     setBusy(true);
     try {

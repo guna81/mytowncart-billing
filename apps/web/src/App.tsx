@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { OwnerOnly } from "./components/OwnerOnly";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { Layout } from "./components/Layout";
@@ -11,7 +11,9 @@ import { checkAndRunAutoBackup } from "./lib/autoBackup";
 import { useAutoSync } from "./lib/autoSync";
 import { DIAGNOSTICS_KEY, setDiagnosticsEnabled } from "./lib/diagnostics";
 import { SHOP_LOGO_KEY } from "./lib/shopLogo";
-import { getRepository } from "./lib/repository";
+import { getRepository, isLanServer } from "./lib/repository";
+import { refreshLoginState } from "./lib/roles";
+import { PinLockModal } from "./components/PinLockModal";
 import { BillDetailScreen } from "./screens/BillDetailScreen";
 import { BillsScreen } from "./screens/BillsScreen";
 import { CustomersScreen } from "./screens/CustomersScreen";
@@ -46,7 +48,23 @@ export function App() {
 
   useAutoSync();
 
+  // LAN browsers have no session yet, and the host rejects every command but
+  // the PIN ones until they sign in, so boot must wait for the PIN screen.
+  const [needsLogin, setNeedsLogin] = useState(false);
+  const [loginChecked, setLoginChecked] = useState(!isLanServer());
+  const setCurrentUser = useAppStore((s) => s.setCurrentUser);
+
   useEffect(() => {
+    if (loginChecked) return;
+    void (async () => {
+      await refreshLoginState();
+      setNeedsLogin(useAppStore.getState().loginRequired && !useAppStore.getState().currentUser);
+      setLoginChecked(true);
+    })();
+  }, [loginChecked]);
+
+  useEffect(() => {
+    if (!loginChecked || needsLogin) return;
     void (async () => {
       const repo = getRepository();
       const [p, diag, logo] = await Promise.all([
@@ -62,7 +80,22 @@ export function App() {
       void checkAndRunAutoBackup();
       void runUpdateCheck();
     })();
-  }, [setProfile, setShopLogo, setBooted, runUpdateCheck]);
+  }, [loginChecked, needsLogin, setProfile, setShopLogo, setBooted, runUpdateCheck]);
+
+  if (needsLogin) {
+    return (
+      <PinLockModal
+        isOpen
+        isQuickLock={true}
+        onClose={() => {}}
+        onSuccess={(user) => {
+          setCurrentUser(user);
+          useAppStore.getState().setIsLocked(false);
+          setNeedsLogin(false);
+        }}
+      />
+    );
+  }
 
   if (!booted) {
     return <main className="p-8 text-gray-600">{t("common.loading")}</main>;

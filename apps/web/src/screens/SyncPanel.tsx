@@ -37,6 +37,7 @@ import {
   type SyncOutcome,
 } from "../lib/syncEngine";
 import { useAppStore } from "../store/appStore";
+import { confirmAction } from "../lib/shell";
 
 const btnPrimary =
   "rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:bg-blue-300";
@@ -230,7 +231,7 @@ export function SyncPanel({
   };
 
   const bootstrap = async (pull: boolean) => {
-    if (!window.confirm(t(pull ? "sync.bootstrap_remote_confirm" : "sync.bootstrap_local_confirm"))) return;
+    if (!await confirmAction(t(pull ? "sync.bootstrap_remote_confirm" : "sync.bootstrap_local_confirm"))) return;
     setSettling(true);
     setSettleError(null);
     try {
@@ -285,6 +286,8 @@ export function SyncPanel({
       {part === "sync" && bootstrapRequired && (
         <section className="space-y-2 rounded border border-amber-400 bg-amber-50 p-4 text-amber-950" data-testid="stock-bootstrap">
           <p>{t("sync.bootstrap_needed")}</p>
+          {settling && <p role="status" className="text-sm">{t("sync.status.syncing")}</p>}
+          {settleError && <p role="alert" className="text-sm text-red-700">{settleError}</p>}
           <div className="flex flex-wrap gap-2">
             <button type="button" className={btnSecondary} disabled={working || !syncAvailable()} onClick={() => void bootstrap(false)}>{t("sync.bootstrap_local")}</button>
             <button type="button" className={btnSecondary} disabled={working || !syncAvailable()} onClick={() => void bootstrap(true)}>{t("sync.bootstrap_remote")}</button>
@@ -535,12 +538,15 @@ function StockRecoverySection({ sources, intents, history, items, disabled, onRe
   const reviews = intents.filter((entry) => entry.status === "needs_review" && !intents.some((child) => child.parentOperationId === entry.operationId && child.status !== "conflict"));
   if (!sources.length && !reviews.length && !history.length && !intents.length) return null;
   const blocked = disabled || busy || !confirmed || !reason.trim();
-  return <section className="space-y-3 rounded border border-amber-400 bg-amber-50 p-4" data-testid="stock-recovery">
+  // Only history (e.g. completed setup baselines) and nothing to decide: no form, no warning.
+  const actionable = sources.length > 0 || reviews.length > 0;
+  return <section className={actionable ? "space-y-3 rounded border border-amber-400 bg-amber-50 p-4" : "space-y-3 rounded border border-gray-200 bg-white p-4"} data-testid="stock-recovery">
+    {actionable && <>
     <h2 className="font-semibold">{t("sync.recovery_title")}</h2>
     <p className="text-sm">{t("sync.recovery_warning")}</p>
     <label className="block">{t("sync.recovery_reason")}<textarea className="block w-full rounded border p-2" value={reason} onChange={(event) => setReason(event.target.value)} /></label>
     <label className="flex items-center gap-2"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmedSnapshot(event.target.checked ? reviewedSnapshot : null)} />{t("sync.recovery_confirm")}</label>
-    {error && <p role="alert" className="text-red-700">{error}</p>}
+    {error && <p role="alert" className="text-red-700">{error}</p>}</>}
     {sources.some(exceptionalStockSourceEligible) && <label className="block">{t("sync.recovery_item")}<select className="ml-2 max-w-full rounded border p-2" value={itemId} onChange={(event) => setItemId(event.target.value)}><option value="">—</option>{items.filter((item) => item.remoteProductId !== null).map((item) => <option key={item.id} value={item.id}>{item.name} (itm_{item.id})</option>)}</select></label>}
     {sources.map((source) => {
       const mapped = history.find((entry) => entry.sourceId === source.id && entry.action === "map" && !entry.retiredBy);

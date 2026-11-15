@@ -7,6 +7,7 @@ import { getRepository } from "../lib/repository";
 import { formatDate } from "../lib/formatDate";
 import { EmptyState, PageHeader } from "../components/ui";
 import { CustomerDialog } from "../components/CustomerDialog";
+import { confirmAction } from "../lib/shell";
 
 const inputCls = "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-2xs";
 const labelCls = "block text-sm font-medium text-gray-700";
@@ -305,7 +306,7 @@ export function CustomersScreen() {
   }, [search, version]);
 
   const onDelete = async (c: Customer) => {
-    if (!window.confirm(t("customers.delete_confirm", { name: c.name }))) return;
+    if (!await confirmAction(t("customers.delete_confirm", { name: c.name }))) return;
     try {
       setErrorNotice(null);
       await getRepository().deleteCustomer(c.id);

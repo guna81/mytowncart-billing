@@ -383,7 +383,7 @@ export class MyTownCartConnector implements MarketplaceConnector {
         headers: { Accept: "application/json", "X-App-Version": this.opts.appVersion },
       });
       if (!response.ok) {
-        throw new MarketplaceError("categories_unavailable", "Could not load marketplace categories.", response.status, retryAfterSeconds(response));
+        throw new MarketplaceError("categories_unavailable", `Could not load marketplace categories (HTTP ${response.status} from ${url}).`, response.status, retryAfterSeconds(response));
       }
       return (await response.json()) as CategoryPage;
     } catch (err) {
