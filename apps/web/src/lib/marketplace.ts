@@ -8,6 +8,8 @@ import { APP_VERSION } from "@mytowncart-billing/core";
 import {
   DEFAULT_API_BASE_URL,
   DEFAULT_WEB_BASE_URL,
+  DEV_API_BASE_URL,
+  DEV_WEB_BASE_URL,
   MyTownCartConnector,
 } from "@mytowncart-billing/connector-mytowncart";
 import { currentToken } from "./connection";
@@ -15,16 +17,29 @@ import { isLanServer } from "./repository";
 import { lanMarketplaceFetch } from "./lanMarketplace";
 import { variantSyncEnabled } from "./variantSync";
 
-const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
+const env = (import.meta as unknown as { env?: Record<string, string | boolean | undefined> }).env ?? {};
+const isDev = Boolean(env.DEV);
 
-export const MARKETPLACE_WEB_URL = env.VITE_MTC_WEB_URL || DEFAULT_WEB_BASE_URL;
+export const MARKETPLACE_WEB_URL =
+  (typeof env.VITE_MTC_WEB_URL === "string" && env.VITE_MTC_WEB_URL
+    ? env.VITE_MTC_WEB_URL
+    : isDev
+      ? DEV_WEB_BASE_URL
+      : DEFAULT_WEB_BASE_URL);
+
+export const MARKETPLACE_API_URL =
+  (typeof env.VITE_MTC_API_URL === "string" && env.VITE_MTC_API_URL
+    ? env.VITE_MTC_API_URL
+    : isDev
+      ? DEV_API_BASE_URL
+      : DEFAULT_API_BASE_URL);
 
 let connector: MyTownCartConnector | null = null;
 
 export function getConnector(): MyTownCartConnector {
   if (!connector) {
     connector = new MyTownCartConnector({
-      apiBaseUrl: env.VITE_MTC_API_URL || DEFAULT_API_BASE_URL,
+      apiBaseUrl: MARKETPLACE_API_URL,
       webBaseUrl: MARKETPLACE_WEB_URL,
       appVersion: APP_VERSION,
       variantGroups: variantSyncEnabled(),

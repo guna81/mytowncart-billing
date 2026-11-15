@@ -68,6 +68,220 @@ beforeEach(() => {
   repo = new MemoryRepository();
 });
 
+describe("stock pull cursor", () => {
+  it("rejects a stale page without applying movements or changing the cursor", async () => {
+    const id = await makeItem({ openingStockMilli: 2000 });
+    const moves = [{ externalId: `itm_${id}`, deltaUnits: -1, reason: "online_order" as const, createdAt: "now" }];
+    const results = await Promise.allSettled([
+      repo.applyStockPull(null, "1", moves),
+      repo.applyStockPull(null, "1", moves),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((r) => r.status === "rejected")).toHaveLength(1);
+    expect((await repo.getItem(id))?.stockMilli).toBe(1000);
+    expect(await repo.getSyncCursor("stock")).toBe("1");
+    await expect(repo.applyStockPull("1", "1", moves)).rejects.toThrow("must advance");
+    await repo.applyStockPull("1", "2", []);
+    expect(await repo.getSyncCursor("stock")).toBe("2");
+  });
+});
+
+describe("outbox acknowledgements", () => {
+  it("rolls back a bad batch and never resurrects a done row", async () => {
+    const id = await makeItem({ openingStockMilli: 2000 });
+    await repo.recordPublish([{ itemId: id, state: "pending_store_approval", remoteProductId: "p1", remoteVariantId: "v1", contentHash: "abc" }], new Map());
+    await repo.adjustStock(id, -1000, "adjustment");
+    const [row] = await repo.listOutbox("pending");
+    const done = { idempotencyKey: row!.idempotencyKey, outcome: "done" as const };
+    await expect(repo.recordOutboxResults([done, { idempotencyKey: "missing", outcome: "done" }])).rejects.toThrow();
+    expect(await repo.listOutbox("pending")).toEqual([row]);
+    await repo.recordOutboxResults([done]);
+    await repo.recordOutboxResults([{ idempotencyKey: row!.idempotencyKey, outcome: "retry", nextAttemptAt: "2030-01-01T00:00:00.000Z" }]);
+    expect(await repo.listOutbox("pending")).toEqual([]);
+    expect((await repo.listOutbox("done"))[0]).toMatchObject({ attempts: 1, nextAttemptAt: null });
+  });
+});
+
+describe("reconcile pulls", () => {
+  it("allows independent metadata while unrelated stock is pending and rejects legacy stock fixes", async () => {
+    const id = await makeItem({ openingStockMilli: 2000 });
+    const other = await makeItem({ openingStockMilli: 2000 });
+    await repo.recordPublish([{ itemId: other, state: "pending_store_approval", remoteProductId: "p1", remoteVariantId: "v1", contentHash: "abc" }], new Map());
+    await repo.adjustStock(other, -1000, "adjustment");
+    const [pending] = await repo.listOutbox("pending");
+    expect(pending).toBeDefined();
+    const fixes = [
+      { itemId: id, externalId: `itm_${id}`, pullToLocal: true, kind: "stock" as const, stockUnits: 5 },
+      { itemId: id, externalId: `itm_${id}`, pullToLocal: false, kind: "price" as const },
+    ];
+    await expect(repo.applyReconcileFixes(fixes)).rejects.toThrow("durable protocol");
+    await repo.applyReconcileFixes([{ itemId: id, externalId: `itm_${id}`, pullToLocal: true, kind: "price", pricePaise: 1700 }]);
+    expect((await repo.getItem(id))?.pricePaise).toBe(1700);
+    expect((await repo.getItem(id))?.stockMilli).toBe(2000);
+    expect(await repo.listMovements(id)).toHaveLength(1);
+    await repo.recordOutboxResults([{ idempotencyKey: pending!.idempotencyKey, outcome: "done" }]);
+    await expect(repo.applyReconcileFixes(fixes)).rejects.toThrow("durable protocol");
+  });
+
+  it("applies observed values and records only real stock changes", async () => {
+    const id = await makeItem({ openingStockMilli: 2000, isActive: false });
+    const base = { itemId: id, externalId: `itm_${id}`, pullToLocal: true };
+    await repo.applyReconcileFixes([
+      { ...base, kind: "price", pricePaise: 0 },
+      { ...base, kind: "remote_inactive", isActive: true },
+    ]);
+    const input = { operationId: "remote-choice", itemId: id, externalId: `itm_${id}`, choice: "remote" as const, expectedLocalStockMilli: 2000, stockUnits: 4, variantId: "variant-id", epoch: "epoch", sequence: 10, revision: 2, generation: 1 };
+    await repo.beginStockReconciliation(input);
+    await repo.settleStockReconciliation(input.operationId, { ...input, generation: 2, revision: 3 });
+    await repo.settleStockReconciliation(input.operationId, { ...input, generation: 2, revision: 3 });
+    expect(await repo.getItem(id)).toMatchObject({ pricePaise: 0, stockMilli: 4000, isActive: true });
+    expect(await repo.listOutbox("pending")).toEqual([]);
+    expect(await repo.listMovements(id)).toHaveLength(2);
+  });
+
+  it("rejects invalid pulls and leaves the whole batch untouched", async () => {
+    const id = await makeItem({ openingStockMilli: 2000 });
+    const base = { itemId: id, externalId: `itm_${id}`, pullToLocal: true };
+    for (const bad of [
+      { ...base, kind: "price" as const },
+      { ...base, kind: "price" as const, pricePaise: -1 },
+      { ...base, kind: "stock" as const, stockUnits: 1.5 },
+      { ...base, kind: "stock" as const, stockUnits: Number.MAX_SAFE_INTEGER },
+      { ...base, kind: "remote_inactive" as const },
+      { ...base, kind: "stock" as const, stockUnits: 1, externalId: "wrong" },
+    ]) {
+      await expect(repo.applyReconcileFixes([{ ...base, kind: "stock", stockUnits: 5 }, bad])).rejects.toThrow();
+      expect(await repo.getItem(id)).toMatchObject({ stockMilli: 2000, pricePaise: 1000, isActive: true });
+      expect(await repo.listMovements(id)).toHaveLength(1);
+    }
+  });
+});
+
+describe("durable stock protocol parity", () => {
+  const state = (externalId: string, stockUnits = 5) => ({ externalId, variantId: "variant-uuid", epoch: "epoch", sequence: 10, revision: 3, generation: 2, stockUnits });
+  it("keeps immutable sale/void requests in order across expiry, retry and quarantine", async () => {
+    const id = await makeItem({ openingStockMilli: 5000 });
+    await repo.recordPublish([{ itemId: id, state: "live", remoteProductId: "remote", remoteVariantId: "variant-uuid", contentHash: "hash" }], new Map());
+    await repo.adjustStock(id, -1000, "adjustment");
+    await repo.adjustStock(id, 1000, "adjustment");
+    const a = (await repo.claimStockDelivery("2026-01-01T00:00:00Z", "2026-01-01T00:01:00Z"))!;
+    expect(await repo.claimStockDelivery("2026-01-01T00:00:01Z", "2026-01-01T00:01:01Z")).toBeNull();
+    const b = (await repo.claimStockDelivery("2026-01-01T00:01:01Z", "2026-01-01T00:02:01Z"))!;
+    expect(b.payloadJson).toBe(a.payloadJson);
+    await expect(repo.settleStockDelivery(a.id, a.claimToken, "done")).rejects.toThrow("stale");
+    await repo.settleStockDelivery(b.id, b.claimToken, "retry", "2026-01-01T00:05:00Z");
+    expect(await repo.claimStockDelivery("2026-01-01T00:04:00Z", "2026-01-01T00:05:00Z")).toBeNull();
+    const retry = (await repo.claimStockDelivery("2026-01-01T00:05:00Z", "2026-01-01T00:06:00Z"))!;
+    expect(retry.payloadJson).toBe(a.payloadJson);
+    await repo.settleStockDelivery(retry.id, retry.claimToken, "quarantined", undefined, "clamped");
+    expect((await repo.listOutbox("quarantined"))[0]?.quarantineReason).toBe("clamped");
+    expect(await repo.claimStockDelivery("2026-01-01T00:07:00Z", "2026-01-01T00:08:00Z")).toBeNull();
+  });
+  it("captures a durable boundary, rebases later sales and suppresses selected feed only", async () => {
+    const id = await makeItem({ openingStockMilli: 5000 }); const other = await makeItem({ openingStockMilli: 5000 });
+    await repo.recordPublish([{ itemId: id, state: "live", remoteProductId: "remote", remoteVariantId: "variant-uuid", contentHash: "hash" }], new Map());
+    await repo.adjustStock(id, -1000, "adjustment");
+    const request = { ...state(`itm_${id}`, 7), operationId: "decision", itemId: id, choice: "remote" as const, expectedLocalStockMilli: 4000 };
+    const intent = await repo.beginStockReconciliation(request);
+    await expect(repo.beginStockReconciliation({ ...request, stockUnits: 8 })).rejects.toThrow("changed payload");
+    await repo.adjustStock(id, -1000, "adjustment");
+    expect(await repo.claimStockDelivery("2026-01-01T00:00:00Z", "2026-01-01T00:01:00Z")).toBeNull();
+    const result = { ...state(`itm_${id}`, 7), generation: 3, revision: 4, sequence: 12 };
+    await repo.settleStockReconciliation(intent.operationId, result);
+    await repo.settleStockReconciliation(intent.operationId, result);
+    expect((await repo.getItem(id))?.stockMilli).toBe(6000);
+    expect(await repo.listOutbox("pending")).toHaveLength(1);
+    const applied = await repo.applyStockPull(null, "12", [
+      { externalId: `itm_${id}`, deltaUnits: -2, reason: "online_order", createdAt: "now", epoch: "epoch", sequence: 11 },
+      { externalId: `itm_${other}`, deltaUnits: -1, reason: "online_order", createdAt: "now", epoch: "epoch", sequence: 12 },
+    ]);
+    expect(applied.map((m) => m.itemId)).toEqual([other]);
+    const delivery = (await repo.claimStockDelivery("2026-01-01T00:02:00Z", "2026-01-01T00:03:00Z"))!;
+    expect(JSON.parse(delivery.payloadJson)).toMatchObject({ generation: 3, epoch: "epoch", variantId: "variant-uuid", deltaUnits: -1 });
+  });
+  it("rejects stale capture, unsafe fences and negative rebases without partial writes", async () => {
+    const id = await makeItem({ openingStockMilli: 5000 });
+    const request = { ...state(`itm_${id}`, 1), operationId: "decision", itemId: id, choice: "remote" as const, expectedLocalStockMilli: 4000 };
+    await expect(repo.beginStockReconciliation(request)).rejects.toThrow("local stock changed");
+    await repo.beginStockReconciliation({ ...request, expectedLocalStockMilli: 5000 });
+    await expect(repo.beginStockReconciliation({ ...request, operationId: "conflict" })).rejects.toThrow("pending");
+    await repo.adjustStock(id, -2000, "adjustment");
+    expect((await repo.settleStockReconciliation("decision", { ...state(`itm_${id}`, 1), generation: 3, revision: 4 })).status).toBe("needs_review");
+    expect((await repo.getItem(id))?.stockMilli).toBe(3000);
+    expect(await repo.listStockProtocolStates()).toEqual([]);
+    await expect(repo.rejectStockReconciliation("decision", "conflict")).rejects.toThrow("not pending");
+    expect((await repo.listStockReconciliations())[0]?.status).toBe("needs_review");
+  });
+  it("activates only complete reconciled epochs and preserves same-epoch cursor", async () => {
+    const id = await makeItem({ openingStockMilli: 5000 });
+    await repo.recordPublish([{ itemId: id, state: "live", remoteProductId: "remote", remoteVariantId: "variant-uuid", contentHash: "hash" }], new Map());
+    await expect(repo.activateStockEpoch("epoch")).rejects.toThrow("all linked");
+    await expect(repo.saveStockProtocolStates([state("remote")])).rejects.toThrow("explicit reconciliation");
+    await repo.beginStockReconciliation({ ...state("remote"), itemId: id, operationId: "bootstrap", choice: "local", expectedLocalStockMilli: 5000 });
+    await repo.settleStockReconciliation("bootstrap", { ...state("remote"), generation: 3, revision: 4 });
+    await repo.activateStockEpoch("epoch");
+    expect(await repo.getAppSetting("sync.stock_epoch")).toBe("epoch");
+    await repo.setSyncCursor("stock", "99"); await repo.activateStockEpoch("epoch");
+    expect(await repo.getSyncCursor("stock")).toBe("99");
+  });
+});
+
+describe("exceptional stock recovery", () => {
+  const state = (id: number, stockUnits: number) => ({ externalId: `itm_${id}`, variantId: "variant", epoch: "epoch", sequence: 10, revision: 3, generation: 2, stockUnits });
+  it("keeps committed evidence and repeats zero recovery with a fresh boundary and current shortage", async () => {
+    const id = await makeItem({ openingStockMilli: 5000 });
+    await repo.recordPublish([{ itemId: id, state: "live", remoteProductId: "marketplace-uuid", remoteVariantId: "variant", contentHash: "hash" }], new Map());
+    await repo.beginStockReconciliation({ ...state(id, 1), operationId: "parent", itemId: id, choice: "remote", expectedLocalStockMilli: 5000 });
+    await repo.adjustStock(id, -2000, "adjustment");
+    const committed = { ...state(id, 1), generation: 3, revision: 4 };
+    const parent = await repo.settleStockReconciliation("parent", committed);
+    expect(parent.review?.shortageMilli).toBe(1000);
+    await repo.adjustStock(id, -1000, "adjustment");
+    const request = { ...committed, stockUnits: 0, operationId: "child", parentOperationId: "parent", itemId: id, choice: "remote" as const, expectedLocalStockMilli: 2000, reason: "Confirmed zero after later sale" };
+    await expect(repo.beginStockRecovery({ ...request, expectedLocalStockMilli: 3000 })).rejects.toThrow("local stock changed");
+    const child = await repo.beginStockRecovery(request); expect(child.approvedShortageMilli).toBe(2000);
+    await expect(repo.beginStockRecovery({ ...request, reason: "changed" })).rejects.toThrow("changed payload");
+    await repo.adjustStock(id, -1000, "adjustment");
+    const childResult = { ...committed, stockUnits: 0, generation: 4, revision: 5 };
+    expect((await repo.settleStockReconciliation("child", childResult)).status).toBe("needs_review");
+    await expect(repo.settleStockReconciliation("parent", { ...committed, sequence: 11 })).rejects.toThrow("result changed");
+    await expect(repo.activateStockEpoch("epoch")).rejects.toThrow("pending");
+    expect(await repo.claimStockDelivery("2026-01-01T00:00:00Z", "2026-01-01T00:01:00Z")).toBeNull();
+    await repo.beginStockRecovery({ ...request, ...childResult, operationId: "grandchild", parentOperationId: "child", expectedLocalStockMilli: 1000 });
+    const result = { ...childResult, generation: 5, revision: 6 };
+    await repo.settleStockReconciliation("grandchild", result); await repo.settleStockReconciliation("grandchild", result);
+    expect((await repo.getItem(id))?.stockMilli).toBe(0);
+    expect((await repo.listStockReconciliations()).map((i) => i.status)).toEqual(["done", "done", "done"]);
+    expect((await repo.listStockReconciliations())[0]?.result).toEqual(committed);
+    expect(await repo.listOutbox("pending")).toHaveLength(0);
+  });
+  it("maps only unusable quarantined evidence, fences feed and retires only captured associations", async () => {
+    const id = await makeItem({ openingStockMilli: 5000 });
+    await repo.recordPublish([{ itemId: id, state: "live", remoteProductId: "marketplace-uuid", remoteVariantId: "variant", contentHash: "hash" }], new Map());
+    const rows: import("../src/types").OutboxRow[] = [1, 2, 3].map((n) => ({ id: n, externalId: "", idempotencyKey: `legacy-${n}`, deltaUnits: 0, reason: "sale", attempts: 0, nextAttemptAt: null, status: "quarantined", rawPayloadJson: "not-json" }));
+    (repo as unknown as { outbox: typeof rows }).outbox = rows;
+    const mapping = { operationId: "map", sourceId: 1, idempotencyKey: "legacy-1", rawPayloadJson: "not-json", action: "map" as const, itemId: id, reason: "Verified source ownership", confirmed: true };
+    const evidence = await repo.resolveStockSource(mapping); expect(evidence.externalId).toBe(`itm_${id}`); expect(evidence.createdAt).toBeTruthy();
+    await expect(repo.resolveStockSource({ ...mapping, reason: "changed" })).rejects.toThrow("changed payload");
+    await expect(repo.resolveStockSource({ ...mapping, operationId: "duplicate" })).rejects.toThrow("already");
+    await expect(repo.applyStockPull(null, "11", [{ externalId: `itm_${id}`, deltaUnits: -1, reason: "online_order", createdAt: "now", epoch: "epoch", sequence: 11 }])).rejects.toThrow("pending");
+    await repo.beginStockReconciliation({ ...state(id, 5), operationId: "settle-map", itemId: id, choice: "local", expectedLocalStockMilli: 5000 });
+    await repo.resolveStockSource({ ...mapping, operationId: "late-map", sourceId: 2, idempotencyKey: "legacy-2" });
+    await repo.resolveStockSource({ ...mapping, operationId: "unknown", sourceId: 3, idempotencyKey: "legacy-3", action: "historical_unknown", itemId: undefined });
+    await repo.settleStockReconciliation("settle-map", { ...state(id, 5), revision: 4, generation: 3 });
+    const history = await repo.listStockSourceResolutions(); expect(history[0]?.retiredBy).toBe("settle-map"); expect(history[1]?.retiredBy).toBeUndefined(); expect(history[2]?.retiredBy).toBeUndefined();
+    expect((await repo.listOutbox("quarantined")).map((r) => r.id)).toEqual([2, 3]);
+    expect((await repo.getItem(id))?.stockMilli).toBe(5000);
+  });
+  it("rejects settlement of conflicted intents", async () => {
+    const id = await makeItem({ openingStockMilli: 5000 });
+    await repo.beginStockReconciliation({ ...state(id, 5), operationId: "conflict", itemId: id, choice: "local", expectedLocalStockMilli: 5000 });
+    await repo.rejectStockReconciliation("conflict", "stale revision");
+    await expect(repo.settleStockReconciliation("conflict", { ...state(id, 5), generation: 3, revision: 4 })).rejects.toThrow("not pending");
+    expect((await repo.getItem(id))?.stockMilli).toBe(5000);
+  });
+});
+
 describe("shop profile", () => {
   it("starts empty (drives the first-run setup wizard)", async () => {
     expect(await repo.getShopProfile()).toBeNull();
@@ -487,6 +701,31 @@ describe("customer credit ledger and report batching", () => {
     expect(reportData[0]!.lines).toHaveLength(1);
     expect(reportData[0]!.payments).toHaveLength(1);
     expect(reportData[0]!.payments[0]!.amountPaise).toBe(1000);
+  });
+});
+
+describe("stock outbox parity", () => {
+  it("enqueues linked sales, returns and purchases as separate movements", async () => {
+    const itemId = await makeItem({ openingStockMilli: 10_000 });
+    await repo.recordPublish([{ itemId, state: "pending_store_approval", remoteProductId: "p1", remoteVariantId: null, contentHash: "hash" }], new Map());
+    const bill = await makeBill(itemId, 1000);
+    await repo.createCreditNote({
+      billId: bill.billId, reason: "Return", createdAt: "2026-11-06T12:00:00Z",
+      lines: [{ itemId, nameSnapshot: "Parle-G", qtyMilli: 1000, unitPricePaise: 1000, taxRateBp: 500, taxPaise: 50, totalPaise: 1050, hsnCode: "1905" }],
+    });
+    const supplierId = await repo.upsertSupplier({ name: "Supplier", phone: "", gstin: "", address: "" });
+    await repo.createPurchase({
+      supplierId, invoiceNo: "PO-1", invoiceDate: "2026-11-06", createdAt: "2026-11-06T12:00:00Z",
+      lines: [{ itemId, nameSnapshot: "Parle-G", qtyMilli: 2000, unitCostPaise: 500, taxRateBp: 0 }],
+    });
+    const rows = await repo.listOutbox("pending");
+    expect(rows.map((row) => [row.externalId, row.deltaUnits, row.reason])).toEqual([
+      [`itm_${itemId}`, -1, "sale"], [`itm_${itemId}`, 1, "adjustment"], [`itm_${itemId}`, 2, "adjustment"],
+    ]);
+    expect(rows[0]!.idempotencyKey).toMatch(/^bill:/);
+    expect(rows[1]!.idempotencyKey).toMatch(/^bill:/);
+    expect(rows[2]!.idempotencyKey).toMatch(/^adj:/);
+    expect(new Set(rows.map((row) => row.idempotencyKey)).size).toBe(3);
   });
 });
 

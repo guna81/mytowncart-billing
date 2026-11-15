@@ -331,12 +331,13 @@ fn handle_http_request(
 
 const MARKETPLACE_KEY: &str = "mytowncart.integration";
 
+#[allow(dead_code)]
 const PROD_MARKETPLACE_API: &str = "https://api.mytowncart.com/api/v1/integrations";
+const DEV_MARKETPLACE_API: &str = "http://localhost:9000/api/v1/integrations";
 
 /// Where the LAN web view's marketplace calls are forwarded. Always production
-/// in release builds. Debug builds may point at a local backend with
-/// `MTC_DEV_API_URL`, but only a loopback http(s) address is honoured, so the
-/// stored token can never be redirected to another host.
+/// in release builds. Debug builds default to the local backend at
+/// `http://localhost:9000/api/v1/integrations` or `MTC_DEV_API_URL`.
 fn marketplace_api_base() -> String {
     #[cfg(debug_assertions)]
     if let Ok(url) = std::env::var("MTC_DEV_API_URL") {
@@ -344,6 +345,10 @@ fn marketplace_api_base() -> String {
             return url.trim_end_matches('/').to_string();
         }
     }
+    #[cfg(debug_assertions)]
+    return DEV_MARKETPLACE_API.to_string();
+
+    #[cfg(not(debug_assertions))]
     PROD_MARKETPLACE_API.to_string()
 }
 
@@ -394,7 +399,16 @@ fn marketplace_request(request: &mut Request, url: &str, path: &str) -> Response
         _ => return error(405, "Method not allowed"),
     };
     let query = url.split_once('?').map(|(_, q)| format!("?{q}")).unwrap_or_default();
-    let target = format!("{}{suffix}{query}", marketplace_api_base());
+    let categories = suffix == "/public-categories/";
+    if categories && method != reqwest::Method::GET {
+        return error(405, "Method not allowed");
+    }
+    let base = marketplace_api_base();
+    let target = if categories {
+        format!("{}/products/categories/{query}", base.trim_end_matches("/integrations"))
+    } else {
+        format!("{base}{suffix}{query}")
+    };
     let client = match reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30)).redirect(reqwest::redirect::Policy::none()).build() {
         Ok(c) => c,
@@ -406,7 +420,7 @@ fn marketplace_request(request: &mut Request, url: &str, path: &str) -> Response
             outbound = outbound.header(h.field.as_str().as_str(), h.value.as_str());
         }
     }
-    if !suffix.starts_with("/connect/") {
+    if !categories && !suffix.starts_with("/connect/") {
         let stored = match crate::keychain::get(MARKETPLACE_KEY) {
             Ok(Some(s)) => s,
             Ok(None) => return error(401, "No marketplace connection."),
@@ -600,6 +614,11 @@ pub fn dispatch_invoke(
     args: serde_json::Value,
     session: Option<&str>,
 ) -> Result<serde_json::Value, String> {
+    // Sync protocol writes and reconciliation are desktop-host-only even for a
+    // LAN administrator. LAN sale commands remain supported below.
+    if matches!(cmd, "claim_stock_delivery" | "settle_stock_delivery" | "save_stock_protocol_states" | "list_stock_protocol_states" | "activate_stock_epoch" | "begin_stock_recovery" | "resolve_stock_source" | "list_stock_source_resolutions" | "begin_stock_reconciliation" | "list_stock_reconciliations" | "settle_stock_reconciliation" | "reject_stock_reconciliation" | "enqueue_stock_outbox" | "record_outbox_results" | "drop_outbox" | "apply_stock_pull" | "apply_reconcile_fixes" | "record_remote_catalog" | "set_sync_cursor") {
+        return Err("Stock sync and reconciliation are host-only".into());
+    }
     // Role check first: nothing below runs for a caller who is not allowed to run it.
     let actor = {
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -1040,6 +1059,10 @@ mod tests {
         assert!(dispatch_invoke(&state, "record_audit_log", audit, None).is_ok());
         let exp = serde_json::json!({"daysThreshold": 30, "nowIso": "2026-11-08"});
         assert!(dispatch_invoke(&state, "list_expiring_batches", exp, None).is_ok());
+        for cmd in ["begin_stock_recovery", "resolve_stock_source", "list_stock_source_resolutions"] {
+            assert!(dispatch_invoke(&state,cmd,serde_json::json!({}),None).unwrap_err().contains("host-only"));
+            assert!(dispatch_invoke(&state,cmd,serde_json::json!({}),Some("even-an-owner-token")).unwrap_err().contains("host-only"));
+        }
     }
 
     #[test]

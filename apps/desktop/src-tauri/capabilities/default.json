@@ -21,7 +21,9 @@
         { "url": "https://mytowncart.com/*" },
         { "url": "https://api.mytowncart.com/*" },
         { "url": "https://mytowncart.in/*" },
-        { "url": "https://api.mytowncart.in/*" }
+        { "url": "https://api.mytowncart.in/*" },
+        { "url": "http://localhost:4000/*" },
+        { "url": "http://127.0.0.1:4000/*" }
       ]
     }
   ]

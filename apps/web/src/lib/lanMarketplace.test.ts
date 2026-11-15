@@ -22,6 +22,14 @@ describe("LAN marketplace requests", () => {
     expect(init.headers.get("X-MTC-Session")).toBe("session");
   });
 
+  it("routes public categories through the host", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}"));
+    vi.stubGlobal("fetch", fetchMock);
+    await lanMarketplaceFetch("http://localhost:9000/api/v1/products/categories/?page=1");
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/marketplace/proxy/public-categories/?page=1");
+    expect(fetchMock.mock.calls[0]![1].headers.get("X-MTC-Session")).toBe("session");
+  });
+
   it("loads the host-managed connection and reports host errors", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify('{"token":"host-managed"}')))
       .mockResolvedValueOnce(new Response("credential store unavailable", { status: 500 }));

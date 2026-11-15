@@ -8,7 +8,7 @@
  *  - ids:   local item id <-> `itm_<id>` external id
  */
 
-import { Http, MarketplaceError, type FetchLike } from "./http";
+import { Http, MarketplaceError, retryAfterSeconds, type FetchLike } from "./http";
 import type {
   ConnectSession,
   ConnectionToken,
@@ -24,12 +24,23 @@ import type {
   StockPull,
   StockPush,
   StockPushResult,
+  StockFeed,
+  StockPullOptions,
+  StockProtocolCapabilities,
+  StockSnapshot,
+  StockSnapshotItem,
+  StockReconcileRequest,
+  StockReconcileResult,
   UpsertResult,
 } from "./index";
 
-/** Production defaults; the seller never types these (D12: no custom domain). */
+/** Production defaults (used in production builds; D12: no custom domain). */
 export const DEFAULT_API_BASE_URL = "https://api.mytowncart.com/api/v1/integrations";
 export const DEFAULT_WEB_BASE_URL = "https://api.mytowncart.com";
+
+/** Local development defaults. */
+export const DEV_API_BASE_URL = "http://localhost:9000/api/v1/integrations";
+export const DEV_WEB_BASE_URL = "http://localhost:4000";
 export const CONNECT_SCOPES: readonly Scope[] = ["catalog", "stock", "orders"];
 const BULK_CHUNK = 100;
 
@@ -76,9 +87,17 @@ interface PollResponse {
   scopes: string[];
 }
 
-interface CategoryPage {
+interface Pagination {
+  next?: string | null;
+  has_next?: boolean;
+}
+
+function hasNextPage(body: Pagination): boolean {
+  return body.next !== undefined ? body.next !== null && body.next !== "" : body.has_next === true;
+}
+
+interface CategoryPage extends Pagination {
   count: number;
-  has_next: boolean;
   results: { id: string; name: string; parent: string | null; is_active: boolean }[];
 }
 
@@ -102,8 +121,7 @@ interface BulkResponse {
   }[];
 }
 
-interface ProductPage {
-  has_next: boolean;
+interface ProductPage extends Pagination {
   results: {
     external_id: string;
     external_source?: string;
@@ -144,7 +162,7 @@ interface StockPushResponse {
     external_id: string;
     status: "applied" | "duplicate" | "error";
     stock: number | null;
-    clamped: boolean;
+    clamped: boolean | null;
     error: string | null;
   }[];
 }
@@ -156,8 +174,79 @@ interface StockFeedResponse {
     delta: number;
     reason: StockPull["reason"];
     created_at: string;
+    sequence?: number;
+    revision?: number;
   }[];
   next_cursor: number;
+  has_more?: boolean;
+  continuation?: string | null;
+  epoch?: string;
+  watermark?: number;
+}
+
+interface StockSnapshotWireItem {
+  external_id: string;
+  variant_id: string;
+  stock: number;
+  revision: number;
+  generation: number;
+}
+
+interface StockSnapshotWire {
+  protocol: 2;
+  epoch: string;
+  watermark: number;
+  items: StockSnapshotWireItem[];
+}
+
+interface StockReconcileWire extends StockSnapshotWireItem {
+  operation_id: string;
+  epoch: string;
+  watermark: number;
+  status: "applied";
+}
+
+function stockInteger(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new MarketplaceError("invalid_response", `Invalid ${label} in stock protocol response.`, 502);
+  }
+  return value;
+}
+
+function stockIdentity(value: string, label: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new MarketplaceError("invalid_response", `Missing ${label} in stock protocol response.`, 502);
+  }
+  return value;
+}
+
+function snapshotItem(item: StockSnapshotWireItem): StockSnapshotItem {
+  return {
+    externalId: stockIdentity(item.external_id, "external ID"),
+    variantId: stockIdentity(item.variant_id, "variant ID"),
+    stockUnits: stockInteger(item.stock, "stock"),
+    revision: stockInteger(item.revision, "revision"),
+    generation: stockInteger(item.generation, "generation"),
+  };
+}
+
+function snapshot(body: StockSnapshotWire, requested: readonly string[]): StockSnapshot {
+  if (body.protocol !== 2 || !Array.isArray(body.items)) {
+    throw new MarketplaceError("invalid_response", "Unsupported stock snapshot response.", 502);
+  }
+  const items = body.items.map(snapshotItem);
+  const ids = new Set(items.map((item) => item.externalId));
+  if (ids.size !== items.length || ids.size !== requested.length || requested.some((id) => !ids.has(id))) {
+    throw new MarketplaceError("invalid_response", "Stock snapshot did not identify every requested item exactly once.", 502);
+  }
+  return { protocol: 2, epoch: stockIdentity(body.epoch, "epoch"), watermark: stockInteger(body.watermark, "watermark"), items };
+}
+
+function reconciliationResult(body: StockReconcileWire, operationId: string): StockReconcileResult {
+  if (body.status !== "applied" || body.operation_id !== operationId) {
+    throw new MarketplaceError("invalid_response", "Stock reconciliation returned an unexpected operation.", 502);
+  }
+  return { ...snapshotItem(body), operationId, epoch: stockIdentity(body.epoch, "epoch"), watermark: stockInteger(body.watermark, "watermark") };
 }
 
 export interface MyTownCartOptions {
@@ -277,16 +366,13 @@ export class MyTownCartConnector implements MarketplaceConnector {
         if (!c.is_active) continue;
         out.push({ id: c.id, name: c.name, parentId: c.parent });
       }
-      if (!body.has_next) break;
+      if (!hasNextPage(body)) return out;
+      if (page === 50) throw new Error("Marketplace categories exceed the 50-page pagination limit.");
     }
     return out;
   }
 
   private categoriesBaseUrl(): string {
-    // If webBaseUrl is explicitly set to a custom test or dev origin (not the consumer site), use it.
-    if (this.opts.webBaseUrl && !this.opts.webBaseUrl.includes("mytowncart.com")) {
-      return this.opts.webBaseUrl;
-    }
     // Categories endpoint lives on the API backend (/api/v1/products/categories/).
     return this.opts.apiBaseUrl
       .replace(/\/integrations\/?$/, "")
@@ -299,7 +385,7 @@ export class MyTownCartConnector implements MarketplaceConnector {
         headers: { Accept: "application/json", "X-App-Version": this.opts.appVersion },
       });
       if (!response.ok) {
-        throw new MarketplaceError("categories_unavailable", "Could not load marketplace categories.", response.status);
+        throw new MarketplaceError("categories_unavailable", "Could not load marketplace categories.", response.status, retryAfterSeconds(response));
       }
       return (await response.json()) as CategoryPage;
     } catch (err) {
@@ -449,7 +535,10 @@ export class MyTownCartConnector implements MarketplaceConnector {
         external_id: m.externalId,
         delta: m.deltaUnits,
         idempotency_key: m.idempotencyKey,
-        reason: m.reason,
+        reason: m.reason === "sale" ? "pos_sale" : m.reason,
+        ...(m.epoch === undefined ? {} : { epoch: m.epoch }),
+        ...(m.variantId === undefined ? {} : { variant_id: m.variantId }),
+        ...(m.generation === undefined ? {} : { generation: m.generation }),
       })),
     });
     // The server returns one result per movement, in request order.
@@ -458,22 +547,94 @@ export class MyTownCartConnector implements MarketplaceConnector {
       return {
         idempotencyKey: move.idempotencyKey,
         status: found?.status ?? "error",
-        clamped: found?.clamped ?? false,
+        clamped: found?.clamped ?? null,
         newStockUnits: found?.stock ?? null,
         error: found?.error ?? (found ? null : "The server did not report this move."),
       };
     });
   }
 
-  async pullStock(
-    cursor: number,
-    opts: { force?: boolean } = {},
-  ): Promise<{ moves: StockPull[]; nextCursor: number }> {
+  async stockProtocol(): Promise<StockProtocolCapabilities | null> {
+    try {
+      const body = await this.http.json<StockProtocolCapabilities>("GET", "/stock/protocol/");
+      if (body.protocol !== 2 || !Array.isArray(body.capabilities) || body.capabilities.some((entry) => typeof entry !== "string")) {
+        throw new MarketplaceError("invalid_response", "Unsupported stock protocol capabilities.", 502);
+      }
+      return body;
+    } catch (error) {
+      if (error instanceof MarketplaceError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  async enableStockProtocol(externalIds: string[]): Promise<StockSnapshot> {
+    const body = await this.http.json<StockSnapshotWire>("POST", "/stock/protocol/", { external_ids: externalIds });
+    return snapshot(body, externalIds);
+  }
+
+  async stockSnapshot(externalIds: string[]): Promise<StockSnapshot> {
+    const body = await this.http.json<StockSnapshotWire>("POST", "/stock/snapshot/", { external_ids: externalIds });
+    return snapshot(body, externalIds);
+  }
+
+  async reconcileStock(request: StockReconcileRequest): Promise<StockReconcileResult> {
+    const body = await this.http.json<StockReconcileWire>("POST", "/stock/reconcile/", {
+      operation_id: request.operationId,
+      external_id: request.externalId,
+      variant_id: request.variantId,
+      epoch: request.epoch,
+      expected_revision: request.expectedRevision,
+      generation: request.generation,
+      quantity: request.quantity,
+    });
+    const result = reconciliationResult(body, request.operationId);
+    if (result.externalId !== request.externalId || result.variantId !== request.variantId || result.epoch !== request.epoch ||
+        result.stockUnits !== request.quantity || result.generation !== request.generation + 1) {
+      throw new MarketplaceError("invalid_response", "Stock reconciliation returned a different item, quantity, epoch or generation.", 502);
+    }
+    return result;
+  }
+
+  async stockReconciliation(operationId: string): Promise<StockReconcileResult | null> {
+    try {
+      const body = await this.http.json<StockReconcileWire>("GET", `/stock/reconcile/?operation_id=${encodeURIComponent(operationId)}`);
+      return reconciliationResult(body, operationId);
+    } catch (error) {
+      if (error instanceof MarketplaceError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  async pullStock(cursor: number, opts: StockPullOptions = {}): Promise<StockFeed> {
     const forceQs = opts.force ? "&force=1" : "";
+    const continuationQs = opts.continuation === undefined ? "" : `&continuation=${encodeURIComponent(opts.continuation)}`;
+    const protocolQs = opts.protocol === undefined ? "" : `&protocol=${opts.protocol}`;
+    const epochQs = opts.epoch === undefined ? "" : `&epoch=${encodeURIComponent(opts.epoch)}`;
+    const untilQs = opts.until === undefined ? "" : `&until=${opts.until}`;
+    if (opts.protocol === 2 && !opts.epoch) throw new Error("A committed stock feed requires its epoch.");
     const body = await this.http.json<StockFeedResponse>(
       "GET",
-      `/stock/?cursor=${cursor}&limit=500${forceQs}`,
+      `/stock/?cursor=${cursor}&limit=500${forceQs}${continuationQs}${protocolQs}${epochQs}${untilQs}`,
     );
+    if (opts.protocol === 2) {
+      if (body.epoch !== opts.epoch || body.watermark === undefined) {
+        throw new MarketplaceError("invalid_response", "Stock feed epoch or watermark is missing or changed.", 502);
+      }
+      stockInteger(body.watermark, "watermark");
+      stockInteger(body.next_cursor, "cursor");
+      if (body.next_cursor < cursor || body.next_cursor > body.watermark || (opts.until !== undefined && body.watermark !== opts.until)) {
+        throw new MarketplaceError("invalid_response", "Stock feed escaped its requested interval.", 502);
+      }
+      let previous = cursor;
+      for (const move of body.movements) {
+        const sequence = stockInteger(move.sequence!, "sequence");
+        stockInteger(move.revision!, "revision");
+        if (sequence <= previous || sequence > body.next_cursor) {
+          throw new MarketplaceError("invalid_response", "Stock feed movements are not an ordered committed prefix.", 502);
+        }
+        previous = sequence;
+      }
+    }
     return {
       moves: body.movements.map((m) => ({
         id: m.id,
@@ -481,8 +642,15 @@ export class MyTownCartConnector implements MarketplaceConnector {
         deltaUnits: m.delta,
         reason: m.reason,
         createdAt: m.created_at,
+        ...(body.epoch === undefined ? {} : { epoch: body.epoch }),
+        ...(m.sequence === undefined ? {} : { sequence: m.sequence }),
+        ...(m.revision === undefined ? {} : { revision: m.revision }),
       })),
       nextCursor: body.next_cursor,
+      ...(body.has_more === undefined ? {} : { hasMore: body.has_more }),
+      ...(body.continuation === undefined ? {} : { continuation: body.continuation }),
+      ...(body.epoch === undefined ? {} : { epoch: body.epoch }),
+      ...(body.watermark === undefined ? {} : { watermark: body.watermark }),
     };
   }
 
@@ -527,7 +695,8 @@ export class MyTownCartConnector implements MarketplaceConnector {
               }),
         });
       }
-      if (!body.has_next) break;
+      if (!hasNextPage(body)) return out;
+      if (page === 100) throw new Error("Marketplace remote items exceed the 100-page pagination limit.");
     }
     return out;
   }
@@ -557,7 +726,8 @@ export class MyTownCartConnector implements MarketplaceConnector {
           ...(p.description === undefined ? {} : { description: p.description }),
         });
       }
-      if (!body.has_next) break;
+      if (!hasNextPage(body)) return out;
+      if (page === 20) throw new Error("Marketplace platform products exceed the 20-page pagination limit.");
     }
     return out;
   }

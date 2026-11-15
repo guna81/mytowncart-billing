@@ -173,7 +173,20 @@ export interface BillingRepository {
 
   // --- B5 two-way sync -----------------------------------------------------
 
-  listOutbox(status?: "pending" | "done"): Promise<OutboxRow[]>;
+  listOutbox(status?: "pending" | "done" | "quarantined"): Promise<OutboxRow[]>;
+  claimStockDelivery(now: string, claimUntil: string): Promise<import("./types").StockDeliveryClaim | null>;
+  settleStockDelivery(id: number, claimToken: string, outcome: "done" | "retry" | "quarantined", nextAttemptAt?: string, detail?: string): Promise<void>;
+  /** Explicit protocol bootstrap records per-item fences, never a global cursor. */
+  saveStockProtocolStates(states: readonly import("./types").StockProtocolState[]): Promise<void>;
+  activateStockEpoch(epoch: string): Promise<void>;
+  listStockProtocolStates(): Promise<import("./types").StockProtocolState[]>;
+  beginStockReconciliation(input: import("./types").StockReconciliationInput): Promise<import("./types").StockReconciliationIntent>;
+  listStockReconciliations(): Promise<import("./types").StockReconciliationIntent[]>;
+  settleStockReconciliation(operationId: string, result: import("./types").StockProtocolState): Promise<import("./types").StockReconciliationIntent>;
+  beginStockRecovery(input: import("./types").StockRecoveryInput): Promise<import("./types").StockReconciliationIntent>;
+  resolveStockSource(input: import("./types").StockSourceResolutionInput): Promise<import("./types").StockSourceResolution>;
+  listStockSourceResolutions(): Promise<import("./types").StockSourceResolution[]>;
+  rejectStockReconciliation(operationId: string, detail: string): Promise<void>;
   /** Record push results: `done` is terminal, `retry` schedules the next try. */
   recordOutboxResults(
     results: readonly { idempotencyKey: string; outcome: "done" | "retry"; nextAttemptAt?: string }[],
@@ -183,16 +196,19 @@ export interface BillingRepository {
   getSyncCursor(key: string): Promise<string | null>;
   setSyncCursor(key: string, value: string): Promise<void>;
   /**
-   * Apply one remote stock page and advance `stock_cursor` to `nextCursor` in
-   * the same transaction, so a crash can never replay or skip a page.
+   * Apply a page only if the current cursor matches the captured starting
+   * cursor, advancing it atomically with the movements. A conflict rejects.
    */
   applyStockPull(
+    expectedCursor: string | null,
     nextCursor: string,
     moves: readonly {
       externalId: string;
       deltaUnits: number;
-      reason: "online_order" | "order_cancel" | "adjustment";
+      reason: "online_order" | "order_cancel" | "adjustment" | "import";
       createdAt: string;
+      epoch?: string;
+      sequence?: number;
     }[],
   ): Promise<{ externalId: string; itemId: number | null; deltaMilli: number }[]>;
   /** Store what the marketplace currently holds for each linked item. */

@@ -13,10 +13,27 @@ export class MarketplaceError extends Error {
     readonly code: string,
     message: string,
     readonly status: number,
+    /** Delay in seconds from a 429 Retry-After header, when valid. */
+    readonly retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = "MarketplaceError";
   }
+}
+
+/** Interpret Retry-After only for rate-limited responses. */
+export function retryAfterSeconds(response: Response): number | undefined {
+  if (response.status !== 429) return undefined;
+  const value = response.headers.get("Retry-After")?.trim();
+  if (!value) return undefined;
+  if (/^\d+$/.test(value)) {
+    const seconds = Number(value);
+    return Number.isSafeInteger(seconds) ? seconds : undefined;
+  }
+  // Avoid Date.parse accepting non-date numeric strings or other loose formats.
+  if (!/^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(value)) return undefined;
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, Math.ceil((date - Date.now()) / 1000)) : undefined;
 }
 
 export interface HttpOptions {
@@ -30,6 +47,7 @@ export interface HttpOptions {
 interface ErrorBody {
   message?: unknown;
   detail?: unknown;
+  error?: unknown;
   code?: unknown;
 }
 
@@ -45,6 +63,7 @@ function errorCode(status: number, body: ErrorBody): string {
 function errorMessage(status: number, body: ErrorBody): string {
   if (typeof body.message === "string" && body.message !== "") return body.message;
   if (typeof body.detail === "string" && body.detail !== "") return body.detail;
+  if (typeof body.error === "string" && body.error !== "") return body.error;
   return `Request failed (HTTP ${status}).`;
 }
 
@@ -87,6 +106,7 @@ export class Http {
         errorCode(response.status, payload),
         errorMessage(response.status, payload),
         response.status,
+        retryAfterSeconds(response),
       );
     }
     return payload as T;
@@ -113,7 +133,7 @@ export class Http {
       );
     }
     if (!response.ok) {
-      throw new MarketplaceError("server_error", `Photo download failed (${response.status}).`, response.status);
+      throw new MarketplaceError("server_error", `Photo download failed (${response.status}).`, response.status, retryAfterSeconds(response));
     }
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.byteLength > maxBytes) {
@@ -146,6 +166,7 @@ export class Http {
         errorCode(response.status, payload),
         errorMessage(response.status, payload),
         response.status,
+        retryAfterSeconds(response),
       );
     }
     const payload = await readJson(response);

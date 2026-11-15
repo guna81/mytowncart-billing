@@ -2,22 +2,20 @@
 /**
  * B5 two-way sync (roadmap §8.6), driven from MyTownCart → Sync.
  *
- * - push: the outbox (stock deltas written in the same transaction as each
- *   sale/adjustment) is sent in server-sized batches. Each run merges the
- *   pending deltas per item into ONE net movement with its own idempotency
- *   key, so "sell 1 five times" never clamps in between. Failures back off
- *   exponentially and are never dropped.
- * - catalog: price/other edits and the merged restock ride on a catalog
- *   upsert; the per-item content hash decides what is actually sent.
+ * - push: durable, ordered, immutable source deliveries are claimed before
+ *   network I/O and settled with the exact claim token. Retries reuse payloads.
+ * - catalog: stock-neutral metadata upserts use the per-item content hash.
  * - pull: the remote stock feed advances `stock_cursor` in the same
  *   transaction as the applied moves, so a crash can neither replay nor
  *   skip a page.
  * - snapshot: the marketplace's current values are cached for the reconcile
  *   view. (Online orders are handled in the MyTownCart seller app.)
  */
-import type {
-  MarketplaceConnector,
-  RemoteItem,
+import {
+  MarketplaceError,
+  type MarketplaceConnector,
+  type RemoteItem,
+  type StockPush,
 } from "@mytowncart-billing/connector-mytowncart";
 import {
   externalIdOf,
@@ -37,7 +35,6 @@ import type {
   BillingRepository,
   Category,
   Item,
-  OutboxRow,
   ReconcileFix,
   RemoteItemLink,
 } from "@mytowncart-billing/storage";
@@ -49,6 +46,7 @@ import { groupOf } from "./variantSync";
 import { syncPhotos } from "./photoSync";
 import { loadRemoteSeen, saveRemoteSeen } from "./remoteSeen";
 import { descriptionFingerprint, toWireHtml } from "./richText";
+import { activeStockSources, recoverStockReconciliations } from "./reconcileFixes";
 
 /** Server cap from `me/`; never ask for more. */
 export const DEFAULT_BULK_MAX = 100;
@@ -71,6 +69,8 @@ export interface SyncOutcome {
   pulledDescriptions?: number;
   /** Main photos taken from MyTownCart (the later change wins). */
   pulledPhotos?: number;
+  /** Seconds until a throttled or paginated stock pull can be retried. */
+  retryAfterSeconds?: number;
   /** Problems phrased for the seller, one line per failed step. */
   problems: string[];
 }
@@ -107,20 +107,6 @@ function toPlanInputs(items: readonly Item[], categories: readonly Category[]): 
   }));
 }
 
-/** Net delta per external id for one run (sales negative, restocks positive). */
-export function netDeltas(rows: readonly OutboxRow[]): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const row of rows) {
-    // Rows record the signed change to local stock, which mirrors the remote.
-    out.set(row.externalId, (out.get(row.externalId) ?? 0) + row.deltaUnits);
-  }
-  return out;
-}
-
-function newKey(externalId: string, now: Date): string {
-  const random = Math.random().toString(36).slice(2, 10);
-  return `${externalId}:merge:${now.getTime()}:${random}`;
-}
 
 export async function runSync(
   deps: SyncDeps,
@@ -128,6 +114,10 @@ export async function runSync(
     bulkMax?: number;
     force?: boolean;
     platformOnly?: boolean;
+    /** Run the lightweight stock path without a catalog or photo scan. */
+    stockOnly?: boolean;
+    /** Whether this run should poll the stock feed (default true). */
+    pullStock?: boolean;
     /** Keep items already on MyTownCart up to date: name, description, price, stock. Default on. */
     details?: boolean;
     /** Publish eligible items (a photo is optional: without one the server keeps it hidden) that are not on MyTownCart yet. Default on. */
@@ -146,103 +136,80 @@ export async function runSync(
     problems: [],
   };
 
-  const pending = await repo.listOutbox("pending");
   const bulkMax = Math.min(Math.max(1, options.bulkMax ?? DEFAULT_BULK_MAX), DEFAULT_BULK_MAX);
   const details = options.details !== false;
   const list = options.list !== false;
-  // Stock rides with details: when details are off nothing is lost — the outbox
-  // and the stock cursor stay put and catch up when it is switched back on.
-  const deltas = details
-    ? await pushStock(repo, connector, pending, now, outcome, bulkMax)
-    : new Map<string, number>();
-  if (details || list) await pushCatalog(repo, connector, deltas, outcome, { details, list });
-  if (details) await pullStock(repo, connector, outcome, options.force);
-  await recordSnapshot(repo, connector, now, outcome, details);
-  if (options.platformOnly) {
+  // Each claim persists its immutable request before any network I/O.
+  if (details) {
+    try { await recoverStockReconciliations(repo, connector); }
+    catch (err) { outcome.problems.push(`stock reconciliation: ${message(err)}`); }
+    await pushStock(repo, connector, now, outcome, bulkMax);
+  }
+  if (!options.stockOnly && (details || list)) {
+    try {
+      await pushCatalog(repo, connector, outcome, { details, list });
+    } catch (err) {
+      outcome.problems.push(`catalog: ${message(err)}`);
+    }
+  }
+  if (details && options.pullStock !== false) await pullStock(repo, connector, outcome, options.force);
+  if (!options.stockOnly) await recordSnapshot(repo, connector, now, outcome, details);
+  if (!options.stockOnly && options.platformOnly) {
     await recordPlatformOnly(connector, now, outcome);
     if (list) await autoPullNew(repo, connector, outcome);
   }
   return outcome;
 }
 
-/** Pushes merged deltas; returns the deltas the marketplace accepted. */
+/** Ordered source deliveries; no netting, fresh retry keys or broad acknowledgement. */
 async function pushStock(
   repo: BillingRepository,
   connector: MarketplaceConnector,
-  pending: readonly OutboxRow[],
   now: Date,
   outcome: SyncOutcome,
   bulkMax: number,
-): Promise<Map<string, number>> {
-  const accepted = new Map<string, number>();
-  const deltas = [...netDeltas(pending)].filter(([, delta]) => delta !== 0);
-  if (deltas.length === 0) {
-    // Nothing to send, but zero-sum rows are settled too.
-    const keys = pending.map((r) => r.idempotencyKey);
-    if (keys.length > 0) await repo.dropOutbox(keys);
-    return accepted;
-  }
-
-  const batches: [string, number][][] = [];
-  for (let i = 0; i < deltas.length; i += bulkMax) batches.push(deltas.slice(i, i + bulkMax));
-
-  const okExternal = new Set<string>();
-  const retryAttempts = new Map<string, number>();
-  for (const batch of batches) {
-    const moves = batch.map(([externalId, deltaUnits]) => ({
-      externalId,
-      deltaUnits,
-      reason: deltaUnits < 0 ? ("sale" as const) : ("adjustment" as const),
-      idempotencyKey: newKey(externalId, now),
-      createdAt: now.toISOString(),
-    }));
+): Promise<void> {
+  // A fixed cap prevents continuously arriving sales from extending this run.
+  for (let index = 0; index < bulkMax; index++) {
+    const claim = await repo.claimStockDelivery(now.toISOString(), new Date(now.getTime() + 120_000).toISOString());
+    if (!claim) break;
+    let move: StockPush;
     try {
-      const results = await connector.pushStock(moves);
-      const byKey = new Map(results.map((r) => [r.idempotencyKey, r]));
-      for (const move of moves) {
-        const result = byKey.get(move.idempotencyKey);
-        if (result && (result.status === "applied" || result.status === "duplicate")) {
-          okExternal.add(move.externalId);
-          accepted.set(move.externalId, move.deltaUnits);
-          outcome.pushedMoves += 1;
-        } else {
-          // A rejected move (unknown item, bad data) would be rejected again;
-          // count it, and let the backoff line below keep it visible.
-          const attempts = (retryAttempts.get(move.externalId) ?? 0) + 1;
-          retryAttempts.set(move.externalId, attempts);
-          outcome.problems.push(`${move.externalId}: ${result?.error ?? "rejected"}`);
-        }
+      move = JSON.parse(claim.payloadJson) as StockPush;
+      if (!move || move.idempotencyKey !== claim.idempotencyKey ||
+          typeof move.externalId !== "string" || !Number.isSafeInteger(move.deltaUnits) ||
+          !["sale", "adjustment", "order_cancel"].includes(move.reason)) {
+        throw new Error("Invalid immutable stock delivery");
       }
     } catch (err) {
+      await repo.settleStockDelivery(claim.id, claim.claimToken, "quarantined", undefined, message(err));
       outcome.problems.push(`stock push: ${message(err)}`);
-      for (const move of moves) retryAttempts.set(move.externalId, (retryAttempts.get(move.externalId) ?? 0) + 1);
+      continue;
     }
-  }
-
-  // Settle what went through; schedule the rest.
-  const done = pending.filter((r) => okExternal.has(r.externalId)).map((r) => r.idempotencyKey);
-  if (done.length > 0) await repo.dropOutbox(done);
-
-  const retrying = pending.filter((r) => !okExternal.has(r.externalId));
-  const updates = retrying
-    .filter((r) => (retryAttempts.get(r.externalId) ?? 0) > 0)
-    .map((r) => {
-      const attempts = Math.min(r.attempts + 1, MAX_ATTEMPTS_WITH_BACKOFF);
+    let result;
+    try {
+      const results = await connector.pushStock([move]);
+      result = results.find((entry) => entry.idempotencyKey === move.idempotencyKey);
+    } catch (err) {
+      const attempts = Math.min(claim.attempts + 1, MAX_ATTEMPTS_WITH_BACKOFF);
       const delay = Math.min(30_000 * 2 ** attempts, 30 * 60_000);
-      return {
-        idempotencyKey: r.idempotencyKey,
-        outcome: "retry" as const,
-        nextAttemptAt: new Date(now.getTime() + delay).toISOString(),
-      };
-    });
-  if (updates.length > 0) await repo.recordOutboxResults(updates);
-  return accepted;
+      await repo.settleStockDelivery(claim.id, claim.claimToken, "retry", new Date(now.getTime() + delay).toISOString(), message(err));
+      outcome.problems.push(`stock push: ${message(err)}`);
+      continue;
+    }
+    const definitive = result && (result.status === "applied" || result.status === "duplicate") && result.clamped === false;
+    const detail = definitive ? undefined : result?.error ?? "Stock result is missing, rejected, clamped or unknown; review stock reconciliation";
+    // A local settlement error is not a network retry: leave the exact claim
+    // recoverable and do not acknowledge any other source for this item.
+    await repo.settleStockDelivery(claim.id, claim.claimToken, definitive ? "done" : "quarantined", undefined, detail);
+    if (definitive) outcome.pushedMoves++;
+    else outcome.problems.push(`${move.externalId}: ${detail}`);
+  }
 }
 
 async function pushCatalog(
   repo: BillingRepository,
   connector: MarketplaceConnector,
-  restock: ReadonlyMap<string, number>,
   outcome: SyncOutcome,
   scope: { details: boolean; list: boolean },
 ): Promise<void> {
@@ -253,15 +220,7 @@ async function pushCatalog(
   ]);
   if (marketplace.length === 0) return;
 
-  // The marketplace already holds the restocked quantity; reflect it locally
-  // so the hash below describes the same state and no duplicate is sent.
-  const itemsWithRestock = items.map((item) => {
-    const delta = restock.get(externalIdOf(item.id));
-    if (delta === undefined) return item;
-    return { ...item, stockMilli: Math.max(0, item.stockMilli + delta * 1000) };
-  });
-
-  const plan = planPublish(toPlanInputs(itemsWithRestock, categories), marketplace);
+  const plan = planPublish(toPlanInputs(items, categories), marketplace);
   // Items the seller unpublished locally are sent as inactive, not skipped.
   const linkedIds = new Set(
     items.filter((i) => i.remoteProductId !== null || i.contentHash !== null).map((i) => i.id),
@@ -378,7 +337,6 @@ async function pushCatalog(
         ),
       ),
     );
-    outcome.restocked = changed.filter((r) => restock.has(r.externalId) && r.input.lastPublishedHash !== null).length;
   } catch (err) {
     outcome.problems.push(`catalog: ${message(err)}`);
   }
@@ -390,27 +348,56 @@ async function pullStock(
   outcome: SyncOutcome,
   force = false,
 ): Promise<void> {
-  const stored = Number((await repo.getSyncCursor("stock")) ?? "0");
+  let expectedCursor = await repo.getSyncCursor("stock");
+  const stored = Number(expectedCursor ?? "0");
   let cursor = Number.isSafeInteger(stored) && stored >= 0 ? stored : 0;
   try {
+    const epoch = await repo.getAppSetting("sync.stock_epoch");
+    if (await repo.getAppSetting("sync.stock_bootstrap_required") === "true") {
+      throw new Error("Stock feed bootstrap required after protocol upgrade; stock pull is paused to protect historical balances");
+    }
+    let continuation: string | undefined;
     for (let page = 0; page < PULL_PAGE_CAP; page++) {
-      const feed = await connector.pullStock(cursor, { force });
-      if (feed.nextCursor === cursor && feed.moves.length === 0) break;
+      const feed = await connector.pullStock(cursor, { force, continuation, ...(epoch ? { protocol: 2 as const, epoch } : {}) });
+      if (epoch && feed.epoch !== epoch) throw new Error("Stock feed epoch changed; bootstrap required");
+      if (feed.nextCursor === cursor && feed.moves.length === 0) {
+        if (feed.hasMore) throw new Error("stock feed did not advance its cursor");
+        break;
+      }
+      if (!Number.isSafeInteger(feed.nextCursor) || feed.nextCursor <= cursor) {
+        throw new Error("stock feed returned an invalid cursor");
+      }
       const applied = await repo.applyStockPull(
+        expectedCursor,
         String(feed.nextCursor),
         feed.moves.map((m) => ({
           externalId: m.externalId,
           deltaUnits: m.deltaUnits,
           reason: m.reason,
           createdAt: m.createdAt,
+          epoch: m.epoch ?? feed.epoch,
+          sequence: m.sequence,
         })),
       );
       outcome.pulledMoves += applied.filter((a) => a.itemId !== null).length;
-      if (feed.nextCursor === cursor) break;
       cursor = feed.nextCursor;
+      expectedCursor = String(cursor);
+      if (feed.hasMore === false) break;
+      continuation = feed.continuation ?? undefined;
+      // Older servers have no continuation token; resume from the committed
+      // cursor after their polling interval instead of repeatedly hitting 429.
+      if (!force && !continuation) {
+        outcome.retryAfterSeconds = 120;
+        break;
+      }
+      if (page === PULL_PAGE_CAP - 1) outcome.retryAfterSeconds = 120;
     }
   } catch (err) {
-    outcome.problems.push(`stock pull: ${message(err)}`);
+    if (err instanceof MarketplaceError && err.status === 429) {
+      outcome.retryAfterSeconds = Math.max(1, err.retryAfterSeconds ?? 120);
+    } else {
+      outcome.problems.push(`stock pull: ${message(err)}`);
+    }
   }
 }
 
@@ -457,7 +444,7 @@ async function recordSnapshot(
       }
     }
     const links = toLinks(remoteItems);
-    await saveRemoteSeen(links, now);
+    await saveRemoteSeen(links, now, repo);
     await repo.recordRemoteCatalog(links);
   } catch (err) {
     outcome.problems.push(`catalog read: ${message(err)}`);
@@ -644,18 +631,20 @@ async function recordPlatformOnly(
   }
 }
 
-/** Differences for the reconcile view, from the last snapshot. */
-export async function listReconcileRows(
+/** Differences from the last usable snapshot, or null when no snapshot is available. */
+export async function getReconcileSnapshot(
   repo: BillingRepository,
   now: Date = new Date(),
-): Promise<ReconcileRow[]> {
-  const [items, seen] = await Promise.all([repo.listItems({ activeOnly: false }), loadRemoteSeen(now)]);
+): Promise<ReconcileRow[] | null> {
+  const seen = await loadRemoteSeen(now, repo);
+  if (seen === null) return null;
+  const items = await repo.listItems({ activeOnly: false });
   const remote = new Map<string, RemoteItemRef>();
   // remoteHash is "price:stock:active:name"; a snapshot without it counts as active.
   for (const link of seen.values()) {
     remote.set(link.externalId, { ...link, isActive: link.remoteHash.split(":")[2] !== "0" });
   }
-  return reconcile(
+  const rows = reconcile(
     items.map(
       (item): ReconcileInput => ({
         itemId: item.id,
@@ -668,6 +657,27 @@ export async function listReconcileRows(
     ),
     remote,
   );
+  // A clamped/rejected delivery still needs an explicit decision when the two
+  // displayed quantities happen to match. Do not hide it as already synced.
+  const blocked = new Set(activeStockSources(await repo.listOutbox("quarantined"), await repo.listStockSourceResolutions()).map((entry) => entry.externalId));
+  for (const intent of await repo.listStockReconciliations()) {
+    if (intent.status === "conflict") blocked.add(intent.externalId);
+  }
+  for (const item of items) {
+    const externalId = externalIdOf(item.id);
+    const seenItem = remote.get(externalId);
+    if (!blocked.has(externalId) || !seenItem || rows.some((row) => row.itemId === item.id && row.kind === "stock")) continue;
+    rows.push({ itemId: item.id, externalId, name: item.name, kind: "stock", localValue: stockUnitsOf(item.stockMilli) ?? 0, remoteValue: seenItem.stockUnits });
+  }
+  return rows;
+}
+
+/** Compatibility for callers that do not yet display the unavailable state. */
+export async function listReconcileRows(
+  repo: BillingRepository,
+  now: Date = new Date(),
+): Promise<ReconcileRow[]> {
+  return (await getReconcileSnapshot(repo, now)) ?? [];
 }
 
 /** Background sync is available in Tauri desktop app or connected LAN server. */

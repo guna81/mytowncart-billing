@@ -3,6 +3,7 @@ import { useState } from "react";
 import { seedDemoData } from "@mytowncart-billing/storage";
 import { t } from "../i18n";
 import { getRepository } from "../lib/repository";
+import { refreshLoginState } from "../lib/roles";
 import { useAppStore } from "../store/appStore";
 
 export function DemoDataPanel() {
@@ -25,6 +26,7 @@ export function DemoDataPanel() {
       const summary = await seedDemoData(repo);
       const updatedProfile = await repo.getShopProfile();
       setProfile(updatedProfile);
+      await refreshLoginState();
       bumpDataVersion();
       setResultMsg(
         `${t("settings.demo_data_loaded")} (${summary.itemsCount} items, ${summary.categoriesCount} categories, ${summary.billsCount} bills, ${summary.customersCount} customers)`

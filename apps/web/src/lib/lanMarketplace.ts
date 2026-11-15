@@ -17,11 +17,11 @@ export async function lanConnection(method: "GET" | "DELETE"): Promise<string | 
 export async function lanMarketplaceFetch(input: string, init?: RequestInit): Promise<Response> {
   const url = new URL(input);
   const prefix = "/api/v1/integrations";
-  if (url.pathname === "/api/v1/products/categories/") return fetch(input, init);
-  if (!url.pathname.startsWith(`${prefix}/`)) throw new Error("Invalid marketplace request");
+  const categories = url.pathname === "/api/v1/products/categories/";
+  if (!categories && !url.pathname.startsWith(`${prefix}/`)) throw new Error("Invalid marketplace request");
   const forwarded = new Headers(init?.headers);
   forwarded.delete("Authorization");
-  return fetch(`/api/marketplace/proxy${url.pathname.slice(prefix.length)}${url.search}`, {
+  return fetch(`/api/marketplace/proxy${categories ? "/public-categories/" : url.pathname.slice(prefix.length)}${url.search}`, {
     ...init,
     headers: headers(forwarded),
   });

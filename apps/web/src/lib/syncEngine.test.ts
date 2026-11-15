@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
 
+import { MarketplaceError } from "@mytowncart-billing/connector-mytowncart";
 import type {
   MarketplaceConnector,
   RemoteItem,
@@ -11,7 +12,8 @@ import type {
 } from "@mytowncart-billing/connector-mytowncart";
 import { MemoryRepository } from "@mytowncart-billing/storage";
 
-import { netDeltas, runSync } from "./syncEngine";
+import { getReconcileSnapshot, listReconcileRows, runSync } from "./syncEngine";
+import { invalidateRemoteSeen, loadRemoteSeen, saveRemoteSeen } from "./remoteSeen";
 
 type ConnectorOverrides = Partial<MarketplaceConnector> & { pushes?: StockPush[][] };
 
@@ -95,22 +97,167 @@ async function fixture(): Promise<{ repo: MemoryRepository; itemId: number }> {
   return { repo, itemId };
 }
 
-describe("netDeltas", () => {
-  it("sums the signed deltas per item", () => {
-    const rows = [
-      { id: 1, idempotencyKey: "a", externalId: "itm_1", deltaUnits: -1, reason: "sale", attempts: 0, nextAttemptAt: null, status: "pending" },
-      { id: 2, idempotencyKey: "b", externalId: "itm_1", deltaUnits: -2, reason: "sale", attempts: 0, nextAttemptAt: null, status: "pending" },
-      { id: 3, idempotencyKey: "c", externalId: "itm_2", deltaUnits: 5, reason: "adjustment", attempts: 0, nextAttemptAt: null, status: "pending" },
-    ] as const;
-    expect([...netDeltas(rows)]).toEqual([
-      ["itm_1", -3],
-      ["itm_2", 5],
+describe("remote snapshot completeness", () => {
+  it("rejects older potentially truncated snapshots and invalidates after publishing", async () => {
+    const repo = new MemoryRepository();
+    await repo.setAppSetting("remote.seen", JSON.stringify({ at: now().toISOString(), items: [] }));
+    expect(await loadRemoteSeen(now(), repo)).toBeNull();
+    await saveRemoteSeen([], now(), repo);
+    expect(await loadRemoteSeen(now(), repo)).toEqual(new Map());
+    await invalidateRemoteSeen(repo);
+    expect(await loadRemoteSeen(now(), repo)).toBeNull();
+  });
+});
+
+describe("remote snapshots", () => {
+  it("distinguishes unavailable, empty, and populated snapshots", async () => {
+    const { repo, itemId } = await fixture();
+    expect(await getReconcileSnapshot(repo, now())).toBeNull();
+    expect(await listReconcileRows(repo, now())).toEqual([]);
+    const link = { externalId: `itm_${itemId}`, stockUnits: 10, pricePaise: 1000, remoteHash: "1000:10:1" };
+    await saveRemoteSeen([link], now(), repo);
+    expect(await getReconcileSnapshot(repo, now())).toEqual([]);
+    await saveRemoteSeen([], now(), repo);
+    expect(await loadRemoteSeen(now(), repo)).toEqual(new Map());
+    expect(await getReconcileSnapshot(repo, now())).toEqual([
+      expect.objectContaining({ itemId, kind: "missing_remote" }),
     ]);
+  });
+
+  it("treats expired, malformed, and unreadable snapshots as unavailable", async () => {
+    const { repo } = await fixture();
+    await saveRemoteSeen([], new Date(now().getTime() - 8 * 86_400_000), repo);
+    expect(await loadRemoteSeen(now(), repo)).toBeNull();
+    for (const raw of ["not json", '{"at":"invalid","items":[]}', '{"at":"2026-11-05T10:00:00.000Z","items":[{}]}']) {
+      await repo.setAppSetting("remote.seen", raw);
+      expect(await loadRemoteSeen(now(), repo)).toBeNull();
+    }
+    repo.getAppSetting = () => Promise.reject(new Error("read failed"));
+    expect(await getReconcileSnapshot(repo, now())).toBeNull();
+  });
+
+  it("preserves the last snapshot on a remote read failure and replaces it on an empty read", async () => {
+    const { repo, itemId } = await fixture();
+    const link = { externalId: `itm_${itemId}`, stockUnits: 10, pricePaise: 1000, remoteHash: "1000:10:1" };
+    await saveRemoteSeen([link], now(), repo);
+    const failed = await runSync({ repo, connector: fakeConnector({ listRemoteItems: () => Promise.reject(new Error("offline")) }), now, isApproved: () => true }, { details: false, list: false });
+    expect(failed.problems).toContain("catalog read: offline");
+    expect(await loadRemoteSeen(now(), repo)).toEqual(new Map([[link.externalId, link]]));
+    await runSync({ repo, connector: fakeConnector(), now, isApproved: () => true }, { details: false, list: false });
+    expect(await loadRemoteSeen(now(), repo)).toEqual(new Map());
+    expect(await getReconcileSnapshot(repo, now())).toEqual([expect.objectContaining({ kind: "missing_remote" })]);
   });
 });
 
 describe("runSync", () => {
-  it("merges repeated sales into one push and clears the outbox", async () => {
+  it("keeps a stock-only event run from scanning catalogs", async () => {
+    const { repo } = await fixture();
+    const calls: string[] = [];
+    const connector = fakeConnector({
+      listCategories: () => { calls.push("categories"); return Promise.resolve([]); },
+      listRemoteItems: () => { calls.push("catalog"); return Promise.resolve([]); },
+      pullStock: () => { calls.push("stock pull"); return Promise.resolve({ moves: [], nextCursor: 0 }); },
+    });
+    await runSync({ repo, connector, now, isApproved: () => true }, { stockOnly: true, pullStock: false });
+    expect(calls).toEqual([]);
+  });
+
+  it("continues to pull stock when loading categories fails", async () => {
+    const { repo } = await fixture();
+    let pulled = false;
+    const connector = fakeConnector({
+      listCategories: () => Promise.reject(new Error("offline")),
+      pullStock: () => { pulled = true; return Promise.resolve({ moves: [], nextCursor: 0 }); },
+    });
+    const result = await runSync({ repo, connector, now, isApproved: () => true });
+    expect(pulled).toBe(true);
+    expect(result.problems).toContain("catalog: offline");
+  });
+
+  it("follows a stock continuation and stops at the final page", async () => {
+    const { repo, itemId } = await fixture();
+    const calls: { cursor: number; continuation?: string }[] = [];
+    const connector = fakeConnector({
+      pullStock: (cursor, options) => {
+        calls.push({ cursor, continuation: options?.continuation });
+        return Promise.resolve(cursor === 0
+          ? { moves: [{ id: 1, externalId: `itm_${itemId}`, deltaUnits: -1, reason: "online_order", createdAt: now().toISOString() }], nextCursor: 1, hasMore: true, continuation: "next" }
+          : { moves: [{ id: 2, externalId: `itm_${itemId}`, deltaUnits: -1, reason: "online_order", createdAt: now().toISOString() }], nextCursor: 2, hasMore: false });
+      },
+    });
+    const result = await runSync({ repo, connector, now, isApproved: () => true }, { stockOnly: true });
+    expect(calls).toEqual([{ cursor: 0, continuation: undefined }, { cursor: 1, continuation: "next" }]);
+    expect(result.problems).toEqual([]);
+    expect(await repo.getSyncCursor("stock")).toBe("2");
+  });
+
+  it("records rate limiting as a scheduled stock retry", async () => {
+    const { repo } = await fixture();
+    const connector = fakeConnector({ pullStock: () => Promise.reject(new MarketplaceError("rate_limited", "wait", 429, 37)) });
+    const result = await runSync({ repo, connector, now, isApproved: () => true }, { stockOnly: true });
+    expect(result.retryAfterSeconds).toBe(37);
+    expect(result.problems).toEqual([]);
+  });
+
+  it("surfaces a marketplace clamp even when the movement is accepted", async () => {
+    const { repo, itemId } = await fixture();
+    await repo.adjustStock(itemId, -1000, "adjustment");
+    const connector = fakeConnector({
+      pushStock: (moves) => Promise.resolve(moves.map((move) => ({
+        idempotencyKey: move.idempotencyKey, status: "applied" as const,
+        clamped: true, newStockUnits: 0, error: null,
+      }))),
+    });
+    const result = await runSync({ repo, connector, now, isApproved: () => true }, { stockOnly: true, pullStock: false });
+    expect(result.problems.join(" ")).toContain("clamped or unknown");
+    expect(await repo.listOutbox("pending")).toHaveLength(0);
+    expect(await repo.listOutbox("quarantined")).toHaveLength(1);
+    await saveRemoteSeen([{ externalId: `itm_${itemId}`, stockUnits: 9, pricePaise: 1000, remoteHash: "1000:9:1" }], now(), repo);
+    expect(await getReconcileSnapshot(repo, now())).toContainEqual(expect.objectContaining({ kind: "stock", localValue: 9, remoteValue: 9 }));
+  });
+
+  it("reports unknown historical clamp status for accepted duplicates", async () => {
+    const { repo, itemId } = await fixture();
+    await repo.adjustStock(itemId, -1000, "adjustment");
+    const connector = fakeConnector({
+      pushStock: (moves) => Promise.resolve(moves.map((move) => ({
+        idempotencyKey: move.idempotencyKey, status: "duplicate" as const,
+        clamped: null, newStockUnits: 0, error: null,
+      }))),
+    });
+    const result = await runSync({ repo, connector, now, isApproved: () => true }, { stockOnly: true, pullStock: false });
+    expect(result.problems.join(" ")).toContain("clamped or unknown");
+    expect(await repo.listOutbox("pending")).toHaveLength(0);
+    expect(await repo.listOutbox("quarantined")).toHaveLength(1);
+  });
+
+  it("sends opposite-sign movements in order without netting them", async () => {
+    const { repo, itemId } = await fixture();
+    await repo.adjustStock(itemId, -1000, "adjustment");
+    await repo.adjustStock(itemId, 1000, "adjustment");
+    const pushes: StockPush[][] = [];
+    const result = await runSync({ repo, connector: fakeConnector({ pushes }), now, isApproved: () => true }, { stockOnly: true, pullStock: false });
+    expect(pushes.flat().map((move) => move.deltaUnits)).toEqual([-1, 1]);
+    expect(new Set(pushes.flat().map((move) => move.idempotencyKey)).size).toBe(2);
+    expect(await repo.listOutbox("pending")).toHaveLength(0);
+    expect(result.problems).toEqual([]);
+  });
+
+  it("does not retry an item before its outbox backoff expires", async () => {
+    const { repo, itemId } = await fixture();
+    await repo.adjustStock(itemId, -1000, "adjustment");
+    let attempts = 0;
+    const connector = fakeConnector({
+      pushStock: () => { attempts++; return Promise.reject(new Error("offline")); },
+    });
+    await runSync({ repo, connector, now, isApproved: () => true }, { stockOnly: true, pullStock: false });
+    await repo.adjustStock(itemId, -1000, "adjustment");
+    await runSync({ repo, connector, now, isApproved: () => true }, { stockOnly: true, pullStock: false });
+    expect(attempts).toBe(1);
+    expect(await repo.listOutbox("pending")).toHaveLength(2);
+  });
+
+  it("sends repeated sources separately and clears only their exact outbox rows", async () => {
     const { repo, itemId } = await fixture();
     await repo.adjustStock(itemId, -1000, "adjustment");
     await repo.adjustStock(itemId, -1000, "adjustment");
@@ -123,12 +270,74 @@ describe("runSync", () => {
       isApproved: () => true,
     });
 
-    expect(pushes).toHaveLength(1);
-    expect(pushes[0]).toHaveLength(1);
-    // The outbox is written by the Tauri repo; the memory repo has no outbox
-    // writer, so this checks the zero-row path stays harmless.
+    expect(pushes).toHaveLength(2);
+    expect(pushes.flat().map((move) => move.deltaUnits)).toEqual([-1, -1]);
+    expect(pushes.flat().every((move) => move.reason === "adjustment")).toBe(true);
     expect(outcome.problems).toEqual([]);
     expect(await repo.listOutbox("pending")).toEqual([]);
+  });
+
+  it("replays identical immutable requests after response loss while preserving newer sources", async () => {
+    const { repo, itemId } = await fixture();
+    await repo.adjustStock(itemId, -1000, "adjustment");
+    const sent: StockPush[] = [];
+    let lost = true;
+    const connector = fakeConnector({ pushStock: async (moves) => {
+      sent.push(...structuredClone(moves));
+      if (lost) { lost = false; throw new Error("response lost after apply"); }
+      return moves.map((move) => ({ idempotencyKey: move.idempotencyKey, status: "duplicate", clamped: false, newStockUnits: 9, error: null }));
+    } });
+    await runSync({ repo, connector, now, isApproved: () => true }, { stockOnly: true, pullStock: false });
+    await repo.adjustStock(itemId, -1000, "adjustment");
+    await runSync({ repo, connector, now: () => new Date(now().getTime() + 3_600_000), isApproved: () => true }, { stockOnly: true, pullStock: false });
+    expect(sent).toHaveLength(3);
+    expect(sent[1]).toEqual(sent[0]);
+    expect(sent[2]!.idempotencyKey).not.toBe(sent[0]!.idempotencyKey);
+    expect(await repo.listOutbox("pending")).toEqual([]);
+  });
+
+  it("leaves a failed local settlement recoverable under the same key", async () => {
+    const { repo, itemId } = await fixture();
+    await repo.adjustStock(itemId, -1000, "adjustment");
+    const pushes: StockPush[][] = [];
+    const settle = repo.settleStockDelivery.bind(repo);
+    repo.settleStockDelivery = async () => { throw new Error("disk unavailable"); };
+    await expect(runSync({ repo, connector: fakeConnector({ pushes }), now, isApproved: () => true }, { stockOnly: true, pullStock: false })).rejects.toThrow("disk unavailable");
+    expect(await repo.listOutbox("pending")).toHaveLength(1);
+    repo.settleStockDelivery = settle;
+    await runSync({ repo, connector: fakeConnector({ pushes }), now: () => new Date(now().getTime() + 180_000), isApproved: () => true }, { stockOnly: true, pullStock: false });
+    expect(pushes[1]).toEqual(pushes[0]);
+    expect(await repo.listOutbox("pending")).toEqual([]);
+  });
+
+  it("bounds a run even when each in-flight delivery creates another sale", async () => {
+    const { repo, itemId } = await fixture();
+    await repo.adjustStock(itemId, -1000, "adjustment");
+    let calls = 0;
+    const connector = fakeConnector({ pushStock: async (moves) => {
+      calls++;
+      await repo.adjustStock(itemId, -1000, "adjustment");
+      return moves.map((move) => ({ idempotencyKey: move.idempotencyKey, status: "applied", clamped: false, newStockUnits: 1, error: null }));
+    } });
+    const result = await runSync({ repo, connector, now, isApproved: () => true }, { stockOnly: true, pullStock: false, bulkMax: 3 });
+    expect(calls).toBe(3);
+    expect(result.pushedMoves).toBe(3);
+    expect(await repo.listOutbox("pending")).toHaveLength(1);
+  });
+
+  it("does not release the opposite-sign successor after a clamped predecessor", async () => {
+    const { repo, itemId } = await fixture();
+    await repo.adjustStock(itemId, -1000, "adjustment");
+    await repo.adjustStock(itemId, 1000, "adjustment");
+    const sent: StockPush[] = [];
+    const connector = fakeConnector({ pushStock: async (moves) => {
+      sent.push(...moves);
+      return moves.map((move) => ({ idempotencyKey: move.idempotencyKey, status: "applied", clamped: true, newStockUnits: 0, error: null }));
+    } });
+    await runSync({ repo, connector, now, isApproved: () => true }, { stockOnly: true, pullStock: false });
+    expect(sent.map((move) => move.deltaUnits)).toEqual([-1]);
+    expect(await repo.listOutbox("quarantined")).toHaveLength(1);
+    expect(await repo.listOutbox("pending")).toHaveLength(1);
   });
 
   it("with details off, sends and pulls no stock or edits to linked items", async () => {

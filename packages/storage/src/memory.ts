@@ -101,6 +101,16 @@ export class MemoryRepository implements BillingRepository {
   private imageBytes = new Map<number, Uint8Array>();
   private held = new Map<number, HeldBill>();
   private outbox: OutboxRow[] = [];
+  private stockStates = new Map<string, import("./types").StockProtocolState>();
+  private stockIntents = new Map<string, import("./types").StockReconciliationIntent>();
+  private stockRequests = new Map<string, import("./types").StockReconciliationInput>();
+  private sourceResolutions = new Map<string, import("./types").StockSourceResolution>();
+  private capturedSources = new Map<string, string[]>();
+  private unresolvedStock(externalId?: string): boolean {
+    return [...this.stockIntents.values()].some((i) => (!externalId || i.externalId === externalId) && (i.status === "pending" || i.status === "needs_review")) || [...this.sourceResolutions.values()].some((r) => r.externalId && (!externalId || r.externalId === externalId) && !r.retiredBy);
+  }
+  private stockResults = new Map<string, import("./types").StockProtocolState>();
+  private deliveries = new Map<number, import("./types").StockDeliveryClaim & { sourceId: number; externalId: string; status: "pending" | "done" | "quarantined"; claimUntil: string | null; nextAttemptAt: string | null }>();
   private cursors = new Map<string, string>();
   private appSettings = new Map<string, string>();
 
@@ -395,15 +405,18 @@ export class MemoryRepository implements BillingRepository {
     // Mirrors the Tauri repo: only published items with real sales/adjustments
     // are pushed, and each movement's key is stable for idempotent retries.
     const remoteReason =
-      reason === "sale" ? "sale" : reason === "void" ? "order_cancel" : reason === "adjustment" ? "adjustment" : null;
+      reason === "sale" ? "sale" : reason === "void" ? "order_cancel" :
+        reason === "adjustment" || reason === "return" || reason === "purchase" ? "adjustment" : null;
     if (
       item.remoteProductId !== null &&
+      refType !== "sync" &&
       deltaMilli !== 0 &&
       deltaMilli % 1000 === 0 &&
       remoteReason !== null
     ) {
-      const key =
-        refType === "bill" && refId !== null ? `bill:${refId}:${id}` : `adj:${id}`;
+      const key = reason === "adjustment" || reason === "purchase"
+        ? `adj:${id}`
+        : `bill:${refId ?? "-"}:${id}`;
       this.outbox.push({
         id: this.nextIds.outbox++,
         idempotencyKey: key,
@@ -778,7 +791,169 @@ export class MemoryRepository implements BillingRepository {
 
   // --- B5 sync -------------------------------------------------------------
 
-  async listOutbox(status?: "pending" | "done"): Promise<OutboxRow[]> {
+  async claimStockDelivery(now: string, claimUntil: string): Promise<import("./types").StockDeliveryClaim | null> {
+    if (!Number.isFinite(Date.parse(now)) || !Number.isFinite(Date.parse(claimUntil)) || claimUntil <= now) throw new Error("invalid claim expiry");
+    for (const source of this.outbox) {
+      if (source.status !== "pending") continue;
+      if (this.unresolvedStock(source.externalId) || [...this.sourceResolutions.values()].some((r) => r.externalId === source.externalId && !r.retiredBy)) continue;
+      if (this.outbox.some((r) => r.id < source.id && r.externalId === source.externalId && r.status !== "done")) continue;
+      if (source.nextAttemptAt && source.nextAttemptAt > now) continue;
+      let delivery = [...this.deliveries.values()].find((d) => d.sourceId === source.id);
+      if (delivery && (delivery.status !== "pending" || (delivery.claimUntil && delivery.claimUntil > now) || (delivery.nextAttemptAt && delivery.nextAttemptAt > now))) continue;
+      if (!delivery) {
+        const state = this.stockStates.get(source.externalId);
+        const key = crypto.randomUUID();
+        delivery = { id: source.id, sourceId: source.id, externalId: source.externalId, payloadJson: JSON.stringify({ externalId: source.externalId, deltaUnits: source.deltaUnits, reason: source.reason, idempotencyKey: key, createdAt: now, ...(state ? { epoch: state.epoch, variantId: state.variantId, generation: state.generation } : {}) }), idempotencyKey: key, claimToken: "", attempts: 0, status: "pending", claimUntil: null, nextAttemptAt: null };
+        this.deliveries.set(delivery.id, delivery);
+      }
+      delivery.claimToken = crypto.randomUUID(); delivery.claimUntil = claimUntil;
+      return { id: delivery.id, payloadJson: delivery.payloadJson, idempotencyKey: delivery.idempotencyKey, claimToken: delivery.claimToken, attempts: delivery.attempts };
+    }
+    return null;
+  }
+  async settleStockDelivery(id: number, claimToken: string, outcome: "done" | "retry" | "quarantined", nextAttemptAt?: string, detail?: string): Promise<void> {
+    const delivery = this.deliveries.get(id);
+    if (!delivery || delivery.status !== "pending" || delivery.claimToken !== claimToken) throw new Error("stale or missing stock delivery claim");
+    if (!["done", "retry", "quarantined"].includes(outcome) || (outcome === "retry" && !nextAttemptAt)) throw new Error("invalid stock delivery outcome");
+    const source = this.outbox.find((r) => r.id === delivery.sourceId);
+    if (!source || source.status !== "pending") throw new Error("stock delivery source is not pending");
+    delivery.attempts++; delivery.claimToken = ""; delivery.claimUntil = null;
+    if (outcome === "retry") { delivery.nextAttemptAt = nextAttemptAt!; return; }
+    delivery.status = outcome; delivery.nextAttemptAt = null;
+    source.status = outcome; source.attempts++; source.nextAttemptAt = null;
+    if (outcome === "quarantined") source.quarantineReason = detail ?? "Unknown or permanent stock outcome";
+  }
+  private validateStockState(state: import("./types").StockProtocolState): void {
+    if (!state.externalId || !state.variantId || !state.epoch || ![state.sequence,state.revision,state.generation,state.stockUnits].every((n) => Number.isSafeInteger(n) && n >= 0) || !Number.isSafeInteger(state.stockUnits * 1000)) throw new Error("invalid stock protocol state");
+  }
+  async saveStockProtocolStates(states: readonly import("./types").StockProtocolState[]): Promise<void> {
+    for (const state of states) {
+      this.validateStockState(state);
+      const prior = this.stockStates.get(state.externalId);
+      if (!prior || Object.keys(state).some((k) => state[k as keyof typeof state] !== prior[k as keyof typeof prior])) throw new Error("stock baseline changes require explicit reconciliation");
+      if (this.unresolvedStock(state.externalId)) throw new Error("stock reconciliation pending");
+    }
+    for (const state of states) this.stockStates.set(state.externalId, { ...state });
+  }
+  async listStockProtocolStates(): Promise<import("./types").StockProtocolState[]> { return [...this.stockStates.values()].map((s) => ({ ...s })); }
+  async activateStockEpoch(epoch: string): Promise<void> {
+    if (!epoch || this.unresolvedStock()) throw new Error("recover pending stock reconciliation before activation");
+    for (const item of this.items.values()) {
+      if (!item.remoteProductId) continue;
+      const state = this.stockStates.get(item.remoteProductId) ?? this.stockStates.get(`itm_${item.id}`);
+      if (state?.epoch !== epoch) throw new Error("all linked items require a reconciled stock baseline");
+    }
+    if (this.appSettings.get("sync.stock_epoch") !== epoch) { this.cursors.set("stock", "0"); this.appSettings.set("sync.stock_epoch", epoch); }
+    this.appSettings.delete("sync.stock_bootstrap_required");
+  }
+  async beginStockReconciliation(input: import("./types").StockReconciliationInput): Promise<import("./types").StockReconciliationIntent> {
+    this.validateStockState(input);
+    const prior = this.stockIntents.get(input.operationId);
+    if (prior) {
+      const request = this.stockRequests.get(input.operationId)!;
+      if (Object.keys(input).some((k) => input[k as keyof typeof input] !== request[k as keyof typeof request]) || Object.keys(input).length !== Object.keys(request).length) throw new Error("reconciliation operation key reused with changed payload");
+      return structuredClone(prior);
+    }
+    if (!input.operationId || !["local", "remote"].includes(input.choice)) throw new Error("invalid reconciliation input");
+    if ([...this.stockIntents.values()].some((i) => i.externalId === input.externalId && (i.status === "pending" || i.status === "needs_review"))) throw new Error("stock reconciliation pending");
+    const item = this.items.get(input.itemId);
+    if (!item || (item.remoteProductId !== input.externalId && `itm_${item.id}` !== input.externalId)) throw new Error("stock identity changed");
+    if (item.stockMilli !== input.expectedLocalStockMilli || (input.choice === "local" && input.stockUnits * 1000 !== item.stockMilli)) throw new Error("local stock changed; refresh reconciliation");
+    const intent: import("./types").StockReconciliationIntent = { ...input, capturedStockMilli: item.stockMilli, sourceBoundary: Math.max(0, ...this.outbox.map((r) => r.id)), status: "pending" };
+    this.stockIntents.set(input.operationId, intent);
+    this.stockRequests.set(input.operationId, { ...input });
+    this.captureStockSources(intent);
+    return structuredClone(intent);
+  }
+  private captureStockSources(intent: import("./types").StockReconciliationIntent): void {
+    this.capturedSources.set(intent.operationId, [...this.sourceResolutions.values()].filter((r) => r.externalId === intent.externalId && !r.retiredBy && r.sourceId <= intent.sourceBoundary).map((r) => r.operationId));
+  }
+  async beginStockRecovery(input: import("./types").StockRecoveryInput): Promise<import("./types").StockReconciliationIntent> {
+    this.validateStockState(input);
+    if (!input.operationId || !input.reason.trim() || input.choice !== "remote" || input.stockUnits !== 0) throw new Error("recovery requires an explicit reason and zero target");
+    const { parentOperationId, reason, ...request } = input;
+    const existing = this.stockIntents.get(input.operationId);
+    if (existing) {
+      const original = this.stockRequests.get(input.operationId)!;
+      if (existing.parentOperationId !== parentOperationId || existing.reason !== reason || Object.keys(original).length !== Object.keys(request).length || Object.keys(request).some((k) => request[k as keyof typeof request] !== original[k as keyof typeof original])) throw new Error("reconciliation operation key reused with changed payload");
+      return structuredClone(existing);
+    }
+    const parent = this.stockIntents.get(parentOperationId);
+    if (!parent || parent.status !== "needs_review" || !parent.result || [...this.stockIntents.values()].some((i) => i.parentOperationId === parentOperationId && i.status !== "conflict")) throw new Error("review parent is not the active leaf");
+    const committed = parent.result;
+    if (parent.itemId !== input.itemId || parent.externalId !== input.externalId || committed.variantId !== input.variantId || committed.epoch !== input.epoch || input.generation < committed.generation || input.revision < committed.revision || input.sequence < committed.sequence) throw new Error("recovery parent or fresh remote fence mismatch");
+    const item = this.items.get(input.itemId);
+    if (!item || (item.remoteProductId !== input.externalId && `itm_${item.id}` !== input.externalId) || item.stockMilli !== input.expectedLocalStockMilli) throw new Error("local stock changed; refresh recovery");
+    const parentTarget = committed.stockUnits * 1000 + item.stockMilli - parent.capturedStockMilli;
+    if (!Number.isSafeInteger(parentTarget)) throw new Error("stock rebase overflow");
+    const intent: import("./types").StockReconciliationIntent = { ...request, parentOperationId, reason, actor: null, createdAt: new Date().toISOString(), approvedShortageMilli: Math.max(0, -parentTarget), capturedStockMilli: item.stockMilli, sourceBoundary: Math.max(0, ...this.outbox.map((r) => r.id)), status: "pending" };
+    this.stockRequests.set(input.operationId, { ...request }); this.stockIntents.set(input.operationId, intent); this.captureStockSources(intent);
+    return structuredClone(intent);
+  }
+  async resolveStockSource(input: import("./types").StockSourceResolutionInput): Promise<import("./types").StockSourceResolution> {
+    if (!input.operationId.trim() || !input.reason.trim() || !input.confirmed || !["map", "historical_unknown"].includes(input.action)) throw new Error("explicit reason and confirmation required");
+    const prior = this.sourceResolutions.get(input.operationId);
+    if (prior) {
+      const { actor: _actor, createdAt: _created, externalId: _external, retiredBy: _retired, ...original } = prior;
+      if (Object.keys(original).length !== Object.keys(input).length || Object.keys(input).some((k) => input[k as keyof typeof input] !== original[k as keyof typeof original])) throw new Error("source resolution operation key reused with changed payload");
+      return structuredClone(prior);
+    }
+    const source = this.outbox.find((r) => r.id === input.sourceId);
+    if (!source || source.status !== "quarantined" || source.idempotencyKey !== input.idempotencyKey || source.rawPayloadJson !== input.rawPayloadJson) throw new Error("source evidence changed or is not quarantined");
+    if ([...this.deliveries.values()].some((d) => d.sourceId === input.sourceId)) throw new Error("delivery evidence requires ordinary stock reconciliation");
+    let identified = false; try { const raw = JSON.parse(input.rawPayloadJson); identified = typeof raw?.externalId === "string" && raw.externalId !== ""; } catch { /* retain malformed evidence */ }
+    if (identified) throw new Error("identified sources require ordinary stock reconciliation");
+    if ([...this.sourceResolutions.values()].some((r) => r.sourceId === input.sourceId)) throw new Error("source already resolved or mapped");
+    let externalId: string | undefined;
+    if (input.action === "map") { const item = this.items.get(input.itemId ?? -1); if (!item?.remoteProductId) throw new Error("mapping requires a verified linked item"); externalId = `itm_${item.id}`; }
+    else if (input.itemId !== undefined) throw new Error("historical unknown disposition cannot select an item");
+    const resolution: import("./types").StockSourceResolution = { ...input, actor: null, createdAt: new Date().toISOString(), ...(externalId ? { externalId } : {}) };
+    this.sourceResolutions.set(input.operationId, resolution); return { ...resolution };
+  }
+  async listStockSourceResolutions(): Promise<import("./types").StockSourceResolution[]> { return [...this.sourceResolutions.values()].map((r) => ({ ...r })); }
+  async listStockReconciliations(): Promise<import("./types").StockReconciliationIntent[]> { return structuredClone([...this.stockIntents.values()]); }
+  async rejectStockReconciliation(operationId: string, detail: string): Promise<void> {
+    const intent = this.stockIntents.get(operationId);
+    if (!intent || intent.status !== "pending") throw new Error("reconciliation is not pending");
+    intent.status = "conflict"; intent.detail = detail;
+  }
+  async settleStockReconciliation(operationId: string, result: import("./types").StockProtocolState): Promise<import("./types").StockReconciliationIntent> {
+    this.validateStockState(result);
+    const intent = this.stockIntents.get(operationId);
+    if (!intent) throw new Error("missing reconciliation intent");
+    const prior = this.stockResults.get(operationId);
+    if (prior) {
+      if (Object.keys(result).some((k) => result[k as keyof typeof result] !== prior[k as keyof typeof prior])) throw new Error("reconciliation result changed");
+      return structuredClone(intent);
+    }
+    if (intent.status !== "pending") throw new Error("reconciliation is not pending");
+    const item = this.items.get(intent.itemId);
+    if (!item || (item.remoteProductId !== result.externalId && `itm_${item.id}` !== result.externalId)) throw new Error("stock identity changed");
+    if (result.externalId !== intent.externalId || result.variantId !== intent.variantId || result.epoch !== intent.epoch || result.sequence < intent.sequence || result.generation !== intent.generation + 1 || result.revision <= intent.revision || result.stockUnits !== intent.stockUnits) throw new Error("reconciliation result identity or fence mismatch");
+    const target = result.stockUnits * 1000 + item.stockMilli - intent.capturedStockMilli;
+    if (!Number.isSafeInteger(target)) throw new Error("stock rebase overflow");
+    intent.result = { ...result }; this.stockResults.set(operationId, { ...result });
+    if (target < 0) {
+      intent.status = "needs_review"; intent.detail = "Committed remote baseline cannot cover later local sales; explicit linked recovery required";
+      intent.review = { currentStockMilli: item.stockMilli, subsequentDeltaMilli: item.stockMilli - intent.capturedStockMilli, shortageMilli: -target };
+      return structuredClone(intent);
+    }
+    const delta = target - item.stockMilli;
+    const shortage = intent.approvedShortageMilli ?? 0;
+    if (delta - shortage) this.recordMovement(item.id, delta - shortage, "adjustment", "sync", operationId);
+    if (shortage) this.recordMovement(item.id, shortage, "adjustment", "sync", `${operationId}:shortage`);
+    for (const source of this.outbox) if (source.id <= intent.sourceBoundary && source.externalId === result.externalId && source.status !== "done") { source.status = "done"; source.nextAttemptAt = null; source.quarantineReason = null; }
+    for (const delivery of this.deliveries.values()) if (delivery.sourceId <= intent.sourceBoundary && delivery.externalId === result.externalId) { delivery.status = "done"; delivery.claimToken = ""; delivery.claimUntil = null; delivery.nextAttemptAt = null; }
+    for (const id of this.capturedSources.get(operationId) ?? []) {
+      const resolution = this.sourceResolutions.get(id)!;
+      if (!resolution.retiredBy) { resolution.retiredBy = operationId; const source = this.outbox.find((r) => r.id === resolution.sourceId)!; source.status = "done"; source.nextAttemptAt = null; }
+    }
+    this.stockStates.set(result.externalId, { ...result }); intent.status = "done";
+    let parentId = intent.parentOperationId;
+    while (parentId) { const parent = this.stockIntents.get(parentId)!; parent.status = "done"; parentId = parent.parentOperationId; }
+    return structuredClone(intent);
+  }
+  async listOutbox(status?: "pending" | "done" | "quarantined"): Promise<OutboxRow[]> {
     return this.outbox
       .filter((r) => status === undefined || r.status === status)
       .map((r) => ({ ...r }));
@@ -787,22 +962,30 @@ export class MemoryRepository implements BillingRepository {
   async recordOutboxResults(
     results: readonly { idempotencyKey: string; outcome: "done" | "retry"; nextAttemptAt?: string }[],
   ): Promise<void> {
+    // Stage the entire batch so a bad result cannot partially acknowledge it.
+    const staged = this.outbox.map((row) => ({ ...row }));
     for (const result of results) {
-      const row = this.outbox.find((r) => r.idempotencyKey === result.idempotencyKey);
+      const row = staged.find((r) => r.idempotencyKey === result.idempotencyKey);
       if (!row) throw new Error(`no outbox row for key ${result.idempotencyKey}`);
+      if (row.status === "quarantined" || [...this.deliveries.values()].some((d) => d.sourceId === row.id)) throw new Error("stock source requires delivery settlement or explicit reconciliation");
+      if (result.outcome === "retry" && !result.nextAttemptAt) {
+        throw new Error("a retry needs a nextAttemptAt");
+      }
+      // A late retry result must not undo a successful acknowledgement.
+      if (row.status === "done") continue;
       row.attempts += 1;
       if (result.outcome === "done") {
         row.status = "done";
         row.nextAttemptAt = null;
       } else {
-        if (!result.nextAttemptAt) throw new Error("a retry needs a nextAttemptAt");
-        row.status = "pending";
-        row.nextAttemptAt = result.nextAttemptAt;
+        row.nextAttemptAt = result.nextAttemptAt!;
       }
     }
+    this.outbox = staged;
   }
 
   async dropOutbox(keys: readonly string[]): Promise<void> {
+    if (this.outbox.some((r) => keys.includes(r.idempotencyKey) && (r.status !== "done" || [...this.deliveries.values()].some((d) => d.sourceId === r.id)))) throw new Error("cannot discard pending or quarantined stock sources");
     this.outbox = this.outbox.filter((r) => !keys.includes(r.idempotencyKey));
   }
 
@@ -815,17 +998,38 @@ export class MemoryRepository implements BillingRepository {
   }
 
   async applyStockPull(
+    expectedCursor: string | null,
     nextCursor: string,
     moves: readonly {
       externalId: string;
       deltaUnits: number;
-      reason: "online_order" | "order_cancel" | "adjustment";
+      reason: "online_order" | "order_cancel" | "adjustment" | "import";
       createdAt: string;
+      epoch?: string;
+      sequence?: number;
     }[],
   ): Promise<{ externalId: string; itemId: number | null; deltaMilli: number }[]> {
-    this.cursors.set("stock", nextCursor);
+    if (expectedCursor === nextCursor) throw new Error("stock pull cursor must advance");
+    if ((this.cursors.get("stock") ?? null) !== expectedCursor) {
+      throw new Error("stock pull cursor changed; retry sync");
+    }
+    const activeEpoch = this.appSettings.get("sync.stock_epoch");
+    if (activeEpoch) {
+      for (const item of this.items.values()) {
+        if (item.remoteProductId && (this.stockStates.get(item.remoteProductId) ?? this.stockStates.get(`itm_${item.id}`))?.epoch !== activeEpoch) throw new Error("new linked item requires stock baseline before feed application");
+      }
+      if (moves.some((m) => m.epoch !== activeEpoch || m.sequence === undefined)) throw new Error("stock feed epoch mismatch or sequence missing");
+    }
+    for (const move of moves) {
+      if (this.unresolvedStock(move.externalId)) throw new Error("stock reconciliation pending; recover before pulling this item");
+      const baseline = this.stockStates.get(move.externalId);
+      if (baseline && (move.epoch !== baseline.epoch || move.sequence === undefined)) throw new Error("stock feed epoch mismatch or sequence missing; explicit bootstrap required");
+      if (!["online_order", "order_cancel", "adjustment", "import"].includes(move.reason) || !Number.isSafeInteger(move.deltaUnits * 1000)) throw new Error("invalid remote stock movement");
+    }
     const applied: { externalId: string; itemId: number | null; deltaMilli: number }[] = [];
     for (const move of moves) {
+      const baseline = this.stockStates.get(move.externalId);
+      if (baseline && move.sequence! <= baseline.sequence) continue;
       if (move.deltaUnits === 0) continue;
       const item = [...this.items.values()].find(
         (i) => i.remoteProductId === move.externalId || `itm_${i.id}` === move.externalId,
@@ -834,6 +1038,7 @@ export class MemoryRepository implements BillingRepository {
       if (item) this.recordMovement(item.id, deltaMilli, move.reason, "sync", move.externalId);
       applied.push({ externalId: move.externalId, itemId: item?.id ?? null, deltaMilli });
     }
+    this.cursors.set("stock", nextCursor);
     return applied;
   }
 
@@ -856,23 +1061,61 @@ export class MemoryRepository implements BillingRepository {
    * to force a re-send. Pull-to-local writes the remote values instead.
    */
   async applyReconcileFixes(fixes: readonly ReconcileFix[]): Promise<void> {
-    const now = localIsoTimestamp(new Date());
+    // No await between this check and the writes: in-memory operations are atomic
+    // with respect to other calls on this repository instance.
+    for (const fix of fixes.filter((f) => f.kind === "stock" || f.kind === "missing_remote")) {
+      if (this.outbox.some((row) => row.externalId === fix.externalId && row.status !== "done") || [...this.stockIntents.values()].some((i) => i.externalId === fix.externalId && i.status === "pending")) throw new Error("Cannot reconcile while conflicting stock changes are pending sync");
+      if (fix.kind === "stock") throw new Error("stock reconciliation requires a durable protocol operation");
+    }
+    // Validate the entire batch against a simulated state before making any changes.
+    const staged = new Map<number, { remoteProductId: string | null; stockMilli: number }>();
     for (const fix of fixes) {
+      if (!["stock", "price", "missing_remote", "remote_inactive"].includes(fix.kind)) {
+        throw new Error(`bad reconcile kind "${fix.kind}"`);
+      }
       if (fix.kind === "missing_remote" && fix.pullToLocal) {
         throw new Error("a missing marketplace item can only be pushed");
       }
       const item = this.items.get(fix.itemId);
       if (!item) throw new Error(`no item with id ${fix.itemId}`);
-      if (fix.pullToLocal) {
-        if (fix.kind === "price" && fix.pricePaise !== undefined) item.pricePaise = fix.pricePaise;
-        if (fix.kind === "stock" && fix.stockUnits !== undefined) {
-          this.recordMovement(item.id, fix.stockUnits * 1000 - item.stockMilli, "adjustment", null, null);
+      const state = staged.get(item.id) ?? { remoteProductId: item.remoteProductId, stockMilli: item.stockMilli };
+      if (state.remoteProductId !== fix.externalId && `itm_${item.id}` !== fix.externalId) {
+        throw new Error(`item ${fix.itemId} is not linked to ${fix.externalId}`);
+      }
+      if (fix.pullToLocal && fix.kind === "price" &&
+          (!Number.isSafeInteger(fix.pricePaise) || fix.pricePaise! < 0)) {
+        throw new Error("a non-negative integer remote price is required");
+      }
+      if (fix.pullToLocal && fix.kind === "stock") {
+        const target = fix.stockUnits! * 1000;
+        if (!Number.isSafeInteger(fix.stockUnits) || fix.stockUnits! < 0 ||
+            !Number.isSafeInteger(target) || !Number.isSafeInteger(target - state.stockMilli)) {
+          throw new Error("a valid non-negative integer remote stock count is required");
         }
-        if (fix.kind === "remote_inactive") item.isActive = false;
+        state.stockMilli = target;
+      }
+      if (fix.pullToLocal && fix.kind === "remote_inactive" && typeof fix.isActive !== "boolean") {
+        throw new Error("a remote active state is required");
+      }
+      if (!fix.pullToLocal && fix.kind === "missing_remote") state.remoteProductId = null;
+      staged.set(item.id, state);
+    }
+
+    const now = localIsoTimestamp(new Date());
+    for (const fix of fixes) {
+      const item = this.items.get(fix.itemId)!;
+      if (fix.pullToLocal) {
+        if (fix.kind === "price") item.pricePaise = fix.pricePaise!;
+        if (fix.kind === "stock") {
+          const delta = fix.stockUnits! * 1000 - item.stockMilli;
+          if (delta !== 0) this.recordMovement(item.id, delta, "adjustment", "sync", fix.externalId);
+        }
+        if (fix.kind === "remote_inactive") item.isActive = fix.isActive!;
       } else if (fix.kind === "missing_remote") {
         item.remoteProductId = null;
         item.remoteVariantId = null;
         item.contentHash = null;
+        item.remoteHash = null;
         item.publishState = "local_only";
       } else {
         item.contentHash = null;

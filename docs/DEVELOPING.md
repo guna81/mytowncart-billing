@@ -162,12 +162,11 @@ generated and kept by the owner.
    ```sh
    MTC_DEV_API_URL=http://localhost:9000/api/v1/integrations \
    VITE_MTC_API_URL=http://localhost:9000/api/v1/integrations \
-   VITE_MTC_WEB_URL=http://localhost:9000 \
    VITE_VARIANT_SYNC=1 pnpm tauri dev
    ```
 
-   `VITE_MTC_WEB_URL` is the **API origin** (it serves `/api/v1/products/categories/`), not the website.
-   `MTC_DEV_API_URL` only affects the LAN proxy and is ignored in release builds and for non-loopback hosts.
+   Categories use the API origin. `VITE_MTC_WEB_URL` defaults to the seller website at `http://localhost:4000`.
+   `MTC_DEV_API_URL` only affects the LAN proxy and is ignored in release builds and for non-loopback hosts. Set both API variables to the same backend when overriding. Release builds reject non-production endpoint overrides.
 3. Connect from *MyTownCart* and approve on `http://localhost:4000/seller/connect`. Check the
    pairing code exists in the local database before approving; never approve a code on
    `www.mytowncart.com` while testing locally.

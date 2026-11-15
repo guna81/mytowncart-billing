@@ -104,7 +104,63 @@ export interface HeldBillInput {
   lines: { itemId: number; qtyMilli: number }[];
 }
 
-export type OutboxStatus = "pending" | "done";
+export type OutboxStatus = "pending" | "done" | "quarantined";
+
+export interface StockDeliveryClaim {
+  id: number;
+  payloadJson: string;
+  idempotencyKey: string;
+  claimToken: string;
+  attempts: number;
+}
+export interface StockProtocolState {
+  externalId: string;
+  variantId: string;
+  epoch: string;
+  sequence: number;
+  revision: number;
+  generation: number;
+  stockUnits: number;
+}
+export interface StockReconciliationInput extends StockProtocolState {
+  operationId: string;
+  itemId: number;
+  choice: "local" | "remote";
+  expectedLocalStockMilli: number;
+}
+export interface StockReconciliationIntent extends StockReconciliationInput {
+  capturedStockMilli: number;
+  sourceBoundary: number;
+  status: "pending" | "done" | "conflict" | "needs_review";
+  detail?: string;
+  result?: StockProtocolState;
+  review?: { currentStockMilli: number; subsequentDeltaMilli: number; shortageMilli: number };
+  parentOperationId?: string;
+  reason?: string;
+  actor?: number | null;
+  createdAt?: string;
+  approvedShortageMilli?: number;
+}
+export interface StockRecoveryInput extends StockReconciliationInput {
+  parentOperationId: string;
+  reason: string;
+}
+export interface StockSourceResolutionInput {
+  operationId: string;
+  sourceId: number;
+  idempotencyKey: string;
+  rawPayloadJson: string;
+  action: "map" | "historical_unknown";
+  itemId?: number;
+  reason: string;
+  confirmed: boolean;
+}
+export interface StockSourceResolution extends StockSourceResolutionInput {
+  actor: number | null;
+  createdAt: string;
+  externalId?: string;
+  retiredBy?: string;
+}
 
 /** A stock movement waiting for (or already sent to) the marketplace. */
 export interface OutboxRow {
@@ -116,6 +172,9 @@ export interface OutboxRow {
   attempts: number;
   nextAttemptAt: string | null;
   status: OutboxStatus;
+  /** Always retained, even when a legacy payload cannot be decoded. */
+  rawPayloadJson?: string;
+  quarantineReason?: string | null;
 }
 
 /** Remote catalogue entry observed for an item (reconcile + fingerprinting). */

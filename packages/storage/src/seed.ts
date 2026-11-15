@@ -1063,6 +1063,9 @@ export async function seedDemoData(
   });
   usersCount++;
 
+  // Authenticate session as the newly created owner so subsequent gated calls succeed
+  await repo.verifyPin("1234");
+
   await repo.upsertUser({
     name: "Rajesh (Cashier)",
     role: "cashier",

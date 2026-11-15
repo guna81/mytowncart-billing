@@ -877,17 +877,17 @@ pub fn enqueue_movement(
     if delta_milli == 0 {
         return Ok(());
     }
-    let external_id: Option<String> = conn
+    let linked: bool = conn
         .query_row(
-            "SELECT remote_product_id FROM items WHERE id = ?1 AND remote_product_id IS NOT NULL",
+            "SELECT EXISTS(SELECT 1 FROM items WHERE id = ?1 AND remote_product_id IS NOT NULL)",
             rusqlite::params![item_id],
             |r| r.get(0),
         )
-        .ok();
-    let Some(external_id) = external_id else {
+        .map_err(err)?;
+    if !linked {
         return Ok(());
-    };
-    if !matches!(reason, "sale" | "void" | "adjustment" | "purchase") {
+    }
+    if !matches!(reason, "sale" | "void" | "return" | "adjustment" | "purchase") {
         return Ok(());
     }
     // Only whole pieces can be represented remotely; a fractional ledger delta
@@ -907,11 +907,11 @@ pub fn enqueue_movement(
         _ => "adjustment",
     };
     let payload = serde_json::json!({
-        "externalId": external_id,
+        "externalId": format!("itm_{item_id}"),
         "deltaUnits": delta_milli / 1000,
         "reason": reason_code,
     });
-    crate::sync::enqueue_stock_outbox(conn, &[(payload.to_string(), key)])?;
+    crate::sync::enqueue_stock_outbox_in_transaction(conn, &[(payload.to_string(), key)])?;
     Ok(())
 }
 
@@ -3151,6 +3151,113 @@ mod tests {
             |r| r.get(0),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn linked_movements_enqueue_billing_ids_and_roll_back_atomically() {
+        let (_d, mut conn) = setup();
+        let id = item(&mut conn, "Soap", 10_000);
+        conn.execute("UPDATE items SET remote_product_id = 'remote-uuid' WHERE id = ?1", [id]).unwrap();
+
+        let mut bad = bill_payload(id, 1000);
+        bad.payments[0].amount_paise = 1;
+        assert!(create_bill(&mut conn, &bad).is_err());
+        assert_eq!(stock_cache(&conn, id), 10_000);
+        assert!(crate::sync::list_outbox(&conn, None).unwrap().is_empty());
+
+        let bill = create_bill(&mut conn, &bill_payload(id, 1000)).unwrap();
+        create_credit_note(&mut conn, &NewCreditNotePayload {
+            bill_id: bill.bill_id, reason: "returned".into(), created_at: "2026-11-04T11:00:00Z".into(),
+            lines: vec![CreditNoteLinePayload { item_id: Some(id), name_snapshot: "Soap".into(), qty_milli: 1000,
+                unit_price_paise: 1000, tax_rate_bp: 0, tax_paise: 0, total_paise: 1000, hsn_code: String::new() }],
+        }).unwrap();
+        let rows = crate::sync::list_outbox(&conn, None).unwrap();
+        assert_eq!(rows.len(), 2);
+        let sale: serde_json::Value = serde_json::from_str(&rows[0].payload_json).unwrap();
+        let returned: serde_json::Value = serde_json::from_str(&rows[1].payload_json).unwrap();
+        assert_eq!(sale, serde_json::json!({"externalId": format!("itm_{id}"), "deltaUnits": -1, "reason": "sale"}));
+        assert_eq!(returned, serde_json::json!({"externalId": format!("itm_{id}"), "deltaUnits": 1, "reason": "adjustment"}));
+        assert_ne!(rows[0].idempotency_key, rows[1].idempotency_key);
+        assert_eq!(stock_cache(&conn, id), 10_000);
+
+        adjust_stock(&mut conn, id, 500, "adjustment", "2026-11-04T12:00:00Z").unwrap();
+        assert_eq!(crate::sync::list_outbox(&conn, None).unwrap().len(), 2);
+        let bill = create_bill(&mut conn, &bill_payload(id, 1000)).unwrap();
+        void_bill(&mut conn, bill.bill_id, "mistake", "2026-11-04T13:00:00Z").unwrap();
+        let rows = crate::sync::list_outbox(&conn, None).unwrap();
+        assert_eq!(rows.len(), 4);
+        let void: serde_json::Value = serde_json::from_str(&rows[3].payload_json).unwrap();
+        assert_eq!(void["reason"], "order_cancel");
+        assert_eq!(void["deltaUnits"], 1);
+    }
+
+    #[test]
+    fn standalone_outbox_batch_is_atomic_and_idempotent() {
+        let (_d, conn) = setup();
+        let valid = ("{}".to_string(), "one".to_string());
+        assert!(crate::sync::enqueue_stock_outbox(&conn, &[valid.clone(), ("bad".into(), "two".into())]).is_err());
+        assert!(crate::sync::list_outbox(&conn, None).unwrap().is_empty());
+        assert_eq!(crate::sync::enqueue_stock_outbox(&conn, &[valid.clone()]).unwrap(), vec!["one"]);
+        assert!(crate::sync::enqueue_stock_outbox(&conn, &[valid]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn delivery_claim_is_stable_and_legacy_rows_block_their_item() {
+        let (_d, conn) = setup();
+        let old = r#"{"externalId":"itm_1","deltaUnits":-1,"reason":"sale"}"#;
+        crate::sync::enqueue_stock_outbox(&conn, &[(old.into(), "old".into())]).unwrap();
+        conn.execute("UPDATE outbox SET status='quarantined' WHERE status='pending'", []).unwrap();
+        let new_same = r#"{"externalId":"itm_1","deltaUnits":1,"reason":"adjustment"}"#;
+        let new_other = r#"{"externalId":"itm_2","deltaUnits":-1,"reason":"sale"}"#;
+        crate::sync::enqueue_stock_outbox(&conn, &[(new_same.into(), "same".into()), (new_other.into(), "other".into())]).unwrap();
+        let a = crate::sync::claim_stock_delivery(&conn, "2026-01-01T00:00:00Z", "2026-01-01T00:01:00Z").unwrap().unwrap();
+        assert!(a.payload_json.contains("itm_2"));
+        assert!(crate::sync::claim_stock_delivery(&conn, "2026-01-01T00:00:01Z", "2026-01-01T00:01:01Z").unwrap().is_none());
+        let b = crate::sync::claim_stock_delivery(&conn, "2026-01-01T00:01:01Z", "2026-01-01T00:02:01Z").unwrap().unwrap();
+        assert_eq!(a.payload_json, b.payload_json);
+        assert_eq!(a.idempotency_key, b.idempotency_key);
+        assert_ne!(a.claim_token, b.claim_token);
+        assert!(crate::sync::settle_stock_delivery(&conn, a.id, &a.claim_token, "done", None, None).is_err());
+        crate::sync::settle_stock_delivery(&conn, b.id, &b.claim_token, "done", None, None).unwrap();
+        assert!(crate::sync::claim_stock_delivery(&conn, "2026-01-01T00:02:02Z", "2026-01-01T00:03:02Z").unwrap().is_none());
+        assert_eq!(crate::sync::list_outbox(&conn, Some("quarantined")).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn concurrent_connections_cannot_claim_the_same_delivery() {
+        let (dir, conn) = setup();
+        conn.execute("UPDATE outbox SET status='quarantined' WHERE status='pending'", []).unwrap();
+        let payload = r#"{"externalId":"itm_1","deltaUnits":-1,"reason":"sale"}"#;
+        crate::sync::enqueue_stock_outbox(&conn, &[(payload.into(), "one".into())]).unwrap();
+        let path = dir.path().join(db::DB_FILE_NAME);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let workers: Vec<_> = (0..2).map(|_| {
+            let path = path.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                let conn = db::open(&path).unwrap();
+                conn.busy_timeout(std::time::Duration::from_secs(5)).unwrap();
+                barrier.wait();
+                crate::sync::claim_stock_delivery(&conn, "2026-01-01T00:00:00Z", "2026-01-01T00:01:00Z").unwrap()
+            })
+        }).collect();
+        assert_eq!(workers.into_iter().map(|worker| worker.join().unwrap()).filter(Option::is_some).count(), 1);
+    }
+
+    #[test]
+    fn outbox_ack_batch_rolls_back_and_done_is_terminal() {
+        let (_d, conn) = setup();
+        crate::sync::enqueue_stock_outbox(&conn, &[("{}".into(), "one".into())]).unwrap();
+        let done = ("one".to_string(), "done".to_string(), None);
+        let missing = ("missing".to_string(), "done".to_string(), None);
+        assert!(crate::sync::record_outbox_result(&conn, &[done.clone(), missing]).is_err());
+        assert_eq!(crate::sync::list_outbox(&conn, Some("pending")).unwrap().len(), 1);
+        crate::sync::record_outbox_result(&conn, &[done]).unwrap();
+        crate::sync::record_outbox_result(&conn, &[("one".into(), "retry".into(), Some("2030-01-01T00:00:00Z".into()))]).unwrap();
+        let rows = crate::sync::list_outbox(&conn, Some("done")).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].attempts, 1);
+        assert!(rows[0].next_attempt_at.is_none());
     }
 
     #[test]

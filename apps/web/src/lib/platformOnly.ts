@@ -18,7 +18,7 @@ export interface PlatformOnlySnapshot {
 }
 
 export async function savePlatformOnly(items: readonly PlatformProduct[], now: Date): Promise<void> {
-  const snapshot: PlatformOnlySnapshot = { at: now.toISOString(), items: [...items] };
+  const snapshot = { version: 2, at: now.toISOString(), items: [...items] };
   await getRepository().setAppSetting(KEY, JSON.stringify(snapshot));
 }
 
@@ -26,7 +26,10 @@ export async function loadPlatformOnly(): Promise<PlatformOnlySnapshot | null> {
   const raw = await getRepository().getAppSetting(KEY);
   if (raw === null) return null;
   try {
-    return JSON.parse(raw) as PlatformOnlySnapshot;
+    const snapshot = JSON.parse(raw) as PlatformOnlySnapshot & { version?: number };
+    // Earlier reads could stop after one page and are not complete snapshots.
+    return snapshot.version === 2 && Array.isArray(snapshot.items) && Number.isFinite(Date.parse(snapshot.at))
+      ? snapshot : null;
   } catch {
     return null;
   }

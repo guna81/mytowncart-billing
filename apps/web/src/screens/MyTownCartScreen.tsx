@@ -11,10 +11,8 @@ import { Link } from "react-router-dom";
 import {
   formatPaise,
   groupMarketplaceCategories,
-  planPublish,
   suggestCategories,
   suggestCategoryForItem,
-  type PublishItemInput,
 } from "@mytowncart-billing/core";
 import {
   CLIENT_NAME,
@@ -25,16 +23,22 @@ import {
   type MarketplaceProfile,
   type UpsertResult,
 } from "@mytowncart-billing/connector-mytowncart";
-import type { Category, Item } from "@mytowncart-billing/storage";
+import type { Category, Item, OutboxRow, RemoteItemLink } from "@mytowncart-billing/storage";
 import { Modal, PageHeader } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
 import { assignMarketplaceCategory } from "../lib/categoryAssign";
+import { withReconciliationLock } from "../lib/autoSync";
+import { publishCatalogItems } from "../lib/publishService";
+import { classifyCatalogOverview } from "../lib/catalogOverview";
+import { invalidateRemoteSeen, loadRemoteSeen } from "../lib/remoteSeen";
+import { syncAvailable } from "../lib/syncEngine";
+import { activeStockSources } from "../lib/reconcileFixes";
 import { clearConnection, loadConnection, saveConnection } from "../lib/connection";
 import { getConnector } from "../lib/marketplace";
 import { openReleasePage } from "../lib/tauri";
 import { getRepository } from "../lib/repository";
 import { useAppStore } from "../store/appStore";
-import { SyncPanel } from "./SyncPanel";
+import { Pagination, SyncPanel, usePagination } from "./SyncPanel";
 import { SyncSettingsPanel } from "./SyncSettingsPanel";
 
 type Phase = "boot" | "disconnected" | "connecting" | "connected";
@@ -46,31 +50,6 @@ const btnSecondary = "rounded border border-gray-300 bg-white px-3 py-1.5 text-s
 function errorText(err: unknown): string {
   if (err instanceof MarketplaceError) return err.message;
   return err instanceof Error ? err.message : String(err);
-}
-
-/** The catalog as the planner sees it, joined against category mappings. */
-export function toPlanInputs(
-  items: readonly Item[],
-  categories: readonly Category[],
-): PublishItemInput[] {
-  const mapped = new Map(categories.map((c) => [c.id, c.marketplaceCategoryId]));
-  return items.map((item) => ({
-    id: item.id,
-    name: item.name,
-    barcode: item.barcode,
-    categoryId: item.categoryId,
-    unitKind: item.unitKind,
-    pricePaise: item.pricePaise,
-    mrpPaise: item.mrpPaise,
-    stockMilli: item.stockMilli,
-    isActive: item.isActive,
-    photoPath: item.photoPath,
-    marketplaceCategoryId: item.categoryId === null ? null : (mapped.get(item.categoryId) ?? null),
-    lastPublishedHash: item.contentHash,
-    description: item.description,
-    brand: item.brand,
-    customAttributes: item.customAttributes,
-  }));
 }
 
 /** Honest state for one upsert result, given where the item ended up. */
@@ -507,9 +486,6 @@ export function MyTownCartScreen() {
     void loadLocal();
   }, [dataVersion, loadLocal]);
 
-  const planInputs = useMemo(() => toPlanInputs(items, categories), [items, categories]);
-  const plan = useMemo(() => planPublish(planInputs, marketplace ?? []), [planInputs, marketplace]);
-
   const onConnected = async (token: ConnectionToken) => {
     setPhase("connected");
     await loadRemote(token);
@@ -610,7 +586,6 @@ export function MyTownCartScreen() {
                 marketplace === null ? null : (
                   <ReviewTable
                     items={items}
-                    blocked={plan.blocked}
                     marketplace={marketplace}
                     categories={categories}
                     onChanged={() => bumpDataVersion()}
@@ -632,23 +607,41 @@ export function MyTownCartScreen() {
   );
 }
 
-/** Every item the seller cares about: what was published, and what blocks the rest. */
-function ReviewTable({
-  items,
-  blocked,
-  marketplace,
-  categories,
-  onChanged,
-}: {
+/** Separate publish readiness from marketplace reconciliation and visibility. */
+function ReviewTable({ items, marketplace, categories, onChanged }: {
   items: Item[];
-  blocked: ReturnType<typeof planPublish>["blocked"];
   marketplace: MarketplaceCategory[];
   categories: Category[];
   onChanged(): void;
 }) {
-  const reasonByItem = new Map(blocked.map((b) => [b.id, b.reason.code]));
+  const dataVersion = useAppStore((s) => s.dataVersion);
+  const isSyncing = useAppStore((s) => s.isSyncing);
+  const approved = useAppStore((s) => s.sellerIsApproved);
+  const [snapshot, setSnapshot] = useState<{ seen: Map<string, RemoteItemLink> | null; pending: OutboxRow[] } | null>(null);
+  const [stockBlocked, setStockBlocked] = useState(0);
+  const [publishing, setPublishing] = useState(false);
+  const [publishNote, setPublishNote] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const repo = getRepository();
+    setSnapshot(null);
+    void Promise.all([loadRemoteSeen(new Date(), repo), repo.listOutbox("pending"), repo.listOutbox("quarantined"), repo.listStockReconciliations(), repo.listStockSourceResolutions()])
+      .then(([seen, pending, quarantined, intents, history]) => { if (!cancelled) {
+        const active = activeStockSources(quarantined, history);
+        setSnapshot({ seen, pending: [...pending, ...active] });
+        setStockBlocked(active.length + intents.filter((intent) => (intent.status === "pending" || intent.status === "needs_review") && !intents.some((child) => child.parentOperationId === intent.operationId && child.status !== "conflict")).length);
+      } })
+      .catch(() => { if (!cancelled) setSnapshot({ seen: null, pending: [] }); });
+    return () => { cancelled = true; };
+  }, [dataVersion]);
+
+  const overview = useMemo(() => classifyCatalogOverview(items, categories, marketplace, snapshot?.seen ?? null, snapshot?.pending ?? []), [items, categories, marketplace, snapshot]);
+  const ready = overview.items.filter((entry) => entry.status === "ready");
+  const blocked = overview.items.filter((entry) => entry.status === "blocked");
+  const readyPage = usePagination(ready);
+  const blockedPage = usePagination(blocked);
   const groups = useMemo(() => groupMarketplaceCategories(marketplace), [marketplace]);
-  // Names of items already mapped, so a suggestion can follow the seller's own choices.
   const mappedHints = useMemo(() => {
     const mapped = new Map(categories.map((c) => [c.id, c.marketplaceCategoryId]));
     return items.flatMap((i) => {
@@ -660,70 +653,55 @@ function ReviewTable({
     await assignMarketplaceCategory(getRepository(), item, categories, choice);
     onChanged();
   };
-  // Only what still needs the seller's action; live items collapse into one summary line.
-  const rows = items.filter(
-    (i) => reasonByItem.has(i.id) || (i.publishState !== "local_only" && i.publishState !== "live"),
-  );
-  const liveCount = items.filter((i) => i.publishState === "live" && !reasonByItem.has(i.id)).length;
-  if (rows.length === 0 && liveCount === 0) return null;
+  const publish = async () => {
+    setPublishing(true);
+    setPublishNote([]);
+    try {
+      const notes = await withReconciliationLock(async () => {
+        const repo = getRepository();
+        const targets = ready.map((entry) => entry.item);
+        const result = await publishCatalogItems(repo, getConnector(), targets, approved === true);
+        if (result.publishedCount > 0) await invalidateRemoteSeen(repo);
+        const failed = result.outcomes.filter((outcome) => outcome.state === "error");
+        return [t("overview.publish_result", { count: result.publishedCount }), ...result.errors,
+          ...failed.map((outcome) => t("overview.failed_item", { name: targets.find((item) => item.id === outcome.itemId)?.name ?? String(outcome.itemId) })),
+          ...result.blocked.map((entry) => t("overview.failed_item", { name: entry.name }))];
+      });
+      setPublishNote(notes);
+      onChanged();
+    } catch (err) {
+      setPublishNote([errorText(err)]);
+    } finally {
+      setPublishing(false);
+    }
+  };
+
   return (
-    <section className="rounded border border-gray-200 bg-white p-4" data-testid="mtc-states">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="font-semibold">
-          {rows.length > 0 ? t("mtc.pending_title", { count: rows.length }) : t("mtc.published_title")}
-        </h2>
-        <Link to="/items" className="text-sm text-blue-700 hover:underline" data-testid="mtc-goto-items">
-          {t("mtc.manage_items")}
-        </Link>
-      </div>
-      <table className="mt-2 w-full text-sm">
-        <tbody>
-          {rows.map((item) => {
-            const reason = reasonByItem.get(item.id);
-            const label = reason
-              ? t(`mtc.blocked.${reason}` as I18nKey)
-              : t(`mtc.state.${item.publishState}` as I18nKey);
-            return (
-              <tr key={item.id} className="border-t border-gray-100" data-testid={`mtc-state-${item.id}`}>
-                <td className="py-1 font-medium">{item.name}</td>
-                <td className="py-1 text-right">{formatPaise(item.pricePaise)}</td>
-                <td className="py-1 pl-4 text-right text-gray-600">
-                  {t("mtc.state_stock", { count: Math.trunc(item.stockMilli / 1000) })}
-                </td>
-                <td
-                  className={`py-1 pl-4 text-right ${reason ? "text-amber-800" : "text-gray-700"}`}
-                >
-                  {reason === "no_category" || reason === "no_category_mapping" ? (
-                    <CategoryPicker
-                      itemId={item.id}
-                      groups={groups}
-                      suggestion={suggestCategoryForItem(item.name, marketplace, mappedHints)}
-                      onPick={(choice) => void choose(item, choice)}
-                    />
-                  ) : (
-                    label
-                  )}
-                  {!reason && item.publishState === "hidden" ? (
-                    <Link
-                      to={`/items/${item.id}/edit`}
-                      className="ml-2 text-blue-700 hover:underline"
-                      data-testid={`mtc-add-photo-${item.id}`}
-                    >
-                      {t("mtc.add_photo")}
-                    </Link>
-                  ) : null}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {liveCount > 0 || rows.length === 0 ? (
-        <p className="mt-2 text-sm text-gray-500" data-testid="mtc-live-count">
-          {rows.length === 0 ? t("mtc.all_live") : t("mtc.live_count", { count: liveCount })}
-        </p>
-      ) : null}
-    </section>
+    <div className="space-y-4" data-testid="mtc-states">
+      {stockBlocked > 0 && <p role="status" className="rounded border border-amber-400 bg-amber-50 p-3 text-sm text-amber-950" data-testid="overview-stock-blocked">{t("sync.quarantined", { count: stockBlocked })}</p>}
+      <section className="rounded border border-gray-200 bg-white p-4" data-testid="overview-synced">
+        <h2 className="font-semibold">{overview.synced === null ? t("overview.not_checked") : t("overview.synced", { count: overview.synced })}</h2>
+        <p className="mt-1 text-sm text-gray-600">{overview.synced === null ? t("overview.check_sync") : t("overview.synced_hint")}</p>
+        {overview.changed > 0 && <p className="mt-1 text-sm text-amber-800">{t("overview.changed", { count: overview.changed })}</p>}
+      </section>
+      <section className="rounded border border-gray-200 bg-white p-4" data-testid="overview-ready">
+        <h2 className="font-semibold">{t("overview.ready", { count: ready.length })}</h2>
+        <p className="mt-1 text-sm text-gray-600">{t("overview.ready_hint")}</p>
+        {ready.length > 0 && <button type="button" className={`${btnPrimary} mt-2`} disabled={publishing || isSyncing || !syncAvailable()} onClick={() => void publish()}>{publishing ? t("overview.publishing") : t("overview.publish", { count: ready.length })}</button>}
+        {publishNote.length > 0 && <div role="status" className="mt-2 text-sm">{publishNote.map((note, i) => <p key={i}>{note}</p>)}</div>}
+        {ready.length === 0 ? <p className="mt-2 text-sm text-gray-500">{t("overview.none")}</p> : <table className="mt-2 w-full text-sm"><tbody>{readyPage.visible.map(({ item }) => <tr key={item.id} className="border-t border-gray-100" data-testid={`overview-ready-${item.id}`}><td className="py-1 font-medium">{item.name}</td><td className="py-1 text-right">{formatPaise(item.pricePaise)}</td><td className="py-1 pl-4 text-right">{t("mtc.state_stock", { count: Math.trunc(item.stockMilli / 1000) })}</td></tr>)}</tbody></table>}
+        <Pagination {...readyPage} label={t("overview.ready", { count: ready.length })} />
+      </section>
+      <section className="rounded border border-gray-200 bg-white p-4" data-testid="overview-attention">
+        <div className="flex items-center justify-between gap-2"><h2 className="font-semibold">{t("overview.attention", { count: blocked.length })}</h2><Link to="/items" className="text-sm text-blue-700 hover:underline">{t("mtc.manage_items")}</Link></div>
+        {blocked.length === 0 ? <p className="mt-2 text-sm text-gray-500">{t("overview.none")}</p> : <table className="mt-2 w-full text-sm"><tbody>{blockedPage.visible.map((entry) => {
+          if (entry.status !== "blocked") return null;
+          const { item, reason } = entry;
+          return <tr key={item.id} className="border-t border-gray-100" data-testid={`mtc-state-${item.id}`}><td className="py-1 font-medium">{item.name}</td><td className="py-1 pl-4 text-right text-amber-800">{reason.code === "no_category" || reason.code === "no_category_mapping" ? <CategoryPicker itemId={item.id} groups={groups} suggestion={suggestCategoryForItem(item.name, marketplace, mappedHints)} onPick={(choice) => void choose(item, choice)} /> : t(`mtc.blocked.${reason.code}` as I18nKey)} <Link to={`/items/${item.id}/edit`} className="ml-2 text-blue-700 hover:underline">{t("overview.edit")}</Link></td></tr>;
+        })}</tbody></table>}
+        <Pagination {...blockedPage} label={t("overview.attention", { count: blocked.length })} />
+      </section>
+    </div>
   );
 }
 

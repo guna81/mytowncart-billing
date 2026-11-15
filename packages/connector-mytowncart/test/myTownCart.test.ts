@@ -208,10 +208,10 @@ describe("listCategories", () => {
       { id: "c1", name: "Snacks", parentId: null },
       { id: "c2", name: "Drinks", parentId: "c1" },
     ]);
-    expect(calls[0].url.startsWith(`${WEB}/api/v1/products/categories/`)).toBe(true);
+    expect(calls[0].url.startsWith(`https://api.test/api/v1/products/categories/`)).toBe(true);
   });
 
-  it("falls back to apiBaseUrl origin when webBaseUrl points to the mytowncart.com frontend", async () => {
+  it("uses the API origin when the seller site has a different origin", async () => {
     const { fetch, calls } = fakeFetch([
       [
         /categories\/\?page=1/,
@@ -227,6 +227,49 @@ describe("listCategories", () => {
     const cats = await custom.listCategories();
     expect(cats).toEqual([{ id: "c1", name: "Snacks", parentId: null }]);
     expect(calls[0].url.startsWith("https://api.mytowncart.com/api/v1/products/categories/")).toBe(true);
+  });
+});
+
+describe("listing pagination", () => {
+  const listings = [
+    { method: "listCategories", limit: 50, path: "/categories/", result: (id: string) => ({ id, name: id, parent: null, is_active: true }) },
+    { method: "listRemoteItems", limit: 100, path: "/products/", result: (id: string) => ({ external_id: id, product_id: id, variant_id: id, price: "1.00", stock: 1, is_active: true }) },
+    { method: "listPlatformProducts", limit: 20, path: "/products/", result: (id: string) => ({ external_source: "web", product_id: id, variant_id: id, name: id, price: "1.00", stock: 1, is_active: true }) },
+  ] as const;
+
+  it.each(listings)("$method follows DRF next using local page URLs", async ({ method, path, result }) => {
+    const { fetch, calls } = fakeFetch([[/.*/, () => {
+      const page = calls.length;
+      return jsonResponse({ next: page === 1 ? "https://untrusted.test/other?page=2" : null, has_next: page !== 1, results: [result(`p${page}`)] });
+    }]]);
+    const items = await connector(fetch)[method]();
+    expect(items).toHaveLength(2);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.url).toContain(`${path}?`);
+    expect(calls[1]!.url).toContain("page=2&page_size=100");
+    expect(calls[1]!.url).toMatch(/^https:\/\/api\.test\//);
+    if (method === "listPlatformProducts") expect(calls[1]!.url).toContain("include=all");
+  });
+
+  it.each(listings)("$method supports legacy has_next", async ({ method, result }) => {
+    const { fetch, calls } = fakeFetch([[/.*/, () => jsonResponse({ has_next: calls.length === 1, results: [result(`p${calls.length}`)] })]]);
+    expect(await connector(fetch)[method]()).toHaveLength(2);
+    expect(calls).toHaveLength(2);
+  });
+
+  it.each(listings.flatMap((listing) => [
+    { ...listing, pagination: { next: "https://api.test/next" }, format: "DRF next" },
+    { ...listing, pagination: { has_next: true }, format: "legacy has_next" },
+  ]))("$method fails at its page limit with $format", async ({ method, limit, pagination }) => {
+    const { fetch, calls } = fakeFetch([[/.*/, () => jsonResponse({ ...pagination, results: [] })]]);
+    await expect(connector(fetch)[method]()).rejects.toThrow(`${limit}-page pagination limit`);
+    expect(calls).toHaveLength(limit);
+  });
+
+  it.each(listings)("$method succeeds when the final allowed legacy page has no successor", async ({ method, limit }) => {
+    const { fetch, calls } = fakeFetch([[/.*/, () => jsonResponse({ has_next: calls.length < limit, results: [] })]]);
+    await expect(connector(fetch)[method]()).resolves.toEqual([]);
+    expect(calls).toHaveLength(limit);
   });
 });
 
@@ -320,11 +363,30 @@ describe("stock", () => {
       external_id: "itm_1",
       delta: -1,
       idempotency_key: "bill:7:1",
-      reason: "sale",
+      reason: "pos_sale",
     });
     expect(results.map((r) => r.status)).toEqual(["applied", "error"]);
     expect(results[0].newStockUnits).toBe(119);
     expect(results[1].error).toContain("No billing item");
+  });
+
+  it("preserves an unknown clamp result on a historical duplicate", async () => {
+    const { fetch } = fakeFetch([[/.*/, () => jsonResponse({ results: [
+      { external_id: "itm_1", status: "duplicate", stock: 0, clamped: null, error: null },
+    ] })]]);
+    const results = await connector(fetch).pushStock([
+      { externalId: "itm_1", deltaUnits: -1, reason: "sale", idempotencyKey: "old", createdAt: "" },
+    ]);
+    expect(results[0].clamped).toBeNull();
+  });
+
+  it("passes non-sale stock reasons through unchanged", async () => {
+    const { fetch, calls } = fakeFetch([[/.*/, () => jsonResponse({ results: [] })]]);
+    await connector(fetch).pushStock([
+      { externalId: "a", deltaUnits: 1, reason: "adjustment", idempotencyKey: "a", createdAt: "" },
+      { externalId: "b", deltaUnits: 1, reason: "order_cancel", idempotencyKey: "b", createdAt: "" },
+    ]);
+    expect((bodyOf(calls[0]!).movements as { reason: string }[]).map((m) => m.reason)).toEqual(["adjustment", "order_cancel"]);
   });
 
   it("pulls the feed with the cursor", async () => {
@@ -343,8 +405,25 @@ describe("stock", () => {
     ]);
     const out = await connector(fetch).pullStock(12);
     expect(out.nextCursor).toBe(13);
+    expect(out.hasMore).toBe(false);
     expect(out.moves[0]).toMatchObject({ id: 13, externalId: "itm_1", deltaUnits: -2, reason: "online_order" });
     expect(calls[0].url).toContain("cursor=12");
+  });
+
+  it("returns pagination metadata and encodes the continuation without changing force", async () => {
+    const { fetch, calls } = fakeFetch([[/.*/, () => jsonResponse({ movements: [], next_cursor: 12, has_more: true, continuation: "next+/=" })]]);
+    const out = await connector(fetch).pullStock(12, { force: true, continuation: "a+/=&?" });
+    expect(out).toEqual({ moves: [], nextCursor: 12, hasMore: true, continuation: "next+/=" });
+    const url = new URL(calls[0]!.url);
+    expect(url.searchParams.get("continuation")).toBe("a+/=&?");
+    expect(url.searchParams.get("force")).toBe("1");
+  });
+
+  it("preserves absent legacy metadata and a null continuation", async () => {
+    const { fetch } = fakeFetch([[/.*/, () => jsonResponse({ movements: [], next_cursor: 5 })]]);
+    expect(await connector(fetch).pullStock(5, { force: false })).toEqual({ moves: [], nextCursor: 5 });
+    const next = fakeFetch([[/.*/, () => jsonResponse({ movements: [], next_cursor: 5, has_more: false, continuation: null })]]);
+    expect(await connector(next.fetch).pullStock(5)).toEqual({ moves: [], nextCursor: 5, hasMore: false, continuation: null });
   });
 
   it("appends force=1 when force is true", async () => {
@@ -356,6 +435,37 @@ describe("stock", () => {
     ]);
     await connector(fetch).pullStock(5, { force: true });
     expect(calls[0].url).toContain("force=1");
+  });
+});
+
+describe("Retry-After", () => {
+  it.each([
+    ["30", 30], ["0", 0], ["invalid", undefined], ["-1", undefined], ["1.5", undefined],
+  ])("parses a 429 header %s", async (header, expected) => {
+    const { fetch } = fakeFetch([[/.*/, () => new Response('{"detail":"slow down"}', { status: 429, headers: { "Retry-After": header } })]]);
+    const err = await connector(fetch).pullStock(0).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(MarketplaceError);
+    expect(err).toMatchObject({ code: "rate_limited", status: 429, retryAfterSeconds: expected });
+  });
+
+  it("converts HTTP dates to rounded-up seconds and clamps past dates", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-11-14T10:00:00.500Z"));
+    try {
+      for (const [header, expected] of [["Sat, 14 Nov 2026 10:00:03 GMT", 3], ["Sat, 14 Nov 2026 09:00:00 GMT", 0]] as const) {
+        const { fetch } = fakeFetch([[/.*/, () => new Response("", { status: 429, headers: { "Retry-After": header } })]]);
+        await expect(connector(fetch).me()).rejects.toMatchObject({ retryAfterSeconds: expected });
+      }
+    } finally { now.mockRestore(); }
+  });
+
+  it("ignores Retry-After on other statuses and supports upload and categories", async () => {
+    for (const [status, expected] of [[503, undefined], [429, 8]] as const) {
+      const { fetch } = fakeFetch([[/.*/, () => new Response("", { status, headers: { "Retry-After": "8" } })]]);
+      const c = connector(fetch);
+      await expect(c.uploadImage("x", new Blob(["x"]))).rejects.toMatchObject({ status, retryAfterSeconds: expected });
+      await expect(c.listCategories()).rejects.toMatchObject({ status, retryAfterSeconds: expected });
+      await expect(c.downloadImage("https://m.test/a")).rejects.toMatchObject({ status, retryAfterSeconds: expected });
+    }
   });
 });
 

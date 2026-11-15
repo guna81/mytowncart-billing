@@ -13,6 +13,7 @@ pub(crate) mod db;
 pub(crate) mod keychain;
 pub(crate) mod media;
 pub(crate) mod reconcile;
+pub(crate) mod stock_protocol;
 pub(crate) mod repo;
 pub(crate) mod server;
 pub(crate) mod sync;
@@ -23,6 +24,41 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use tauri::Manager;
+
+// Process-local coordination for desktop webviews. Deliberately no timeout: an
+// abandoned operation must not be assumed complete while its HTTP request may
+// still be running. Restarting the application clears an abandoned lock.
+#[derive(Default)]
+struct SyncCoordinator(Mutex<SyncCoordinatorState>);
+
+#[derive(Default)]
+struct SyncCoordinatorState {
+    next: u64,
+    owner: Option<(String, u64)>,
+}
+
+#[tauri::command]
+fn acquire_sync_coordinator(window: tauri::WebviewWindow, state: tauri::State<'_, SyncCoordinator>) -> Result<String, String> {
+    let mut coordinator = state.0.lock().map_err(|_| "Sync coordinator unavailable")?;
+    if coordinator.owner.is_some() {
+        return Err("Sync or reconciliation is already in progress on this desktop".into());
+    }
+    coordinator.next = coordinator.next.checked_add(1).ok_or("Sync coordinator exhausted")?;
+    let token = coordinator.next;
+    coordinator.owner = Some((window.label().to_owned(), token));
+    Ok(token.to_string())
+}
+
+#[tauri::command]
+fn release_sync_coordinator(window: tauri::WebviewWindow, state: tauri::State<'_, SyncCoordinator>, token: String) -> Result<(), String> {
+    let mut coordinator = state.0.lock().map_err(|_| "Sync coordinator unavailable")?;
+    if coordinator.owner.as_ref().is_some_and(|(label, id)| label == window.label() && id.to_string() == token) {
+        coordinator.owner = None;
+        Ok(())
+    } else {
+        Err("Sync coordinator ownership mismatch".into())
+    }
+}
 
 /// Upper bound for anything read from disk into memory (backups, photos).
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
@@ -609,13 +645,76 @@ fn drop_outbox(state: tauri::State<'_, AppState>, keys: Vec<String>) -> Result<(
 }
 
 #[tauri::command]
+fn claim_stock_delivery(state: tauri::State<'_, AppState>, now: String, claim_until: String) -> Result<Option<sync::StockDeliveryClaim>, String> {
+    let conn = state.conn.lock().map_err(|e|e.to_string())?;
+    sync::claim_stock_delivery(&conn,&now,&claim_until)
+}
+#[tauri::command]
+fn settle_stock_delivery(state: tauri::State<'_, AppState>, id: i64, claim_token: String, outcome: String, next_attempt_at: Option<String>, detail: Option<String>) -> Result<(),String> {
+    let conn=state.conn.lock().map_err(|e|e.to_string())?;
+    sync::settle_stock_delivery(&conn,id,&claim_token,&outcome,next_attempt_at.as_deref(),detail.as_deref())
+}
+#[tauri::command]
+fn save_stock_protocol_states(state: tauri::State<'_, AppState>, states: Vec<stock_protocol::StockProtocolState>) -> Result<(),String> {
+    let conn=state.conn.lock().map_err(|e|e.to_string())?;
+    stock_protocol::save_states(&conn,&states)
+}
+#[tauri::command]
+fn list_stock_protocol_states(state: tauri::State<'_, AppState>) -> Result<Vec<stock_protocol::StockProtocolState>,String> {
+    let conn=state.conn.lock().map_err(|e|e.to_string())?;
+    stock_protocol::list_states(&conn)
+}
+#[tauri::command]
+fn activate_stock_epoch(state: tauri::State<'_, AppState>, epoch: String) -> Result<(),String> {
+    let conn=state.conn.lock().map_err(|e|e.to_string())?;
+    stock_protocol::activate(&conn,&epoch)
+}
+#[tauri::command]
+fn begin_stock_reconciliation(state: tauri::State<'_, AppState>, input: stock_protocol::ReconciliationInput) -> Result<stock_protocol::ReconciliationIntent,String> {
+    let conn=state.conn.lock().map_err(|e|e.to_string())?;
+    stock_protocol::begin(&conn,input)
+}
+#[tauri::command]
+fn list_stock_reconciliations(state: tauri::State<'_, AppState>) -> Result<Vec<stock_protocol::ReconciliationIntent>,String> {
+    let conn=state.conn.lock().map_err(|e|e.to_string())?;
+    stock_protocol::list(&conn)
+}
+#[tauri::command]
+fn reject_stock_reconciliation(state: tauri::State<'_, AppState>, operation_id: String, detail: String) -> Result<(),String> {
+    let conn=state.conn.lock().map_err(|e|e.to_string())?;
+    stock_protocol::reject(&conn,&operation_id,&detail)
+}
+#[tauri::command]
+fn settle_stock_reconciliation(state: tauri::State<'_, AppState>, operation_id: String, result: stock_protocol::StockProtocolState) -> Result<stock_protocol::ReconciliationIntent,String> {
+    let conn=state.conn.lock().map_err(|e|e.to_string())?;
+    stock_protocol::settle(&conn,&operation_id,&result)
+}
+#[tauri::command]
+fn begin_stock_recovery(state: tauri::State<'_, AppState>, input: stock_protocol::RecoveryInput, session: Option<String>) -> Result<stock_protocol::ReconciliationIntent,String> {
+    let conn=state.conn.lock().map_err(|e|e.to_string())?;
+    let actor=state.auth.authorize(&conn,"adjust_stock",session.as_deref())?;
+    stock_protocol::begin_recovery(&conn,input,actor)
+}
+#[tauri::command]
+fn resolve_stock_source(state: tauri::State<'_, AppState>, input: stock_protocol::SourceResolutionInput, session: Option<String>) -> Result<stock_protocol::SourceResolution,String> {
+    let conn=state.conn.lock().map_err(|e|e.to_string())?;
+    let actor=state.auth.authorize(&conn,"adjust_stock",session.as_deref())?;
+    stock_protocol::resolve_source(&conn,input,actor)
+}
+#[tauri::command]
+fn list_stock_source_resolutions(state: tauri::State<'_, AppState>) -> Result<Vec<stock_protocol::SourceResolution>,String> {
+    let conn=state.conn.lock().map_err(|e|e.to_string())?;
+    stock_protocol::list_source_resolutions(&conn)
+}
+#[tauri::command]
 fn apply_stock_pull(
     state: tauri::State<'_, AppState>,
+    expected_cursor: Option<String>,
     cursor: String,
     moves: Vec<sync::RemoteStockMovePayload>,
 ) -> Result<Vec<sync::AppliedRemoteMove>, String> {
     let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
-    sync::apply_stock_pull(&mut conn, &cursor, &moves)
+    sync::apply_stock_pull(&mut conn, expected_cursor.as_deref(), &cursor, &moves)
 }
 
 #[tauri::command]
@@ -982,6 +1081,7 @@ fn lan_server_stop(
 pub fn run(driver_script: Option<String>) {
     let script = driver_script.map(std::sync::Arc::new);
     tauri::Builder::default()
+        .manage(SyncCoordinator::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .on_page_load(move |win, payload| {
@@ -996,19 +1096,41 @@ pub fn run(driver_script: Option<String>) {
             }
         })
         .setup(move |app| {
-            let data_dir = app
-                .path()
-                .app_data_dir()
-                .map_err(|e| format!("cannot resolve app data dir: {e}"))?;
-            let db_path = data_dir.join(db::DB_FILE_NAME);
-            let outcome = db::migrate(&db_path).map_err(|e| e.to_string())?;
-            if outcome.to_version > outcome.from_version {
-                eprintln!(
-                    "db migrated v{} -> v{} (backup: {:?})",
-                    outcome.from_version, outcome.to_version, outcome.backup_path
-                );
-            }
-            let conn = db::open(&db_path).map_err(|e| e.to_string())?;
+            // A failure here (bad migration, locked/corrupt DB) must not panic:
+            // a panic inside setup unwinds through AppKit's launch AppleEvent
+            // and macOS reports an opaque "quit unexpectedly". Tell the user
+            // what went wrong instead, then exit cleanly.
+            let init = || -> Result<(PathBuf, PathBuf, rusqlite::Connection), String> {
+                let data_dir = app
+                    .path()
+                    .app_data_dir()
+                    .map_err(|e| format!("cannot resolve app data dir: {e}"))?;
+                let db_path = data_dir.join(db::DB_FILE_NAME);
+                let outcome = db::migrate(&db_path).map_err(|e| e.to_string())?;
+                if outcome.to_version > outcome.from_version {
+                    eprintln!(
+                        "db migrated v{} -> v{} (backup: {:?})",
+                        outcome.from_version, outcome.to_version, outcome.backup_path
+                    );
+                }
+                let conn = db::open(&db_path).map_err(|e| e.to_string())?;
+                Ok((data_dir, db_path, conn))
+            };
+            let (data_dir, db_path, conn) = match init() {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("[startup] database initialisation failed: {e}");
+                    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                    app.dialog()
+                        .message(format!(
+                            "MyTownCart Billing could not open its database and must close.\n\n{e}\n\nYour data has not been modified. A pre-migration backup is kept in the app's backups-local folder."
+                        ))
+                        .title("Startup failed")
+                        .kind(MessageDialogKind::Error)
+                        .blocking_show();
+                    std::process::exit(1);
+                }
+            };
             let app_state = AppState {
                 data_dir,
                 db_path,
@@ -1046,6 +1168,8 @@ pub fn run(driver_script: Option<String>) {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            acquire_sync_coordinator,
+            release_sync_coordinator,
             lan_server_status,
             lan_server_start,
             lan_server_stop,
@@ -1101,6 +1225,18 @@ pub fn run(driver_script: Option<String>) {
             enqueue_stock_outbox,
             record_outbox_results,
             drop_outbox,
+            claim_stock_delivery,
+            settle_stock_delivery,
+            save_stock_protocol_states,
+            list_stock_protocol_states,
+            activate_stock_epoch,
+            begin_stock_reconciliation,
+            begin_stock_recovery,
+            resolve_stock_source,
+            list_stock_source_resolutions,
+            list_stock_reconciliations,
+            settle_stock_reconciliation,
+            reject_stock_reconciliation,
             apply_stock_pull,
             record_remote_catalog,
             apply_reconcile_fixes,

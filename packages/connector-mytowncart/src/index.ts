@@ -79,13 +79,71 @@ export interface StockPush {
   reason: "sale" | "adjustment" | "order_cancel";
   idempotencyKey: string;
   createdAt: string;
+  /** Immutable protocol fence captured when the delivery is created. */
+  epoch?: string;
+  variantId?: string;
+  generation?: number;
+}
+
+export interface StockProtocolCapabilities {
+  protocol: 2;
+  capabilities: string[];
+}
+
+export interface StockSnapshotItem {
+  externalId: string;
+  variantId: string;
+  stockUnits: number;
+  revision: number;
+  generation: number;
+}
+
+export interface StockSnapshot {
+  protocol: 2;
+  epoch: string;
+  watermark: number;
+  items: StockSnapshotItem[];
+}
+
+export interface StockReconcileRequest {
+  operationId: string;
+  externalId: string;
+  variantId: string;
+  epoch: string;
+  expectedRevision: number;
+  generation: number;
+  quantity: number;
+}
+
+export interface StockReconcileResult extends StockSnapshotItem {
+  operationId: string;
+  epoch: string;
+  watermark: number;
+}
+
+export interface StockPullOptions {
+  force?: boolean;
+  continuation?: string;
+  protocol?: 2;
+  epoch?: string;
+  until?: number;
+}
+
+export interface StockFeed {
+  moves: StockPull[];
+  nextCursor: number;
+  hasMore?: boolean;
+  continuation?: string | null;
+  epoch?: string;
+  watermark?: number;
 }
 
 export interface StockPushResult {
   idempotencyKey: string;
   /** `duplicate` = this key was already applied (safe retry); `error` = see error. */
   status: "applied" | "duplicate" | "error";
-  clamped: boolean;
+  /** Null means the server cannot determine whether an older movement was clamped. */
+  clamped: boolean | null;
   /** Remote stock after the move, in units; null when the item is unknown. */
   newStockUnits: number | null;
   error: string | null;
@@ -93,9 +151,12 @@ export interface StockPushResult {
 
 export interface StockPull {
   id: number;
+  epoch?: string;
+  sequence?: number;
+  revision?: number;
   externalId: string;
   deltaUnits: number;
-  reason: "online_order" | "order_cancel" | "adjustment";
+  reason: "online_order" | "order_cancel" | "adjustment" | "import";
   createdAt: string;
 }
 
@@ -181,8 +242,14 @@ export interface MarketplaceConnector {
   pushStock(moves: StockPush[]): Promise<StockPushResult[]>;
   pullStock(
     cursor: number,
-    opts?: { force?: boolean },
-  ): Promise<{ moves: StockPull[]; nextCursor: number }>;
+    opts?: StockPullOptions,
+  ): Promise<StockFeed>;
+  /** Null means an older server; unsafe stock reconciliation must stay disabled. */
+  stockProtocol?(): Promise<StockProtocolCapabilities | null>;
+  enableStockProtocol?(externalIds: string[]): Promise<StockSnapshot>;
+  stockSnapshot?(externalIds: string[]): Promise<StockSnapshot>;
+  reconcileStock?(request: StockReconcileRequest): Promise<StockReconcileResult>;
+  stockReconciliation?(operationId: string): Promise<StockReconcileResult | null>;
   listRemoteItems(): Promise<RemoteItem[]>;
   /** The seller's products created on MyTownCart itself, for a read-only list. */
   listPlatformProducts(): Promise<PlatformProduct[]>;
@@ -190,7 +257,7 @@ export interface MarketplaceConnector {
   adoptProducts(entries: { productId: string; externalId: string }[]): Promise<AdoptResult[]>;
 }
 
-export { MyTownCartConnector, CLIENT_NAME, CONNECT_SCOPES, DEFAULT_API_BASE_URL, DEFAULT_WEB_BASE_URL, paiseToDecimal, decimalToPaise, scopeNames } from "./myTownCart";
+export { MyTownCartConnector, CLIENT_NAME, CONNECT_SCOPES, DEFAULT_API_BASE_URL, DEFAULT_WEB_BASE_URL, DEV_API_BASE_URL, DEV_WEB_BASE_URL, paiseToDecimal, decimalToPaise, scopeNames } from "./myTownCart";
 export type { MyTownCartOptions } from "./myTownCart";
 export { MarketplaceError } from "./http";
 export type { FetchLike } from "./http";

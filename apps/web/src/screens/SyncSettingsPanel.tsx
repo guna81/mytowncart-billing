@@ -31,8 +31,8 @@ export function SyncSettingsPanel() {
           <legend className="text-sm font-semibold text-gray-900">{t("settings.mode")}</legend>
           {(
             [
-              [true, "settings.mode_auto", "settings.mode_auto_hint"],
               [false, "settings.mode_manual", "settings.mode_manual_hint"],
+              [true, "settings.mode_auto", "settings.mode_auto_hint"],
             ] as const
           ).map(([value, label, hint]) => (
             <label key={label} className="mt-2 flex cursor-pointer items-start gap-2">

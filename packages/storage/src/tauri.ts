@@ -645,28 +645,63 @@ export class TauriRepository implements BillingRepository {
 
   // --- B5 sync -------------------------------------------------------------
 
-  async listOutbox(status?: "pending" | "done"): Promise<OutboxRow[]> {
+  async claimStockDelivery(now: string, claimUntil: string): Promise<import("./types").StockDeliveryClaim | null> {
+    return (await this.getInvoke())("claim_stock_delivery", { now, claimUntil });
+  }
+  async settleStockDelivery(id: number, claimToken: string, outcome: "done" | "retry" | "quarantined", nextAttemptAt?: string, detail?: string): Promise<void> {
+    await (await this.getInvoke())("settle_stock_delivery", { id, claimToken, outcome, nextAttemptAt: nextAttemptAt ?? null, detail: detail ?? null });
+  }
+  async saveStockProtocolStates(states: readonly import("./types").StockProtocolState[]): Promise<void> {
+    await (await this.getInvoke())("save_stock_protocol_states", { states });
+  }
+  async listStockProtocolStates(): Promise<import("./types").StockProtocolState[]> {
+    return (await this.getInvoke())("list_stock_protocol_states", {});
+  }
+  async activateStockEpoch(epoch: string): Promise<void> {
+    await (await this.getInvoke())("activate_stock_epoch", { epoch });
+  }
+  async beginStockReconciliation(input: import("./types").StockReconciliationInput): Promise<import("./types").StockReconciliationIntent> {
+    return (await this.getInvoke())("begin_stock_reconciliation", { input });
+  }
+  async listStockReconciliations(): Promise<import("./types").StockReconciliationIntent[]> {
+    return (await this.getInvoke())("list_stock_reconciliations", {});
+  }
+  async rejectStockReconciliation(operationId: string, detail: string): Promise<void> {
+    await (await this.getInvoke())("reject_stock_reconciliation", { operationId, detail });
+  }
+  async settleStockReconciliation(operationId: string, result: import("./types").StockProtocolState): Promise<import("./types").StockReconciliationIntent> {
+    return (await this.getInvoke())("settle_stock_reconciliation", { operationId, result });
+  }
+  async beginStockRecovery(input: import("./types").StockRecoveryInput): Promise<import("./types").StockReconciliationIntent> {
+    return (await this.getInvoke())("begin_stock_recovery", { input, session: getSessionToken() });
+  }
+  async resolveStockSource(input: import("./types").StockSourceResolutionInput): Promise<import("./types").StockSourceResolution> {
+    return (await this.getInvoke())("resolve_stock_source", { input, session: getSessionToken() });
+  }
+  async listStockSourceResolutions(): Promise<import("./types").StockSourceResolution[]> {
+    return (await this.getInvoke())("list_stock_source_resolutions", {});
+  }
+  async listOutbox(status?: "pending" | "done" | "quarantined"): Promise<OutboxRow[]> {
     const rows = await this.query(
       status === undefined
-        ? "SELECT id, idempotency_key, payload_json, attempts, next_attempt_at, status FROM outbox ORDER BY id"
-        : "SELECT id, idempotency_key, payload_json, attempts, next_attempt_at, status FROM outbox WHERE status = ?1 ORDER BY id",
+        ? "SELECT id, idempotency_key, payload_json, attempts, next_attempt_at, status, quarantine_reason FROM outbox ORDER BY id"
+        : "SELECT id, idempotency_key, payload_json, attempts, next_attempt_at, status, quarantine_reason FROM outbox WHERE status = ?1 ORDER BY id",
       status === undefined ? [] : [status],
     );
     return rows.map((r) => {
-      const payload = JSON.parse(str(r.payload_json)) as {
-        externalId: string;
-        deltaUnits: number;
-        reason: OutboxRow["reason"];
-      };
+      let payload: Partial<OutboxRow> = {};
+      try { payload = JSON.parse(str(r.payload_json)) ?? {}; } catch { /* raw legacy payload remains visible */ }
       return {
         id: num(r.id),
         idempotencyKey: str(r.idempotency_key),
-        externalId: payload.externalId,
-        deltaUnits: payload.deltaUnits,
-        reason: payload.reason,
+        externalId: typeof payload.externalId === "string" ? payload.externalId : "",
+        deltaUnits: typeof payload.deltaUnits === "number" ? payload.deltaUnits : 0,
+        reason: payload.reason ?? "adjustment",
+        rawPayloadJson: str(r.payload_json),
+        quarantineReason: r.quarantine_reason == null ? null : str(r.quarantine_reason),
         attempts: num(r.attempts),
         nextAttemptAt: r.next_attempt_at === null ? null : str(r.next_attempt_at),
-        status: (str(r.status) === "done" ? "done" : "pending") as OutboxRow["status"],
+        status: str(r.status) as OutboxRow["status"],
       };
     });
   }
@@ -690,28 +725,31 @@ export class TauriRepository implements BillingRepository {
   }
 
   async getSyncCursor(key: string): Promise<string | null> {
-    const rows = await this.query("SELECT value FROM sync_state WHERE key = ?1", [key]);
+    const rows = await this.query("SELECT value FROM sync_state WHERE key = ?1", [key === "stock" ? "stock_cursor" : key]);
     return rows[0] ? str(rows[0].value) : null;
   }
 
   async setSyncCursor(key: string, value: string): Promise<void> {
     const invoke = await this.getInvoke();
-    await invoke("set_sync_cursor", { key, value });
+    await invoke("set_sync_cursor", { key: key === "stock" ? "stock_cursor" : key, value });
   }
 
   async applyStockPull(
+    expectedCursor: string | null,
     nextCursor: string,
     moves: readonly {
       externalId: string;
       deltaUnits: number;
-      reason: "online_order" | "order_cancel" | "adjustment";
+      reason: "online_order" | "order_cancel" | "adjustment" | "import";
       createdAt: string;
+      epoch?: string;
+      sequence?: number;
     }[],
   ): Promise<{ externalId: string; itemId: number | null; deltaMilli: number }[]> {
     const invoke = await this.getInvoke();
     return invoke<{ externalId: string; itemId: number | null; deltaMilli: number }[]>(
       "apply_stock_pull",
-      { cursor: nextCursor, moves },
+      { expectedCursor, cursor: nextCursor, moves },
     );
   }
 

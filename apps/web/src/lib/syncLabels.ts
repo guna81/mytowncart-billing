@@ -3,6 +3,7 @@
 import { t, type I18nKey } from "../i18n";
 
 const PREFIXES: [string, I18nKey][] = [
+  ["stock push: zero-net", "sync.problem.stock_reconcile"],
   ["stock push:", "sync.problem.stock_push"],
   ["stock pull:", "sync.problem.stock_pull"],
   ["catalog read:", "sync.problem.catalog_read"],
