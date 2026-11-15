@@ -4,7 +4,22 @@ Reviewed against the working source on November 6, 2026.
 
 ## Release status
 
-The latest published installer is [v0.1.4](https://github.com/guna81/mytowncart-billing/releases/tag/v0.1.4).
+The latest published installer is [v0.1.5](https://github.com/guna81/mytowncart-billing/releases/tag/v0.1.5).
+
+### New in v0.1.5
+
+- **Stock sync with MyTownCart (protocol v2):** a durable outbox, stock snapshots,
+  reconciliation and a committed-feed pull, plus an audited recovery flow for
+  sync sources that could not be delivered.
+- **MyTownCart page:** inline category picker, a Ready-to-pull list with Pull,
+  category mapping on Overview, Sync now in Settings, and choices for what to
+  sync (prices, names and new products can be pulled automatically).
+- **Item variants:** multi-variant items.
+- **Fixes:** stock setup only bootstraps items linked to the marketplace; setup
+  errors show on the Settings tab; the LAN web app shows the PIN screen before
+  loading shop data; confirmation dialogs work under the desktop shell; a
+  database migration repairs hand-repaired older databases.
+- **Settings:** the retained source resolution history now appears only in Settings.
 
 ### New in v0.1.4
 
