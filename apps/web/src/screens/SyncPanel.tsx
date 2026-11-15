@@ -273,7 +273,7 @@ export function SyncPanel({
 
   return (
     <div className="space-y-4" data-testid="sync-panel">
-      <StockRecoverySection sources={quarantined} intents={intents} history={history} items={items} disabled={busy || isSyncing || settling} onRefresh={async () => { bumpDataVersion(); await refresh(); }} />
+      <StockRecoverySection sources={quarantined} intents={intents} history={history} showHistory={part === "sync"} items={items} disabled={busy || isSyncing || settling} onRefresh={async () => { bumpDataVersion(); await refresh(); }} />
       {(quarantined.length > 0 || uncertainCount > 0) && (
         <section className="rounded border border-amber-400 bg-amber-50 p-4 text-amber-950" role="status" data-testid="sync-quarantined">
           <p>{t("sync.quarantined", { count: quarantined.length })}</p>
@@ -517,8 +517,8 @@ export function SyncPanel({
   );
 }
 
-function StockRecoverySection({ sources, intents, history, items, disabled, onRefresh }: {
-  sources: OutboxRow[]; intents: StockReconciliationIntent[]; history: StockSourceResolution[];
+function StockRecoverySection({ sources, intents, history, showHistory, items, disabled, onRefresh }: {
+  sources: OutboxRow[]; intents: StockReconciliationIntent[]; history: StockSourceResolution[]; showHistory: boolean;
   items: Item[]; disabled: boolean; onRefresh: () => Promise<void>;
 }) {
   const [reason, setReason] = useState("");
@@ -540,6 +540,8 @@ function StockRecoverySection({ sources, intents, history, items, disabled, onRe
   const blocked = disabled || busy || !confirmed || !reason.trim();
   // Only history (e.g. completed setup baselines) and nothing to decide: no form, no warning.
   const actionable = sources.length > 0 || reviews.length > 0;
+  // Retained history is shown in Settings only; elsewhere render just the actionable form.
+  if (!actionable && !showHistory) return null;
   return <section className={actionable ? "space-y-3 rounded border border-amber-400 bg-amber-50 p-4" : "space-y-3 rounded border border-gray-200 bg-white p-4"} data-testid="stock-recovery">
     {actionable && <>
     <h2 className="font-semibold">{t("sync.recovery_title")}</h2>
@@ -570,8 +572,8 @@ function StockRecoverySection({ sources, intents, history, items, disabled, onRe
         <button className={btnSecondary} disabled={blocked || !item} onClick={() => void run(() => recoverStockShortage(getRepository(), getConnector(), { parentOperationId: intent.operationId, expectedLocalStockMilli: item!.stockMilli, reason, confirmed }))}>{t("sync.recovery_zero")}</button>
       </div>;
     })}
-    {intents.length > 0 && <details><summary>{t("sync.recovery_history")}</summary><ul className="space-y-2">{intents.map((intent) => <li className="break-all text-sm" key={intent.operationId}>{intent.operationId} · {intent.parentOperationId ?? "—"} · {intent.status} · {intent.reason ?? "—"}<pre className="whitespace-pre-wrap break-all">{JSON.stringify({ request: { quantity: intent.stockUnits, revision: intent.revision, generation: intent.generation }, capturedStockMilli: intent.capturedStockMilli, sourceBoundary: intent.sourceBoundary, result: intent.result, review: intent.review }, null, 2)}</pre></li>)}</ul></details>}
-    {history.length > 0 && <details><summary>{t("sync.recovery_history")}</summary><ul className="space-y-2">{history.map((entry) => <li key={entry.operationId} className="break-all text-sm">{entry.operationId} · {entry.action === "historical_unknown" ? t("sync.recovery_unknown") : t("sync.recovery_map")} · {entry.externalId ?? entry.itemId} · {entry.reason} · {entry.retiredBy ?? "—"}<pre className="whitespace-pre-wrap break-all">{entry.rawPayloadJson}</pre></li>)}</ul></details>}
+    {showHistory && intents.length > 0 && <details><summary>{t("sync.recovery_history")}</summary><ul className="space-y-2">{intents.map((intent) => <li className="break-all text-sm" key={intent.operationId}>{intent.operationId} · {intent.parentOperationId ?? "—"} · {intent.status} · {intent.reason ?? "—"}<pre className="whitespace-pre-wrap break-all">{JSON.stringify({ request: { quantity: intent.stockUnits, revision: intent.revision, generation: intent.generation }, capturedStockMilli: intent.capturedStockMilli, sourceBoundary: intent.sourceBoundary, result: intent.result, review: intent.review }, null, 2)}</pre></li>)}</ul></details>}
+    {showHistory && history.length > 0 && <details><summary>{t("sync.recovery_history")}</summary><ul className="space-y-2">{history.map((entry) => <li key={entry.operationId} className="break-all text-sm">{entry.operationId} · {entry.action === "historical_unknown" ? t("sync.recovery_unknown") : t("sync.recovery_map")} · {entry.externalId ?? entry.itemId} · {entry.reason} · {entry.retiredBy ?? "—"}<pre className="whitespace-pre-wrap break-all">{entry.rawPayloadJson}</pre></li>)}</ul></details>}
   </section>;
 }
 
