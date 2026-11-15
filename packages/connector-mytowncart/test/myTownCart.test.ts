@@ -392,18 +392,18 @@ describe("stock", () => {
   it("pulls the feed with the cursor", async () => {
     const { fetch, calls } = fakeFetch([
       [
-        /stock\/\?cursor=12&limit=500$/,
+        /stock\/\?cursor=12&limit=500&epoch=e1$/,
         () =>
           jsonResponse({
             movements: [
-              { id: 13, external_id: "itm_1", delta: -2, reason: "online_order", resulting_stock: 3, created_at: "2026-11-05T10:00:00Z" },
+              { id: 13, sequence: 13, revision: 1, external_id: "itm_1", delta: -2, reason: "online_order", resulting_stock: 3, created_at: "2026-11-05T10:00:00Z" },
             ],
-            next_cursor: 13,
+            epoch: "e1", watermark: 13, next_cursor: 13,
             has_more: false,
           }),
       ],
     ]);
-    const out = await connector(fetch).pullStock(12);
+    const out = await connector(fetch).pullStock(12, { epoch: "e1" });
     expect(out.nextCursor).toBe(13);
     expect(out.hasMore).toBe(false);
     expect(out.moves[0]).toMatchObject({ id: 13, externalId: "itm_1", deltaUnits: -2, reason: "online_order" });
@@ -411,29 +411,22 @@ describe("stock", () => {
   });
 
   it("returns pagination metadata and encodes the continuation without changing force", async () => {
-    const { fetch, calls } = fakeFetch([[/.*/, () => jsonResponse({ movements: [], next_cursor: 12, has_more: true, continuation: "next+/=" })]]);
-    const out = await connector(fetch).pullStock(12, { force: true, continuation: "a+/=&?" });
-    expect(out).toEqual({ moves: [], nextCursor: 12, hasMore: true, continuation: "next+/=" });
+    const { fetch, calls } = fakeFetch([[/.*/, () => jsonResponse({ movements: [], epoch: "e1", watermark: 20, next_cursor: 12, has_more: true, continuation: "next+/=" })]]);
+    const out = await connector(fetch).pullStock(12, { epoch: "e1", force: true, continuation: "a+/=&?" });
+    expect(out).toEqual({ moves: [], nextCursor: 12, hasMore: true, continuation: "next+/=", epoch: "e1", watermark: 20 });
     const url = new URL(calls[0]!.url);
     expect(url.searchParams.get("continuation")).toBe("a+/=&?");
     expect(url.searchParams.get("force")).toBe("1");
   });
 
-  it("preserves absent legacy metadata and a null continuation", async () => {
-    const { fetch } = fakeFetch([[/.*/, () => jsonResponse({ movements: [], next_cursor: 5 })]]);
-    expect(await connector(fetch).pullStock(5, { force: false })).toEqual({ moves: [], nextCursor: 5 });
-    const next = fakeFetch([[/.*/, () => jsonResponse({ movements: [], next_cursor: 5, has_more: false, continuation: null })]]);
-    expect(await connector(next.fetch).pullStock(5)).toEqual({ moves: [], nextCursor: 5, hasMore: false, continuation: null });
-  });
-
   it("appends force=1 when force is true", async () => {
     const { fetch, calls } = fakeFetch([
       [
-        /stock\/\?cursor=5&limit=500&force=1$/,
-        () => jsonResponse({ movements: [], next_cursor: 5 }),
+        /stock\/\?cursor=5&limit=500&force=1&epoch=e1$/,
+        () => jsonResponse({ movements: [], epoch: "e1", watermark: 5, next_cursor: 5 }),
       ],
     ]);
-    await connector(fetch).pullStock(5, { force: true });
+    await connector(fetch).pullStock(5, { epoch: "e1", force: true });
     expect(calls[0].url).toContain("force=1");
   });
 });
@@ -443,7 +436,7 @@ describe("Retry-After", () => {
     ["30", 30], ["0", 0], ["invalid", undefined], ["-1", undefined], ["1.5", undefined],
   ])("parses a 429 header %s", async (header, expected) => {
     const { fetch } = fakeFetch([[/.*/, () => new Response('{"detail":"slow down"}', { status: 429, headers: { "Retry-After": header } })]]);
-    const err = await connector(fetch).pullStock(0).catch((e: unknown) => e);
+    const err = await connector(fetch).pullStock(0, { epoch: "e1" }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(MarketplaceError);
     expect(err).toMatchObject({ code: "rate_limited", status: 429, retryAfterSeconds: expected });
   });

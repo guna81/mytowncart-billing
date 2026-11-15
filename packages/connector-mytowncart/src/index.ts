@@ -85,11 +85,6 @@ export interface StockPush {
   generation?: number;
 }
 
-export interface StockProtocolCapabilities {
-  protocol: 2;
-  capabilities: string[];
-}
-
 export interface StockSnapshotItem {
   externalId: string;
   variantId: string;
@@ -99,7 +94,6 @@ export interface StockSnapshotItem {
 }
 
 export interface StockSnapshot {
-  protocol: 2;
   epoch: string;
   watermark: number;
   items: StockSnapshotItem[];
@@ -124,8 +118,7 @@ export interface StockReconcileResult extends StockSnapshotItem {
 export interface StockPullOptions {
   force?: boolean;
   continuation?: string;
-  protocol?: 2;
-  epoch?: string;
+  epoch: string;
   until?: number;
 }
 
@@ -244,9 +237,7 @@ export interface MarketplaceConnector {
     cursor: number,
     opts?: StockPullOptions,
   ): Promise<StockFeed>;
-  /** Null means an older server; unsafe stock reconciliation must stay disabled. */
-  stockProtocol?(): Promise<StockProtocolCapabilities | null>;
-  enableStockProtocol?(externalIds: string[]): Promise<StockSnapshot>;
+  /** Links the items (creating their generation fence) and returns their epoch/fence. */
   stockSnapshot?(externalIds: string[]): Promise<StockSnapshot>;
   reconcileStock?(request: StockReconcileRequest): Promise<StockReconcileResult>;
   stockReconciliation?(operationId: string): Promise<StockReconcileResult | null>;

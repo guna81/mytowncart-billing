@@ -24,17 +24,11 @@ function sent(fetch: ReturnType<typeof setup>["fetch"]) {
   return JSON.parse(String(fetch.mock.calls[0][1]?.body));
 }
 
-describe("committed stock protocol", () => {
-  it("recognises an unsupported legacy endpoint without masking authentication failures", async () => {
-    expect(await setup({}, 404).connector.stockProtocol()).toBeNull();
-    await expect(setup({}, 401).connector.stockProtocol()).rejects.toMatchObject({ status: 401 });
-    await expect(setup({ protocol: 1, capabilities: [] }).connector.stockProtocol()).rejects.toMatchObject({ code: "invalid_response" });
-  });
-
+describe("stock snapshot and reconcile", () => {
   it("maps coherent snapshots and preserves UUID variant identity", async () => {
-    const { connector, fetch } = setup({ protocol: 2, epoch, watermark: 7, items: [item] });
+    const { connector, fetch } = setup({ epoch, watermark: 7, items: [item] });
     expect(await connector.stockSnapshot(["itm_1"])).toEqual({
-      protocol: 2, epoch, watermark: 7,
+      epoch, watermark: 7,
       items: [{ externalId: "itm_1", variantId: item.variant_id, stockUnits: 9, revision: 3, generation: 2 }],
     });
     expect(sent(fetch)).toEqual({ external_ids: ["itm_1"] });
@@ -43,7 +37,7 @@ describe("committed stock protocol", () => {
 
   it("rejects partial, duplicate and unsafe-integer snapshots", async () => {
     for (const items of [[], [item, item], [{ ...item, stock: Number.MAX_SAFE_INTEGER + 1 }]]) {
-      await expect(setup({ protocol: 2, epoch, watermark: 7, items }).connector.enableStockProtocol(["itm_1"]))
+      await expect(setup({ epoch, watermark: 7, items }).connector.stockSnapshot(["itm_1"]))
         .rejects.toMatchObject({ code: "invalid_response" });
     }
   });
@@ -81,9 +75,9 @@ describe("committed stock protocol", () => {
     const { connector, fetch } = setup({ epoch, watermark: 8, next_cursor: 8, has_more: false, movements: [
       { id: 30, sequence: 7, revision: 3, external_id: "itm_1", delta: -1, reason: "online_order", created_at: "2026-11-14T00:00:00Z" },
     ] });
-    const feed = await connector.pullStock(5, { protocol: 2, epoch, until: 8 });
+    const feed = await connector.pullStock(5, { epoch, until: 8 });
     expect(feed).toMatchObject({ epoch, watermark: 8, nextCursor: 8, moves: [{ sequence: 7, revision: 3, epoch }] });
-    expect(fetch.mock.calls[0][0]).toContain("&protocol=2&epoch=feed-epoch&until=8");
+    expect(fetch.mock.calls[0][0]).toContain("&epoch=feed-epoch&until=8");
   });
 
   it("rejects a changed epoch, unbounded interval, and unordered feed sequences", async () => {
@@ -92,7 +86,7 @@ describe("committed stock protocol", () => {
       { ...base, epoch: "other" }, { ...base, watermark: 9 }, { ...base, next_cursor: 9 },
       { ...base, movements: [{ id: 1, sequence: 5, revision: 1 }] },
     ]) {
-      await expect(setup(response).connector.pullStock(5, { protocol: 2, epoch, until: 8 }))
+      await expect(setup(response).connector.pullStock(5, { epoch, until: 8 }))
         .rejects.toMatchObject({ code: "invalid_response" });
     }
   });

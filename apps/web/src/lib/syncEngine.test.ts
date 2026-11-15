@@ -46,7 +46,7 @@ function fakeConnector(overrides: ConnectorOverrides = {}): MarketplaceConnector
         })),
       );
     },
-    pullStock: () => Promise.resolve({ moves: [], nextCursor: 0 }),
+    pullStock: () => Promise.resolve({ moves: [], nextCursor: 0, epoch: "e1" }),
     listRemoteItems: (): Promise<RemoteItem[]> => Promise.resolve([]),
     listPlatformProducts: () => Promise.resolve([]),
     adoptProducts: () => Promise.resolve([]),
@@ -58,6 +58,7 @@ const now = () => new Date("2026-11-05T10:00:00.000Z");
 
 async function fixture(): Promise<{ repo: MemoryRepository; itemId: number }> {
   const repo = new MemoryRepository();
+  await repo.setAppSetting("sync.stock_epoch", "e1");
   await repo.saveShopProfile({
     name: "Test shop",
     gstEnabled: false,
@@ -156,7 +157,7 @@ describe("runSync", () => {
     const connector = fakeConnector({
       listCategories: () => { calls.push("categories"); return Promise.resolve([]); },
       listRemoteItems: () => { calls.push("catalog"); return Promise.resolve([]); },
-      pullStock: () => { calls.push("stock pull"); return Promise.resolve({ moves: [], nextCursor: 0 }); },
+      pullStock: () => { calls.push("stock pull"); return Promise.resolve({ moves: [], nextCursor: 0, epoch: "e1" }); },
     });
     await runSync({ repo, connector, now, isApproved: () => true }, { stockOnly: true, pullStock: false });
     expect(calls).toEqual([]);
@@ -167,7 +168,7 @@ describe("runSync", () => {
     let pulled = false;
     const connector = fakeConnector({
       listCategories: () => Promise.reject(new Error("offline")),
-      pullStock: () => { pulled = true; return Promise.resolve({ moves: [], nextCursor: 0 }); },
+      pullStock: () => { pulled = true; return Promise.resolve({ moves: [], nextCursor: 0, epoch: "e1" }); },
     });
     const result = await runSync({ repo, connector, now, isApproved: () => true });
     expect(pulled).toBe(true);
@@ -176,13 +177,15 @@ describe("runSync", () => {
 
   it("follows a stock continuation and stops at the final page", async () => {
     const { repo, itemId } = await fixture();
+    // A linked item must already hold a baseline in the active epoch before feed moves apply.
+    (repo as unknown as { stockStates: Map<string, unknown> }).stockStates.set(`itm_${itemId}`, { externalId: `itm_${itemId}`, variantId: "v", epoch: "e1", sequence: 0, revision: 0, generation: 1, stockUnits: 0 });
     const calls: { cursor: number; continuation?: string }[] = [];
     const connector = fakeConnector({
       pullStock: (cursor, options) => {
         calls.push({ cursor, continuation: options?.continuation });
         return Promise.resolve(cursor === 0
-          ? { moves: [{ id: 1, externalId: `itm_${itemId}`, deltaUnits: -1, reason: "online_order", createdAt: now().toISOString() }], nextCursor: 1, hasMore: true, continuation: "next" }
-          : { moves: [{ id: 2, externalId: `itm_${itemId}`, deltaUnits: -1, reason: "online_order", createdAt: now().toISOString() }], nextCursor: 2, hasMore: false });
+          ? { moves: [{ id: 1, sequence: 1, revision: 1, externalId: `itm_${itemId}`, deltaUnits: -1, reason: "online_order", createdAt: now().toISOString() }], nextCursor: 1, epoch: "e1", hasMore: true, continuation: "next" }
+          : { moves: [{ id: 2, sequence: 2, revision: 1, externalId: `itm_${itemId}`, deltaUnits: -1, reason: "online_order", createdAt: now().toISOString() }], nextCursor: 2, epoch: "e1", hasMore: false });
       },
     });
     const result = await runSync({ repo, connector, now, isApproved: () => true }, { stockOnly: true });
@@ -355,7 +358,7 @@ describe("runSync", () => {
       },
       pullStock: () => {
         pulls += 1;
-        return Promise.resolve({ moves: [], nextCursor: 0 });
+        return Promise.resolve({ moves: [], nextCursor: 0, epoch: "e1" });
       },
     });
     await runSync({ repo, connector, now, isApproved: () => true }, { details: false });
@@ -534,7 +537,7 @@ describe("runSync", () => {
         connector: fakeConnector({
           pullStock: (_c, opts) => {
             pullStockOpts = opts;
-            return Promise.resolve({ moves: [], nextCursor: 0 });
+            return Promise.resolve({ moves: [], nextCursor: 0, epoch: "e1" });
           },
         }),
         now,
@@ -542,7 +545,7 @@ describe("runSync", () => {
       },
       { force: true },
     );
-    expect(pullStockOpts).toEqual({ force: true });
+    expect(pullStockOpts).toMatchObject({ force: true, epoch: "e1" });
   });
 
   it("generates non-empty remoteHash when recording remote catalog items", async () => {

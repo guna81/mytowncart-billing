@@ -353,13 +353,14 @@ async function pullStock(
   let cursor = Number.isSafeInteger(stored) && stored >= 0 ? stored : 0;
   try {
     const epoch = await repo.getAppSetting("sync.stock_epoch");
+    if (!epoch) throw new Error("Stock feed bootstrap required: no stock epoch yet");
     if (await repo.getAppSetting("sync.stock_bootstrap_required") === "true") {
       throw new Error("Stock feed bootstrap required after protocol upgrade; stock pull is paused to protect historical balances");
     }
     let continuation: string | undefined;
     for (let page = 0; page < PULL_PAGE_CAP; page++) {
-      const feed = await connector.pullStock(cursor, { force, continuation, ...(epoch ? { protocol: 2 as const, epoch } : {}) });
-      if (epoch && feed.epoch !== epoch) throw new Error("Stock feed epoch changed; bootstrap required");
+      const feed = await connector.pullStock(cursor, { force, continuation, epoch });
+      if (feed.epoch !== epoch) throw new Error("Stock feed epoch changed; bootstrap required");
       if (feed.nextCursor === cursor && feed.moves.length === 0) {
         if (feed.hasMore) throw new Error("stock feed did not advance its cursor");
         break;
@@ -384,8 +385,8 @@ async function pullStock(
       expectedCursor = String(cursor);
       if (feed.hasMore === false) break;
       continuation = feed.continuation ?? undefined;
-      // Older servers have no continuation token; resume from the committed
-      // cursor after their polling interval instead of repeatedly hitting 429.
+      // No continuation token: resume from the committed cursor after the
+      // polling interval instead of repeatedly hitting 429.
       if (!force && !continuation) {
         outcome.retryAfterSeconds = 120;
         break;

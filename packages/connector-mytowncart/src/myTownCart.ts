@@ -26,7 +26,6 @@ import type {
   StockPushResult,
   StockFeed,
   StockPullOptions,
-  StockProtocolCapabilities,
   StockSnapshot,
   StockSnapshotItem,
   StockReconcileRequest,
@@ -193,7 +192,6 @@ interface StockSnapshotWireItem {
 }
 
 interface StockSnapshotWire {
-  protocol: 2;
   epoch: string;
   watermark: number;
   items: StockSnapshotWireItem[];
@@ -231,7 +229,7 @@ function snapshotItem(item: StockSnapshotWireItem): StockSnapshotItem {
 }
 
 function snapshot(body: StockSnapshotWire, requested: readonly string[]): StockSnapshot {
-  if (body.protocol !== 2 || !Array.isArray(body.items)) {
+  if (!Array.isArray(body.items)) {
     throw new MarketplaceError("invalid_response", "Unsupported stock snapshot response.", 502);
   }
   const items = body.items.map(snapshotItem);
@@ -239,7 +237,7 @@ function snapshot(body: StockSnapshotWire, requested: readonly string[]): StockS
   if (ids.size !== items.length || ids.size !== requested.length || requested.some((id) => !ids.has(id))) {
     throw new MarketplaceError("invalid_response", "Stock snapshot did not identify every requested item exactly once.", 502);
   }
-  return { protocol: 2, epoch: stockIdentity(body.epoch, "epoch"), watermark: stockInteger(body.watermark, "watermark"), items };
+  return { epoch: stockIdentity(body.epoch, "epoch"), watermark: stockInteger(body.watermark, "watermark"), items };
 }
 
 function reconciliationResult(body: StockReconcileWire, operationId: string): StockReconcileResult {
@@ -554,24 +552,6 @@ export class MyTownCartConnector implements MarketplaceConnector {
     });
   }
 
-  async stockProtocol(): Promise<StockProtocolCapabilities | null> {
-    try {
-      const body = await this.http.json<StockProtocolCapabilities>("GET", "/stock/protocol/");
-      if (body.protocol !== 2 || !Array.isArray(body.capabilities) || body.capabilities.some((entry) => typeof entry !== "string")) {
-        throw new MarketplaceError("invalid_response", "Unsupported stock protocol capabilities.", 502);
-      }
-      return body;
-    } catch (error) {
-      if (error instanceof MarketplaceError && error.status === 404) return null;
-      throw error;
-    }
-  }
-
-  async enableStockProtocol(externalIds: string[]): Promise<StockSnapshot> {
-    const body = await this.http.json<StockSnapshotWire>("POST", "/stock/protocol/", { external_ids: externalIds });
-    return snapshot(body, externalIds);
-  }
-
   async stockSnapshot(externalIds: string[]): Promise<StockSnapshot> {
     const body = await this.http.json<StockSnapshotWire>("POST", "/stock/snapshot/", { external_ids: externalIds });
     return snapshot(body, externalIds);
@@ -605,35 +585,31 @@ export class MyTownCartConnector implements MarketplaceConnector {
     }
   }
 
-  async pullStock(cursor: number, opts: StockPullOptions = {}): Promise<StockFeed> {
+  async pullStock(cursor: number, opts: StockPullOptions): Promise<StockFeed> {
     const forceQs = opts.force ? "&force=1" : "";
     const continuationQs = opts.continuation === undefined ? "" : `&continuation=${encodeURIComponent(opts.continuation)}`;
-    const protocolQs = opts.protocol === undefined ? "" : `&protocol=${opts.protocol}`;
-    const epochQs = opts.epoch === undefined ? "" : `&epoch=${encodeURIComponent(opts.epoch)}`;
+    const epochQs = `&epoch=${encodeURIComponent(opts.epoch)}`;
     const untilQs = opts.until === undefined ? "" : `&until=${opts.until}`;
-    if (opts.protocol === 2 && !opts.epoch) throw new Error("A committed stock feed requires its epoch.");
     const body = await this.http.json<StockFeedResponse>(
       "GET",
-      `/stock/?cursor=${cursor}&limit=500${forceQs}${continuationQs}${protocolQs}${epochQs}${untilQs}`,
+      `/stock/?cursor=${cursor}&limit=500${forceQs}${continuationQs}${epochQs}${untilQs}`,
     );
-    if (opts.protocol === 2) {
-      if (body.epoch !== opts.epoch || body.watermark === undefined) {
-        throw new MarketplaceError("invalid_response", "Stock feed epoch or watermark is missing or changed.", 502);
+    if (body.epoch !== opts.epoch || body.watermark === undefined) {
+      throw new MarketplaceError("invalid_response", "Stock feed epoch or watermark is missing or changed.", 502);
+    }
+    stockInteger(body.watermark, "watermark");
+    stockInteger(body.next_cursor, "cursor");
+    if (body.next_cursor < cursor || body.next_cursor > body.watermark || (opts.until !== undefined && body.watermark !== opts.until)) {
+      throw new MarketplaceError("invalid_response", "Stock feed escaped its requested interval.", 502);
+    }
+    let previous = cursor;
+    for (const move of body.movements) {
+      const sequence = stockInteger(move.sequence!, "sequence");
+      stockInteger(move.revision!, "revision");
+      if (sequence <= previous || sequence > body.next_cursor) {
+        throw new MarketplaceError("invalid_response", "Stock feed movements are not an ordered committed prefix.", 502);
       }
-      stockInteger(body.watermark, "watermark");
-      stockInteger(body.next_cursor, "cursor");
-      if (body.next_cursor < cursor || body.next_cursor > body.watermark || (opts.until !== undefined && body.watermark !== opts.until)) {
-        throw new MarketplaceError("invalid_response", "Stock feed escaped its requested interval.", 502);
-      }
-      let previous = cursor;
-      for (const move of body.movements) {
-        const sequence = stockInteger(move.sequence!, "sequence");
-        stockInteger(move.revision!, "revision");
-        if (sequence <= previous || sequence > body.next_cursor) {
-          throw new MarketplaceError("invalid_response", "Stock feed movements are not an ordered committed prefix.", 502);
-        }
-        previous = sequence;
-      }
+      previous = sequence;
     }
     return {
       moves: body.movements.map((m) => ({

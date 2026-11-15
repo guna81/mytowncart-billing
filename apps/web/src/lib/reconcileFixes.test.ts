@@ -72,9 +72,7 @@ describe("durable stock reconciliation active path", () => {
     const remote = { externalId: `itm_${itemId}`, variantId: "variant-uuid", stockUnits: 7, revision: 3, generation: 1 };
     const calls: unknown[] = [];
     const connector = {
-      stockProtocol: async () => ({ protocol: 2, capabilities: ["committed_feed", "snapshot", "generation_fence", "conditional_reconcile", "operation_status"] }),
-      enableStockProtocol: async () => ({ protocol: 2, epoch: "epoch", watermark: 10, items: [remote] }),
-      stockSnapshot: async () => ({ protocol: 2, epoch: "epoch", watermark: 10, items: [remote] }),
+      stockSnapshot: async () => ({ epoch: "epoch", watermark: 10, items: [remote] }),
       stockReconciliation: async () => null,
       reconcileStock: async (request: Parameters<NonNullable<MarketplaceConnector["reconcileStock"]>>[0]) => {
         calls.push(request);
@@ -146,17 +144,10 @@ describe("durable stock reconciliation active path", () => {
     expect(await repo.getSyncCursor("stock")).toBe("8");
   });
 
-  it("rejects incomplete negotiated capabilities before upgrading or sending", async () => {
-    const { repo, connector, target, calls } = await fixture();
-    connector.stockProtocol = async () => ({ protocol: 2, capabilities: ["snapshot"] });
-    await expect(applyReconciliation([target], false, repo, connector)).rejects.toThrow("does not support");
-    expect(calls).toEqual([]);
-    expect(await repo.listStockReconciliations()).toEqual([]);
-  });
 
   it("bootstraps equal stock too, activates epoch, and skips completed items on resume", async () => {
     const { repo, itemId, connector, calls, remote } = await fixture();
-    connector.stockSnapshot = async () => ({ protocol: 2, epoch: "epoch", watermark: 10, items: [{ ...remote, stockUnits: 5 }] });
+    connector.stockSnapshot = async () => ({ epoch: "epoch", watermark: 10, items: [{ ...remote, stockUnits: 5 }] });
     await bootstrapStock(repo, connector, false);
     expect(calls).toHaveLength(1);
     expect(await repo.getSyncCursor("stock")).toBe("0");
@@ -181,8 +172,6 @@ describe("explicit shortage recovery", () => {
     } as unknown as BillingRepository;
     const accepted = new Map();
     const connector = {
-      stockProtocol: async () => ({ protocol: 2, capabilities: ["committed_feed", "snapshot", "generation_fence", "conditional_reconcile", "operation_status"] }),
-      enableStockProtocol: async () => ({}),
       stockSnapshot: vi.fn(async () => ({ epoch: "e", watermark: 5, items: [state] })),
       stockReconciliation: vi.fn(async (id) => accepted.get(id) ?? null),
       reconcileStock: vi.fn(async (request) => { const result = { ...state, operationId: request.operationId, stockUnits: 0, generation: 3, watermark: 6 }; accepted.set(request.operationId, result); return result; }),
@@ -214,14 +203,12 @@ describe("explicit shortage recovery", () => {
     repo.listStockSourceResolutions = async () => [{ operationId: "mapping", sourceId: 7, idempotencyKey: "raw-key", rawPayloadJson: "bad", action: "map", itemId: 1, reason: "verified item", confirmed: true, actor: 1, createdAt: "2026-11-15T00:00:00Z" }];
     repo.getAppSetting = async () => null;
     repo.setAppSetting = vi.fn(async () => {});
-    let enabled = false;
-    connector.enableStockProtocol = vi.fn(async () => { enabled = true; return { protocol: 2 as const, epoch: "e", watermark: 5, items: [state] }; });
-    connector.stockSnapshot = vi.fn(async () => { if (!enabled) throw new Error("legacy link not enabled"); return { protocol: 2 as const, epoch: "e", watermark: 5, items: [state] }; });
+    connector.stockSnapshot = vi.fn(async () => ({ epoch: "e", watermark: 5, items: [state] }));
     repo.beginStockReconciliation = vi.fn(async (input) => ({ ...input, capturedStockMilli: 0, sourceBoundary: 7, status: "pending" }));
     repo.settleStockReconciliation = vi.fn(async () => ({ ...parent, status: "done" as const }));
     await reconcileMappedSource(repo, connector, { itemId: 1, expectedLocalStockMilli: 0, reason: "counted empty", confirmed: true });
     expect(repo.beginStockReconciliation).toHaveBeenCalledWith(expect.objectContaining({ itemId: 1, choice: "local", stockUnits: 0, expectedLocalStockMilli: 0 }));
-    expect(connector.enableStockProtocol).toHaveBeenCalledWith(["itm_1"]);
+    expect(connector.stockSnapshot).toHaveBeenCalledWith(["itm_1"]);
     expect(repo.setAppSetting).toHaveBeenCalledWith("sync.stock_bootstrap_required", "true");
     repo.listStockSourceResolutions = async () => [];
     await expect(reconcileMappedSource(repo, connector, { itemId: 1, expectedLocalStockMilli: 0, reason: "counted empty", confirmed: true })).rejects.toThrow("already resolved");

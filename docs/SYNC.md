@@ -183,11 +183,11 @@ current stock or an automatic retry of the old local settlement. A correction is
 never silently clamped or queued behind sales that would exhaust the old remote baseline. Do not discard the
 original operation or retry its request with a new key.
 
-Before the first protocol-2 feed, explicitly bootstrap all linked items using the
+Before the first stock feed pull, explicitly bootstrap all linked items using the
 chosen local or marketplace stock baseline. Partial bootstrap remains visible and
 resumable; the global cursor changes epoch only after all linked items are covered.
 Ambiguous legacy outbox rows require this explicit decision, not blind replay.
-Stock reconciliation is disabled on servers without the required capabilities.
+Every stock push carries the item's epoch, variant and generation from its last snapshot; a push without a current fence is rejected by the marketplace.
 
 Metadata differences use `remote.seen`, refreshed on sync and ignored after seven
 days, plus a fresh preflight. Price/availability operations are not blocked by
@@ -212,8 +212,8 @@ a full sync. The last outcome is stored as `sync.last` in `app_settings`.
 ## Rate limit and common messages
 
 `GET stock/` and `GET orders/` are normally paced per token (120 seconds by
-default); *Sync now* sends `force=1` for stock pulls. Newer servers provide a
-bounded continuation for a multi-page stock pull. With an older server, Billing
+default); *Sync now* sends `force=1` for stock pulls. The server provides a
+bounded continuation for a multi-page stock pull; without a grant, Billing
 saves each page's cursor and resumes after the poll interval. A 429 is displayed
 as waiting and retried using the server's `Retry-After` when available.
 New items are uploaded only when *Sync all items* (`sync.list_enabled`) is on;
