@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { SharedCatalogPage } from "./index";
 /**
  * The MyTownCart implementation of `MarketplaceConnector` (roadmap §5.3/§8.4).
  *
@@ -351,6 +352,11 @@ export class MyTownCartConnector implements MarketplaceConnector {
     };
   }
 
+  async searchSharedCatalog(search: string, page = 1): Promise<SharedCatalogPage> {
+    const params = new URLSearchParams({ kind: "product", search: search.trim(), page: String(page) });
+    return this.http.json<SharedCatalogPage>("GET", `/catalog/?${params}`);
+  }
+
   async listCategories(): Promise<MarketplaceCategory[]> {
     const out: MarketplaceCategory[] = [];
     const base = this.categoriesBaseUrl();
@@ -473,6 +479,7 @@ export class MyTownCartConnector implements MarketplaceConnector {
               ? { description: "" }
               : {}),
           ...(item.brand ? { brand: item.brand } : {}),
+          ...(item.catalogEntryId ? { catalog_entry_id: item.catalogEntryId } : {}),
           ...(item.customAttributes && Object.keys(item.customAttributes).length > 0
             ? { attributes: item.customAttributes }
             : {}),

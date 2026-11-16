@@ -1029,3 +1029,14 @@ describe("day-end closure and expected cash", () => {
     expect(closures[0]!.variancePaise).toBe(0);
   });
 });
+
+describe("shared catalog identity", () => {
+  it("keeps the catalog link and local stock when the item is edited", async () => {
+    const id = await makeItem({ barcode: "0890123456789", catalogEntryId: "catalog-1", openingStockMilli: 12000 });
+    await repo.upsertItem(itemInput({ id, barcode: "0890123456789", name: "Butter 100 g", pricePaise: 6100 }));
+    const item = await repo.getItem(id);
+    expect(item?.catalogEntryId).toBe("catalog-1");
+    expect(item?.stockMilli).toBe(12000);
+    expect(item?.pricePaise).toBe(6100);
+  });
+});

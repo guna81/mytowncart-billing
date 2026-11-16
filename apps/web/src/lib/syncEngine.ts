@@ -104,6 +104,7 @@ function toPlanInputs(items: readonly Item[], categories: readonly Category[]): 
     description: toWireHtml(item.description ?? ""),
     brand: item.brand,
     customAttributes: item.customAttributes,
+    catalogEntryId: item.catalogEntryId,
   }));
 }
 
@@ -255,6 +256,7 @@ async function pushCatalog(
           descBaseline[r.externalId]!.l !== emptyFp,
         brand: r.input.brand,
         customAttributes: r.input.customAttributes,
+        catalogEntryId: r.input.catalogEntryId,
         ...groupOf(items.find((i) => i.id === r.input.id)),
       })),
     );
@@ -533,6 +535,7 @@ async function pullFromRemote(
       description: item.description,
       brand: item.brand,
       customAttributes: item.customAttributes,
+      catalogEntryId: item.catalogEntryId,
     });
   }
   if (renames.length > 0) outcome.pulledNames = renames.length;
@@ -559,6 +562,7 @@ async function pullFromRemote(
         description: html,
         brand: item.brand,
         customAttributes: item.customAttributes,
+        catalogEntryId: item.catalogEntryId,
       });
     }
     outcome.pulledDescriptions = describedAs.size;

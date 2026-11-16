@@ -561,3 +561,32 @@ describe("upsertItems — item groups", () => {
     expect(sent[0]).not.toHaveProperty("variants");
   });
 });
+
+describe("shared catalog", () => {
+  it("looks up exact pack candidates through the authenticated integration endpoint", async () => {
+    const entries = [{ id: "catalog-1", display_name: "Butter 100 g", barcode: "0890123456789" }];
+    const { fetch, calls } = fakeFetch([[/\/catalog\//, () => jsonResponse({ count: 1, next: null, results: entries })]]);
+    const result = await connector(fetch).searchSharedCatalog(" 0890123456789 ", 2);
+    expect(result.results).toEqual(entries);
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe("/api/v1/integrations/catalog/");
+    expect(url.searchParams.get("search")).toBe("0890123456789");
+    expect(url.searchParams.get("kind")).toBe("product");
+    expect(url.searchParams.get("page")).toBe("2");
+    expect(headersOf(calls[0]!).Authorization).toBe("Bearer tok");
+  });
+
+  it("reports an unavailable catalog rather than returning a false empty result", async () => {
+    const { fetch } = fakeFetch([[/\/catalog\//, () => jsonResponse({ detail: "Unavailable" }, 503)]]);
+    await expect(connector(fetch).searchSharedCatalog("Butter")).rejects.toMatchObject({ status: 503 });
+  });
+});
+
+it("publishes shared identity separately from the seller external ID", async () => {
+  const { fetch, calls } = fakeFetch([[/bulk-upsert/, () => jsonResponse({ results: [] })]]);
+  await connector(fetch).upsertItems([{
+    externalId: "itm_1", catalogEntryId: "catalog-1", name: "Butter 100 g", pricePaise: 6000,
+    mrpPaise: 6000, stockUnits: 12, barcode: "0890123456789", categoryId: "category-1", isActive: true, contentHash: "hash",
+  }]);
+  expect((bodyOf(calls[0]!).items as Record<string, unknown>[])[0]).toMatchObject({ external_id: "itm_1", catalog_entry_id: "catalog-1" });
+});

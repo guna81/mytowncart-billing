@@ -39,6 +39,8 @@ export interface Category {
 }
 
 export interface Item {
+  /** Shared catalog identity; distinct from this shop's marketplace offer IDs. */
+  catalogEntryId?: string | null;
   id: number;
   name: string;
   barcode: string;
@@ -210,6 +212,7 @@ export interface PublishOutcome {
 }
 
 export interface ItemInput {
+  catalogEntryId?: string | null;
   id?: number;
   name: string;
   barcode: string;

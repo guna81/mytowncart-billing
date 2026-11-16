@@ -30,6 +30,26 @@ export interface MarketplaceProfile {
   minBillingAppVersion: string;
 }
 
+/** Approved shared product variant, independent of any seller's offer. */
+export interface SharedCatalogEntry {
+  id: string;
+  display_name: string;
+  name: string;
+  variant_label: string;
+  barcode: string;
+  product_category: string;
+  category_name: string;
+  brand_name: string;
+  description: string;
+  image: string | null;
+  updated_at: string;
+}
+export interface SharedCatalogPage {
+  count: number;
+  next: string | null;
+  results: SharedCatalogEntry[];
+}
+
 export interface MarketplaceCategory {
   id: string;
   name: string;
@@ -37,6 +57,7 @@ export interface MarketplaceCategory {
 }
 
 export interface PublishItem {
+  catalogEntryId?: string | null;
   externalId: string;
   name: string;
   /** Customer-facing, tax-inclusive price, integer paise (§8.2). */
@@ -222,6 +243,7 @@ export interface MarketplaceConnector {
   connect(clientName: string, scopes: Scope[]): Promise<ConnectSession>;
   me(): Promise<MarketplaceProfile>;
   listCategories(): Promise<MarketplaceCategory[]>;
+  searchSharedCatalog?(search: string, page?: number): Promise<SharedCatalogPage>;
   upsertItems(items: PublishItem[]): Promise<UpsertResult[]>;
   uploadImage(
     externalId: string,

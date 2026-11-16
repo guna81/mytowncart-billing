@@ -228,6 +228,7 @@ export class MemoryRepository implements BillingRepository {
         brand: input.brand !== undefined ? input.brand : (existing.brand ?? ""),
         customAttributes:
           input.customAttributes !== undefined ? { ...input.customAttributes } : (existing.customAttributes ?? {}),
+        catalogEntryId: input.catalogEntryId ?? existing.catalogEntryId ?? null,
         variantGroup: input.variantGroup ?? existing.variantGroup ?? "",
         variantOptions: input.variantOptions ? { ...input.variantOptions } : (existing.variantOptions ?? {}),
         updatedAt: now,
@@ -268,6 +269,7 @@ export class MemoryRepository implements BillingRepository {
       description: input.description ?? "",
       brand: input.brand ?? "",
       customAttributes: input.customAttributes ? { ...input.customAttributes } : {},
+      catalogEntryId: input.catalogEntryId ?? null,
       variantGroup: input.variantGroup ?? "",
       variantOptions: input.variantOptions ? { ...input.variantOptions } : {},
       updatedAt: now,
