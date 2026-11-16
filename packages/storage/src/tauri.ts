@@ -122,6 +122,7 @@ function rowToItem(r: Row): Item {
     description: str(r.description ?? ""),
     brand: str(r.brand ?? ""),
     customAttributes: parseJsonAttributes(r.custom_attributes),
+    catalogEntryId: r.catalog_entry_id == null ? null : str(r.catalog_entry_id),
     variantGroup: str(r.variant_group ?? ""),
     variantOptions: parseJsonAttributes(r.variant_options),
     updatedAt: str(r.updated_at),
@@ -153,7 +154,7 @@ const ITEM_SELECT =
   "i.price_paise, i.mrp_paise, i.tax_rate_bp, i.stock_milli, i.is_active, i.photo_path, " +
   "i.publish_state, i.remote_product_id, i.remote_variant_id, i.content_hash, " +
   "i.photo_path, i.image_hash, i.image_uploaded_at, i.remote_hash, i.hsn_code, i.cost_price_paise, " +
-  "i.description, i.brand, i.custom_attributes, i.variant_group, i.variant_options, i.updated_at " +
+  "i.description, i.brand, i.custom_attributes, i.variant_group, i.variant_options, i.catalog_entry_id, i.updated_at " +
   "FROM items i LEFT JOIN categories c ON c.id = i.category_id";
 
 const BILL_SELECT =
@@ -179,6 +180,7 @@ function itemToPayload(input: ItemInput, now: string): Record<string, unknown> {
     description: input.description ?? "",
     brand: input.brand ?? "",
     customAttributes: JSON.stringify(input.customAttributes ?? {}),
+    catalogEntryId: input.catalogEntryId ?? null,
     variantGroup: input.variantGroup ?? "",
     variantOptions: JSON.stringify(input.variantOptions ?? {}),
     now,

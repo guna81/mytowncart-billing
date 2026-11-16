@@ -28,6 +28,7 @@ export interface PublishItemInput {
   description?: string;
   brand?: string;
   customAttributes?: Record<string, string>;
+  catalogEntryId?: string | null;
 }
 
 export type BlockedReason =
@@ -89,6 +90,7 @@ export function contentHash(input: {
   description?: string;
   brand?: string;
   customAttributes?: Record<string, string>;
+  catalogEntryId?: string | null;
 }): string {
   const payload = [
     input.name,
@@ -101,7 +103,7 @@ export function contentHash(input: {
     input.description ?? "",
     input.brand ?? "",
     JSON.stringify(input.customAttributes ?? {}),
-  ].join("\u0001");
+  ].join("\u0001") + (input.catalogEntryId ? `\u0001${input.catalogEntryId}` : "");
   let hash = 0x811c9dc5;
   for (let i = 0; i < payload.length; i++) {
     hash ^= payload.charCodeAt(i);
@@ -172,6 +174,7 @@ export function planPublish(
         description: item.description,
         brand: item.brand,
         customAttributes: item.customAttributes,
+        catalogEntryId: item.catalogEntryId,
       }),
     });
   }

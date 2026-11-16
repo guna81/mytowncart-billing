@@ -109,6 +109,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "repair_missing_columns",
         sql: include_str!("../migrations/0017_repair_missing_columns.sql"),
     },
+    Migration {
+        version: 18,
+        name: "shared_catalog",
+        sql: include_str!("../migrations/0018_shared_catalog.sql"),
+    },
 ];
 
 /// Version whose application also runs [`repair_missing_columns`].
@@ -365,9 +370,10 @@ mod tests {
 
     #[test]
     fn migration_17_adds_columns_missing_from_a_hand_repaired_db() {
+        let migrations = &MIGRATIONS[..17];
         let dir = TempDir::new().unwrap();
         let path = db_path(&dir);
-        migrate_with(&path, MIGRATIONS).unwrap();
+        migrate_with(&path, migrations).unwrap();
         {
             // Simulate the broken state: v16 recorded but columns absent.
             let c = Connection::open(&path).unwrap();
@@ -378,13 +384,13 @@ mod tests {
             )
             .unwrap();
         }
-        let out = migrate_with(&path, MIGRATIONS).unwrap();
+        let out = migrate_with(&path, migrations).unwrap();
         assert_eq!((out.from_version, out.to_version), (16, 17));
         let c = Connection::open(&path).unwrap();
         c.execute_batch("SELECT quarantine_reason FROM outbox; SELECT outcome_detail FROM stock_deliveries;")
             .unwrap();
         // Re-running is a no-op.
-        assert_eq!(migrate_with(&path, MIGRATIONS).unwrap().from_version, 17);
+        assert_eq!(migrate_with(&path, migrations).unwrap().from_version, 17);
     }
 
     #[test]

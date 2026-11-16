@@ -380,6 +380,8 @@ pub struct ItemPayload {
     /// Shared key of the items that are variants of one product; "" = single item.
     #[serde(default)]
     pub variant_group: String,
+    #[serde(default)]
+    pub catalog_entry_id: Option<String>,
     /// This item's own option values as JSON, e.g. {"Size":"M"}.
     #[serde(default)]
     pub variant_options: String,
@@ -411,13 +413,13 @@ fn upsert_item_inner(conn: &Connection, p: &ItemPayload) -> RepoResult<i64> {
                        price_paise = ?6, mrp_paise = ?7, tax_rate_bp = ?8, is_active = ?9,
                        hsn_code = ?10, cost_price_paise = ?11, description = ?12, brand = ?13,
                        custom_attributes = ?14, updated_at = ?15,
-                       variant_group = ?16, variant_options = ?17
+                       variant_group = ?16, variant_options = ?17, catalog_entry_id = COALESCE(?18, catalog_entry_id)
                      WHERE id = ?1",
                     rusqlite::params![
                         id, p.name, p.barcode, p.category_id, p.unit_kind, p.price_paise,
                         p.mrp_paise, p.tax_rate_bp, p.is_active as i64, p.hsn_code, p.cost_price_paise,
                         p.description, p.brand, p.custom_attributes, p.now,
-                        p.variant_group, if p.variant_options.is_empty() { "{}" } else { &p.variant_options },
+                        p.variant_group, if p.variant_options.is_empty() { "{}" } else { &p.variant_options }, p.catalog_entry_id,
                     ],
                 )
                 .map_err(err)?;
@@ -444,13 +446,13 @@ fn upsert_item_inner(conn: &Connection, p: &ItemPayload) -> RepoResult<i64> {
             conn.execute(
                 "INSERT INTO items (name, barcode, category_id, unit_kind, price_paise, mrp_paise,
                    tax_rate_bp, stock_milli, is_active, hsn_code, cost_price_paise,
-                   description, brand, custom_attributes, updated_at, variant_group, variant_options)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                   description, brand, custom_attributes, updated_at, variant_group, variant_options, catalog_entry_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
                 rusqlite::params![
                     p.name, p.barcode, p.category_id, p.unit_kind, p.price_paise, p.mrp_paise,
                     p.tax_rate_bp, p.is_active as i64, p.hsn_code, p.cost_price_paise,
                     p.description, p.brand, p.custom_attributes, p.now,
-                    p.variant_group, if p.variant_options.is_empty() { "{}" } else { &p.variant_options },
+                    p.variant_group, if p.variant_options.is_empty() { "{}" } else { &p.variant_options }, p.catalog_entry_id,
                 ],
             )
             .map_err(err)?;
@@ -3103,6 +3105,7 @@ mod tests {
                 brand: String::new(),
                 custom_attributes: String::new(),
                 variant_group: String::new(),
+                catalog_entry_id: None,
                 variant_options: String::new(),
                 now: "2026-11-04T10:00:00Z".to_string(),
             },
@@ -3774,6 +3777,7 @@ mod tests {
             brand: String::new(),
             custom_attributes: String::new(),
             variant_group: String::new(),
+            catalog_entry_id: None,
             variant_options: String::new(),
             now: "2026-11-04T10:00:00Z".to_string(),
         };
@@ -3808,11 +3812,13 @@ mod tests {
             brand: String::new(),
             custom_attributes: String::new(),
             variant_group: String::new(),
+            catalog_entry_id: None,
             variant_options: String::new(),
             now: "2026-11-04T10:00:00Z".to_string(),
         };
+        let payload = ItemPayload { catalog_entry_id: Some("catalog-1".to_string()), ..payload };
         import_items(&mut conn, std::slice::from_ref(&payload)).unwrap();
-        let updated = ItemPayload { name: "Renamed".to_string(), ..payload };
+        let updated = ItemPayload { name: "Renamed".to_string(), catalog_entry_id: None, ..payload };
         let results = import_items(&mut conn, &[updated]).unwrap();
         assert!(results[0].ok);
         let (count, name, stock): (i64, String, i64) = conn
@@ -3825,6 +3831,8 @@ mod tests {
         assert_eq!(count, 1);
         assert_eq!(name, "Renamed");
         assert_eq!(stock, 1_000, "re-import must not re-apply opening stock");
+        let catalog_id: String = conn.query_row("SELECT catalog_entry_id FROM items WHERE barcode = '222'", [], |r| r.get(0)).unwrap();
+        assert_eq!(catalog_id, "catalog-1");
     }
 
     #[test]
@@ -3847,6 +3855,7 @@ mod tests {
             brand: "ChocoDelight".to_string(),
             custom_attributes: r#"{"Weight":"100g","Cocoa":"70%"}"#.to_string(),
             variant_group: String::new(),
+            catalog_entry_id: None,
             variant_options: String::new(),
             now: "2026-11-04T10:00:00Z".to_string(),
         };
@@ -3869,6 +3878,7 @@ mod tests {
             description: "Updated description".to_string(),
             custom_attributes: r#"{"Weight":"100g","Cocoa":"85%"}"#.to_string(),
             variant_group: String::new(),
+            catalog_entry_id: None,
             variant_options: String::new(),
             ..payload
         };

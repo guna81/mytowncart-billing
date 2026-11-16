@@ -25,6 +25,8 @@ import { loadConnection } from "../lib/connection";
 import { getConnector } from "../lib/marketplace";
 import { getRepository } from "../lib/repository";
 import { useAppStore } from "../store/appStore";
+import type { SharedCatalogEntry } from "@mytowncart-billing/connector-mytowncart";
+import { SharedCatalogPicker } from "./itemForm/SharedCatalogPicker";
 import { VariantEditor } from "./itemForm/VariantEditor";
 import { baseNameOf, newVariantGroup, variantItemName, type VariantRow } from "./itemForm/variants";
 
@@ -38,6 +40,8 @@ export function ItemFormScreen() {
   const bumpDataVersion = useAppStore((s) => s.bumpDataVersion);
 
   const [categories, setCategories] = useState<Category[]>([]);
+  const [catalogEntryId, setCatalogEntryId] = useState<string | null>(null);
+  const [catalogNotice, setCatalogNotice] = useState("");
   const [name, setName] = useState("");
   const [barcode, setBarcode] = useState("");
   const [brand, setBrand] = useState("");
@@ -198,6 +202,7 @@ export function ItemFormScreen() {
         await loadPhotos(editId);
         const item = await repo.getItem(editId);
         if (item) {
+          setCatalogEntryId(item.catalogEntryId ?? null);
           if (item.variantGroup) {
             const siblings = (await repo.listItems({})).filter((i) => i.variantGroup === item.variantGroup);
             siblings.sort((a, b) => a.id - b.id);
@@ -372,6 +377,7 @@ export function ItemFormScreen() {
           ? originalDescription.current.stored
           : plainToHtml(description),
         customAttributes: finalAttributes,
+        catalogEntryId,
         categoryId: finalCategoryId,
         unitKind,
         pricePaise,
@@ -416,6 +422,7 @@ export function ItemFormScreen() {
         return;
       }
       const hash = await imageHash(bytes);
+        if (!hash) throw new Error("Could not verify the downloaded photo.");
       if (hash === null) {
         setError(t("common.error", { message: "this browser cannot verify photos" }));
         return;
@@ -483,6 +490,38 @@ export function ItemFormScreen() {
     }
   };
 
+  const selectCatalogEntry = async (entry: SharedCatalogEntry) => {
+    const existing = (await getRepository().listItems({ activeOnly: false })).find((item) =>
+      item.catalogEntryId === entry.id || (entry.barcode !== "" && item.barcode === entry.barcode));
+    if (existing) {
+      navigate(`/items/${existing.id}/edit`);
+      return;
+    }
+    // Fetch before replacing form values: an image/network failure must not leave half a selection.
+    let photo: { bytes: Uint8Array; hash: string; url: string } | null = null;
+    let notice = "Catalog details selected. Review your price, tax and stock before saving.";
+    if (entry.image) {
+      try {
+        const bytes = await getConnector().downloadImage(entry.image);
+        const blob = new Blob([bytes as BlobPart]);
+        const hash = await imageHash(bytes);
+        if (!hash) throw new Error("Could not verify the downloaded photo.");
+        photo = { bytes, hash, url: URL.createObjectURL(blob) };
+      } catch { notice = "Details selected; photo download failed. Add your own photo or try again while online."; }
+    }
+    for (const existing of photosRef.current) URL.revokeObjectURL(existing.url);
+    setPhotos(photo ? [{ id: `catalog-${entry.id}`, ...photo, isMain: true, imageUploadedAt: null }] : []);
+    setCatalogEntryId(entry.id);
+    setName(entry.display_name); setBarcode(entry.barcode); setBrand(entry.brand_name);
+    setDescription(entry.description); setUnitKind("count");
+    setVariantRows([]); setVariantGroup("");
+    const localCategory = categories.find((c) => c.marketplaceCategoryId === entry.product_category);
+    setCategoryId(localCategory?.id ?? null); setMtcChoice(entry.product_category);
+    setIsCreatingCategory(!localCategory);
+    setNewCategory(localCategory ? "" : entry.category_name);
+    setCatalogNotice(notice);
+  };
+
   return (
     <div className="max-w-4xl mx-auto pb-24">
       <PageHeader
@@ -498,6 +537,8 @@ export function ItemFormScreen() {
         }
       />
 
+      {editId === null && !hasVariants && mtcCategories.length > 0 ? <div className="mt-4"><SharedCatalogPicker onSelect={selectCatalogEntry} /></div> : null}
+      {catalogNotice ? <p role="status" className="mt-3 text-sm text-gray-600">{catalogNotice}</p> : null}
       <form onSubmit={(e) => void submit(e)} className="mt-4 space-y-6">
         {/* Card 1: Basics */}
         <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-xs space-y-4">

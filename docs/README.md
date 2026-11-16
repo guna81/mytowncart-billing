@@ -6,6 +6,7 @@
 | [`LAN.md`](LAN.md) | optional LAN browser access, host setup, and network limits |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | layers, package boundaries, Tauri commands, boot and print flow |
 | [`DATA-MODEL.md`](DATA-MODEL.md) | units, every SQLite table/column, settings keys, what is not stored in SQLite |
+| [`SHARED-CATALOG.md`](SHARED-CATALOG.md) | shared catalog lookup, local snapshots, deployment order and MVP limits |
 | [`SYNC.md`](SYNC.md) | marketplace connection, outbox/merge, stock pull, catalog push, photos (D9), reconcile, orders |
 | [`BACKUP.md`](BACKUP.md) | `.mtcb` format, recovery key and key wrapping, backup and restore steps, limits |
 | [`SCREENS.md`](SCREENS.md) | every screen, keyboard shortcuts, workflows, reports, print preview |

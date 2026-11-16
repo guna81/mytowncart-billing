@@ -56,6 +56,7 @@ export function toPlanInputs(
     description: toWireHtml(item.description ?? ""),
     brand: item.brand,
     customAttributes: item.customAttributes,
+    catalogEntryId: item.catalogEntryId,
   }));
 }
 
@@ -145,6 +146,7 @@ export async function publishCatalogItems(
         description: r.input.description,
         brand: r.input.brand,
         customAttributes: r.input.customAttributes,
+        catalogEntryId: r.input.catalogEntryId,
         ...groupOf(itemsToPublish.find((i) => i.id === r.input.id)),
       })),
     );
