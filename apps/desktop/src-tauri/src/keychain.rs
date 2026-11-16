@@ -7,7 +7,8 @@
 use keyring::Entry;
 use thiserror::Error;
 
-const SERVICE: &str = "com.mytowncart.billing";
+const SERVICE: &str = "MyTownCart Billing";
+const LEGACY_SERVICE: &str = "com.mytowncart.billing";
 const MAX_KEY_LEN: usize = 128;
 
 #[derive(Debug, Error)]
@@ -19,6 +20,10 @@ pub enum KeychainError {
 }
 
 fn entry(key: &str) -> Result<Entry, KeychainError> {
+    entry_for_service(SERVICE, key)
+}
+
+fn entry_for_service(service: &str, key: &str) -> Result<Entry, KeychainError> {
     if key.is_empty() {
         return Err(KeychainError::InvalidKey("key must not be empty"));
     }
@@ -33,26 +38,48 @@ fn entry(key: &str) -> Result<Entry, KeychainError> {
             "only [a-zA-Z0-9._:-] characters are allowed",
         ));
     }
-    Ok(Entry::new(SERVICE, key)?)
+    Ok(Entry::new(service, key)?)
 }
 
 pub fn set(key: &str, value: &str) -> Result<(), KeychainError> {
     entry(key)?.set_password(value)?;
+    if let Ok(legacy) = entry_for_service(LEGACY_SERVICE, key) {
+        let _ = legacy.delete_credential();
+    }
     Ok(())
 }
 
 pub fn get(key: &str) -> Result<Option<String>, KeychainError> {
     match entry(key)?.get_password() {
         Ok(v) => Ok(Some(v)),
-        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(keyring::Error::NoEntry) => {
+            match entry_for_service(LEGACY_SERVICE, key)?.get_password() {
+                Ok(v) => {
+                    let _ = set(key, &v);
+                    Ok(Some(v))
+                }
+                Err(keyring::Error::NoEntry) => Ok(None),
+                Err(e) => Err(KeychainError::Backend(e)),
+            }
+        }
         Err(e) => Err(KeychainError::Backend(e)),
     }
 }
 
 pub fn delete(key: &str) -> Result<(), KeychainError> {
+    let mut last_err = None;
     match entry(key)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(KeychainError::Backend(e)),
+        Ok(()) | Err(keyring::Error::NoEntry) => {}
+        Err(e) => last_err = Some(e),
+    }
+    match entry_for_service(LEGACY_SERVICE, key)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => {}
+        Err(e) => last_err = Some(e),
+    }
+    if let Some(e) = last_err {
+        Err(KeychainError::Backend(e))
+    } else {
+        Ok(())
     }
 }
 
