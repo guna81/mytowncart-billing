@@ -32,7 +32,6 @@ import { publishCatalogItems } from "../lib/publishService";
 import { classifyCatalogOverview } from "../lib/catalogOverview";
 import { invalidateRemoteSeen, loadRemoteSeen } from "../lib/remoteSeen";
 import { syncAvailable } from "../lib/syncEngine";
-import { activeStockSources } from "../lib/reconcileFixes";
 import { clearConnection, loadConnection, saveConnection } from "../lib/connection";
 import { getConnector } from "../lib/marketplace";
 import { openReleasePage } from "../lib/tauri";
@@ -626,11 +625,10 @@ function ReviewTable({ items, marketplace, categories, onChanged }: {
     let cancelled = false;
     const repo = getRepository();
     setSnapshot(null);
-    void Promise.all([loadRemoteSeen(new Date(), repo), repo.listOutbox("pending"), repo.listOutbox("quarantined"), repo.listStockReconciliations(), repo.listStockSourceResolutions()])
-      .then(([seen, pending, quarantined, intents, history]) => { if (!cancelled) {
-        const active = activeStockSources(quarantined, history);
-        setSnapshot({ seen, pending: [...pending, ...active] });
-        setStockBlocked(active.length + intents.filter((intent) => (intent.status === "pending" || intent.status === "needs_review") && !intents.some((child) => child.parentOperationId === intent.operationId && child.status !== "conflict")).length);
+    void Promise.all([loadRemoteSeen(new Date(), repo), repo.listOutbox("pending"), repo.listOutbox("quarantined"), repo.listStockReconciliations()])
+      .then(([seen, pending, quarantined, intents]) => { if (!cancelled) {
+        setSnapshot({ seen, pending: [...pending, ...quarantined] });
+        setStockBlocked(quarantined.length + intents.filter((intent) => (intent.status === "pending" || intent.status === "needs_review") && !intents.some((child) => child.parentOperationId === intent.operationId && child.status !== "conflict")).length);
       } })
       .catch(() => { if (!cancelled) setSnapshot({ seen: null, pending: [] }); });
     return () => { cancelled = true; };

@@ -44,7 +44,7 @@ pub fn required_role(cmd: &str) -> Option<Role> {
         "void_bill" | "adjust_stock" | "create_credit_note" | "apply_stock_audit" | "upsert_user"
         | "create_purchase" | "upsert_item" | "import_items" | "delete_customer" | "upsert_supplier"
         | "delete_supplier" | "save_shop_profile" | "list_audit_logs" | "get_bills_report_data"
-        | "marketplace_connect" | "marketplace_disconnect" => {
+        | "marketplace_connect" | "marketplace_disconnect" | "set_item_active" => {
             Some(Role::Owner)
         }
         // Everything else (selling, looking things up, receiving customer payments).

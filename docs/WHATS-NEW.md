@@ -19,7 +19,6 @@ The latest published installer is [v0.1.5](https://github.com/guna81/mytowncart-
   errors show on the Settings tab; the LAN web app shows the PIN screen before
   loading shop data; confirmation dialogs work under the desktop shell; a
   database migration repairs hand-repaired older databases.
-- **Settings:** the retained source resolution history now appears only in Settings.
 
 ### New in v0.1.4
 

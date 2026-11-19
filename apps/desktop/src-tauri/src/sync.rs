@@ -192,7 +192,6 @@ pub fn claim_stock_delivery(conn: &Connection, now: &str, claim_until: &str) -> 
          WHERE o.status = 'pending'
            AND json_valid(o.payload_json)
            AND NOT EXISTS (SELECT 1 FROM stock_reconciliations intent WHERE intent.external_id=json_extract(o.payload_json,'$.externalId') AND intent.status='pending')
-           AND NOT EXISTS (SELECT 1 FROM stock_source_resolutions resolution WHERE resolution.external_id=json_extract(o.payload_json,'$.externalId') AND resolution.retired_by IS NULL)
            AND NOT EXISTS (SELECT 1 FROM outbox earlier
              WHERE earlier.id < o.id AND earlier.status IN ('pending','quarantined')
                AND json_valid(earlier.payload_json)
@@ -475,7 +474,6 @@ mod pull_tests {
         conn.execute_batch("CREATE TABLE sync_state (key TEXT PRIMARY KEY, value TEXT);
             CREATE TABLE app_settings (key TEXT PRIMARY KEY,value TEXT);
             CREATE TABLE stock_reconciliations (external_id TEXT, status TEXT);
-            CREATE TABLE stock_source_resolutions (external_id TEXT, retired_by TEXT);
             CREATE TABLE stock_protocol_states (external_id TEXT PRIMARY KEY,state_json TEXT);
             CREATE TABLE items (id INTEGER PRIMARY KEY, remote_product_id TEXT, stock_milli INTEGER);
             CREATE TABLE stock_movements (item_id INTEGER, delta_milli INTEGER, reason TEXT, ref_type TEXT, ref_id TEXT, created_at TEXT);

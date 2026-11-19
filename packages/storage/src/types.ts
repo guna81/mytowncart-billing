@@ -147,22 +147,6 @@ export interface StockRecoveryInput extends StockReconciliationInput {
   parentOperationId: string;
   reason: string;
 }
-export interface StockSourceResolutionInput {
-  operationId: string;
-  sourceId: number;
-  idempotencyKey: string;
-  rawPayloadJson: string;
-  action: "map" | "historical_unknown";
-  itemId?: number;
-  reason: string;
-  confirmed: boolean;
-}
-export interface StockSourceResolution extends StockSourceResolutionInput {
-  actor: number | null;
-  createdAt: string;
-  externalId?: string;
-  retiredBy?: string;
-}
 
 /** A stock movement waiting for (or already sent to) the marketplace. */
 export interface OutboxRow {

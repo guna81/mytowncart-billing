@@ -46,7 +46,7 @@ import { groupOf } from "./variantSync";
 import { syncPhotos } from "./photoSync";
 import { loadRemoteSeen, saveRemoteSeen } from "./remoteSeen";
 import { descriptionFingerprint, toWireHtml } from "./richText";
-import { activeStockSources, recoverStockReconciliations } from "./reconcileFixes";
+import { recoverStockReconciliations } from "./reconcileFixes";
 
 /** Server cap from `me/`; never ask for more. */
 export const DEFAULT_BULK_MAX = 100;
@@ -399,6 +399,12 @@ async function pullStock(
     if (err instanceof MarketplaceError && err.status === 429) {
       outcome.retryAfterSeconds = Math.max(1, err.retryAfterSeconds ?? 120);
     } else {
+      if (
+        (err instanceof MarketplaceError && (err.status === 409 || err.code === "bootstrap_required")) ||
+        (err instanceof Error && err.message.toLowerCase().includes("bootstrap required"))
+      ) {
+        await repo.setAppSetting("sync.stock_bootstrap_required", "true");
+      }
       outcome.problems.push(`stock pull: ${message(err)}`);
     }
   }
@@ -664,7 +670,7 @@ export async function getReconcileSnapshot(
   );
   // A clamped/rejected delivery still needs an explicit decision when the two
   // displayed quantities happen to match. Do not hide it as already synced.
-  const blocked = new Set(activeStockSources(await repo.listOutbox("quarantined"), await repo.listStockSourceResolutions()).map((entry) => entry.externalId));
+  const blocked = new Set((await repo.listOutbox("quarantined")).map((entry) => entry.externalId).filter(Boolean));
   for (const intent of await repo.listStockReconciliations()) {
     if (intent.status === "conflict") blocked.add(intent.externalId);
   }

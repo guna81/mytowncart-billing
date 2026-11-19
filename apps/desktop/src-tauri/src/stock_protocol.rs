@@ -47,25 +47,9 @@ pub struct StockReview { pub current_stock_milli: i64, pub subsequent_delta_mill
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RecoveryInput { #[serde(flatten)] pub input: ReconciliationInput, pub parent_operation_id: String, pub reason: String }
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct SourceResolutionInput {
-    pub operation_id: String, pub source_id: i64, pub idempotency_key: String, pub raw_payload_json: String,
-    pub action: String, pub item_id: Option<i64>, pub reason: String, pub confirmed: bool,
-}
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SourceResolution {
-    #[serde(flatten)] pub input: SourceResolutionInput,
-    pub actor: Option<i64>,
-    pub created_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")] pub external_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")] pub retired_by: Option<String>,
-}
 /// Database `pending` includes committed review parents and their linked leaves.
-/// Source mappings fence stock changes until an explicitly captured settlement.
 pub fn unresolved(conn: &Connection, external: Option<&str>) -> RepoResult<bool> {
-    conn.query_row("SELECT EXISTS(SELECT 1 FROM stock_reconciliations WHERE status='pending' AND (?1 IS NULL OR external_id=?1)) OR EXISTS(SELECT 1 FROM stock_source_resolutions WHERE external_id IS NOT NULL AND retired_by IS NULL AND (?1 IS NULL OR external_id=?1))",[external],|r|r.get(0)).map_err(|e|e.to_string())
+    conn.query_row("SELECT EXISTS(SELECT 1 FROM stock_reconciliations WHERE status='pending' AND (?1 IS NULL OR external_id=?1))",[external],|r|r.get(0)).map_err(|e|e.to_string())
 }
 fn valid(state: &StockProtocolState) -> RepoResult<()> {
     if state.external_id.is_empty() || state.epoch.is_empty() || state.variant_id.is_empty() || state.sequence < 0 || state.revision < 0 || state.generation < 0 || state.stock_units < 0 || state.stock_units.checked_mul(1000).is_none() { return Err("invalid stock protocol state".into()); }
@@ -123,13 +107,8 @@ pub fn begin(conn: &Connection, input: ReconciliationInput) -> RepoResult<Reconc
     let boundary: i64 = tx.query_row("SELECT COALESCE(MAX(id),0) FROM outbox", [], |r|r.get(0)).map_err(|e|e.to_string())?;
     let intent = ReconciliationIntent { input, captured_stock_milli: stock, source_boundary: boundary, status: "pending".into(), detail: None, result: None, review: None, parent_operation_id: None, reason: None, actor: None, created_at: timestamp(&tx)?, approved_shortage_milli: None };
     tx.execute("INSERT INTO stock_reconciliations(operation_id,external_id,item_id,request_json,intent_json,status) VALUES (?1,?2,?3,?4,?5,'pending')", params![intent.input.operation_id,intent.input.state.external_id,intent.input.item_id,serde_json::to_string(&intent.input).map_err(|e|e.to_string())?,serde_json::to_string(&intent).map_err(|e|e.to_string())?]).map_err(|e|e.to_string())?;
-    capture_sources(&tx, &intent)?;
     tx.commit().map_err(|e|e.to_string())?;
     Ok(intent)
-}
-fn capture_sources(conn: &Connection, intent: &ReconciliationIntent) -> RepoResult<()> {
-    conn.execute("INSERT INTO stock_reconciliation_sources(operation_id,resolution_id) SELECT ?1,operation_id FROM stock_source_resolutions WHERE external_id=?2 AND source_id<=?3 AND retired_by IS NULL", params![intent.input.operation_id,intent.input.state.external_id,intent.source_boundary]).map_err(|e|e.to_string())?;
-    Ok(())
 }
 fn timestamp(conn: &Connection) -> RepoResult<String> { conn.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')",[],|r|r.get(0)).map_err(|e|e.to_string()) }
 pub fn begin_recovery(conn: &Connection, recovery: RecoveryInput, actor: Option<i64>) -> RepoResult<ReconciliationIntent> {
@@ -156,7 +135,6 @@ pub fn begin_recovery(conn: &Connection, recovery: RecoveryInput, actor: Option<
     tx.execute("UPDATE stock_reconciliations SET active=0 WHERE operation_id=?1",[&recovery.parent_operation_id]).map_err(|e|e.to_string())?;
     let intent=ReconciliationIntent {input:recovery.input,captured_stock_milli:stock,source_boundary:boundary,status:"pending".into(),detail:None,result:None,review:None,parent_operation_id:Some(recovery.parent_operation_id),reason:Some(recovery.reason),actor,created_at:timestamp(&tx)?,approved_shortage_milli};
     tx.execute("INSERT INTO stock_reconciliations(operation_id,external_id,item_id,request_json,intent_json,status,parent_operation_id) VALUES (?1,?2,?3,?4,?5,'pending',?6)",params![intent.input.operation_id,intent.input.state.external_id,intent.input.item_id,serde_json::to_string(&intent.input).map_err(|e|e.to_string())?,serde_json::to_string(&intent).map_err(|e|e.to_string())?,intent.parent_operation_id]).map_err(|e|e.to_string())?;
-    capture_sources(&tx,&intent)?;
     tx.commit().map_err(|e|e.to_string())?;
     Ok(intent)
 }
@@ -211,8 +189,6 @@ pub fn settle(conn: &Connection, operation: &str, result: &StockProtocolState) -
     tx.execute("UPDATE outbox SET status='done',next_attempt_at=NULL,quarantine_reason=NULL WHERE id<=?1 AND status IN ('pending','quarantined') AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json,'$.externalId')=?2 ELSE 0 END", params![intent.source_boundary,result.external_id]).map_err(|e|e.to_string())?;
     tx.execute("UPDATE stock_deliveries SET status='done',claim_token=NULL,claim_until=NULL,next_attempt_at=NULL WHERE outbox_id IN (SELECT id FROM outbox WHERE id<=?1 AND status='done') AND external_id=?2",params![intent.source_boundary,result.external_id]).map_err(|e|e.to_string())?;
     tx.execute("INSERT INTO stock_protocol_states(external_id,state_json) VALUES (?1,?2) ON CONFLICT(external_id) DO UPDATE SET state_json=excluded.state_json",params![result.external_id,serde_json::to_string(result).map_err(|e|e.to_string())?]).map_err(|e|e.to_string())?;
-    tx.execute("UPDATE stock_source_resolutions SET retired_by=?1 WHERE operation_id IN (SELECT resolution_id FROM stock_reconciliation_sources WHERE operation_id=?1) AND retired_by IS NULL",[operation]).map_err(|e|e.to_string())?;
-    tx.execute("UPDATE outbox SET status='done',next_attempt_at=NULL WHERE id IN (SELECT source_id FROM stock_source_resolutions WHERE retired_by=?1)",[operation]).map_err(|e|e.to_string())?;
     intent.status="done".into();
     tx.execute("UPDATE stock_reconciliations SET status='done',intent_json=?2,result_json=?3 WHERE operation_id=?1",params![operation,serde_json::to_string(&intent).map_err(|e|e.to_string())?,serde_json::to_string(result).map_err(|e|e.to_string())?]).map_err(|e|e.to_string())?;
     let mut parent=intent.parent_operation_id.clone();
@@ -225,38 +201,4 @@ pub fn settle(conn: &Connection, operation: &str, result: &StockProtocolState) -
     }
     tx.commit().map_err(|e|e.to_string())?;
     Ok(intent)
-}
-
-pub fn resolve_source(conn: &Connection, input: SourceResolutionInput, actor: Option<i64>) -> RepoResult<SourceResolution> {
-    if input.operation_id.trim().is_empty() || input.reason.trim().is_empty() || !input.confirmed || !["map","historical_unknown"].contains(&input.action.as_str()) { return Err("explicit reason and confirmation required".into()); }
-    let tx=rusqlite::Transaction::new_unchecked(conn,TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
-    let prior=tx.query_row("SELECT request_json,evidence_json,retired_by FROM stock_source_resolutions WHERE operation_id=?1",[&input.operation_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?)));
-    if let Ok((request,evidence,retired))=prior {
-        let original: SourceResolutionInput=serde_json::from_str(&request).map_err(|e|e.to_string())?;
-        if original!=input { return Err("source resolution operation key reused with changed payload".into()); }
-        let mut resolution: SourceResolution=serde_json::from_str(&evidence).map_err(|e|e.to_string())?;
-        resolution.retired_by=retired;
-        return Ok(resolution);
-    }
-    let (key,payload,status):(String,String,String)=tx.query_row("SELECT idempotency_key,payload_json,status FROM outbox WHERE id=?1",[input.source_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|e|e.to_string())?;
-    if key!=input.idempotency_key || payload!=input.raw_payload_json || status!="quarantined" { return Err("source evidence changed or is not quarantined".into()); }
-    let has_delivery: bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM stock_deliveries WHERE outbox_id=?1)",[input.source_id],|r|r.get(0)).map_err(|e|e.to_string())?;
-    if has_delivery { return Err("delivery evidence requires ordinary stock reconciliation".into()); }
-    // Only malformed, unidentifiable artifacts use this exceptional path.
-    let identifiable=serde_json::from_str::<serde_json::Value>(&payload).ok().and_then(|v|v.get("externalId").and_then(|x|x.as_str()).map(|s|!s.is_empty())).unwrap_or(false);
-    if identifiable { return Err("identified sources require ordinary stock reconciliation".into()); }
-    let external_id=if input.action=="map" {
-        let id=input.item_id.ok_or("mapping requires a linked item")?;
-        let external: String=tx.query_row("SELECT 'itm_'||id FROM items WHERE id=?1 AND remote_product_id IS NOT NULL AND remote_product_id!=''",[id],|r|r.get(0)).map_err(|_|"mapping requires a verified linked item".to_string())?;
-        Some(external)
-    } else { if input.item_id.is_some() { return Err("historical unknown disposition cannot select an item".into()); } None };
-    let resolution=SourceResolution {input,actor,external_id,retired_by:None,created_at:timestamp(&tx)?};
-    tx.execute("INSERT INTO stock_source_resolutions(operation_id,source_id,request_json,evidence_json,external_id) VALUES (?1,?2,?3,?4,?5)",params![resolution.input.operation_id,resolution.input.source_id,serde_json::to_string(&resolution.input).map_err(|e|e.to_string())?,serde_json::to_string(&resolution).map_err(|e|e.to_string())?,resolution.external_id]).map_err(|e|e.to_string())?;
-    tx.commit().map_err(|e|e.to_string())?;
-    Ok(resolution)
-}
-pub fn list_source_resolutions(conn: &Connection) -> RepoResult<Vec<SourceResolution>> {
-    let mut stmt=conn.prepare("SELECT evidence_json,retired_by FROM stock_source_resolutions ORDER BY rowid").map_err(|e|e.to_string())?;
-    let rows=stmt.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?))).map_err(|e|e.to_string())?;
-    rows.map(|r| {let (raw,retired)=r.map_err(|e|e.to_string())?;let mut v:SourceResolution=serde_json::from_str(&raw).map_err(|e|e.to_string())?;v.retired_by=retired;Ok(v)}).collect()
 }

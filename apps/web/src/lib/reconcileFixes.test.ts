@@ -5,43 +5,21 @@ import type { MarketplaceConnector, RemoteItem } from "@mytowncart-billing/conne
 import type { BillingRepository } from "@mytowncart-billing/storage";
 import { MemoryRepository } from "@mytowncart-billing/storage";
 import { MarketplaceError } from "@mytowncart-billing/connector-mytowncart";
-import { exceptionalStockSourceEligible, stockRecoveryConsentMatches, activeStockSources, applyReconciliation, bootstrapStock, recoverStockReconciliations, recoverStockShortage, reconcileMappedSource, reconcileFixes, validateReconcileTargets } from "./reconcileFixes";
+import { stockRecoveryConsentMatches, applyReconciliation, bootstrapStock, recoverStockReconciliations, recoverStockShortage, reconcileFixes, validateReconcileTargets } from "./reconcileFixes";
 
 const row = (kind: ReconcileRow["kind"], remoteValue: number | null): ReconcileRow => ({
   itemId: 1, name: "Item", externalId: "itm_1", kind, localValue: 5, remoteValue,
 });
 
 describe("review-bound recovery consent", () => {
-  it("invalidates synchronously for local sales, new evidence, selected mapping or reason changes", () => {
-    const snapshot = { sources: ["raw"], intents: ["operation"], history: [], items: [{ id: 1, stockMilli: 5000 }], itemId: "1", reason: "counted" };
+  it("invalidates synchronously for local sales, new evidence, or reason changes", () => {
+    const snapshot = { intents: ["operation"], items: [{ id: 1, stockMilli: 5000 }], reason: "counted" };
     const token = JSON.stringify(snapshot);
     expect(stockRecoveryConsentMatches(token, token)).toBe(true);
     expect(stockRecoveryConsentMatches(null, token)).toBe(false);
-    for (const change of [{ items: [{ id: 1, stockMilli: 4000 }] }, { sources: ["changed raw"] }, { intents: ["child"] }, { history: ["mapped"] }, { itemId: "2" }, { reason: "different reason" }]) {
+    for (const change of [{ items: [{ id: 1, stockMilli: 4000 }] }, { intents: ["child"] }, { reason: "different reason" }]) {
       expect(stockRecoveryConsentMatches(token, JSON.stringify({ ...snapshot, ...change }))).toBe(false);
     }
-  });
-});
-
-describe("exceptional source eligibility", () => {
-  const source = { id: 1, idempotencyKey: "raw", externalId: "", deltaUnits: 0, reason: "sale" as const, attempts: 0, nextAttemptAt: null, status: "quarantined" as const };
-  it.each(["{bad", "{}", "null", '{"externalId":null}', '{"externalId":7}', '{"externalId":""}'])("accepts only unidentified raw evidence %s", (rawPayloadJson) => {
-    expect(exceptionalStockSourceEligible({ ...source, rawPayloadJson })).toBe(true);
-  });
-  it.each(['{"externalId":"itm_1"}', '{"externalId":"stale-id"}', '{"externalId":" "}'])("rejects any nonempty string identity %s", (rawPayloadJson) => {
-    expect(exceptionalStockSourceEligible({ ...source, rawPayloadJson })).toBe(false);
-  });
-  it("fails closed without evidence or quarantine", () => {
-    expect(exceptionalStockSourceEligible(source)).toBe(false);
-    expect(exceptionalStockSourceEligible({ ...source, status: "pending", rawPayloadJson: "bad" })).toBe(false);
-  });
-});
-
-describe("active source status", () => {
-  it("hides historical/retired evidence but counts unresolved mapping against its verified item", () => {
-    const source = (id: number) => ({ id, idempotencyKey: `key-${id}`, externalId: "", deltaUnits: 0, reason: "sale" as const, attempts: 0, nextAttemptAt: null, status: "quarantined" as const });
-    const resolution = (sourceId: number, action: "map" | "historical_unknown", retiredBy?: string) => ({ operationId: `op-${sourceId}`, sourceId, idempotencyKey: `key-${sourceId}`, rawPayloadJson: "bad", action, itemId: action === "map" ? 9 : undefined, reason: "verified evidence", confirmed: true, actor: 1, createdAt: "now", retiredBy });
-    expect(activeStockSources([source(1), source(2), source(3), source(4)], [resolution(1, "historical_unknown"), resolution(2, "map", "settled"), resolution(3, "map")])).toEqual([{ ...source(3), externalId: "itm_9" }, source(4)]);
   });
 });
 
@@ -127,14 +105,6 @@ describe("durable stock reconciliation active path", () => {
     expect(calls).toEqual([]);
   });
 
-  it("fails closed on unsupported stock servers but keeps metadata usable", async () => {
-    const { repo, target } = await fixture();
-    const unsupported = {} as MarketplaceConnector;
-    await expect(applyReconciliation([target], false, repo, unsupported)).rejects.toThrow("does not support");
-    await expect(applyReconciliation([{ ...target, kind: "price", remoteValue: 120 }], true, repo, unsupported)).resolves.toBeUndefined();
-    expect((await repo.listItems({ activeOnly: false }))[0]?.pricePaise).toBe(120);
-  });
-
   it("does not pause an already-active epoch for a selected stock decision", async () => {
     const { repo, connector, target } = await fixture();
     await repo.setAppSetting("sync.stock_epoch", "epoch");
@@ -213,21 +183,6 @@ describe("explicit shortage recovery", () => {
     expect(connector.reconcileStock).toHaveBeenCalledTimes(1);
     expect(connector.stockSnapshot).toHaveBeenCalledTimes(1);
     expect(repo.beginStockRecovery).toHaveBeenCalledTimes(1);
-  });
-  it("resolves mapped evidence by a conditional captured local baseline, never source delivery", async () => {
-    const { repo, connector } = setup();
-    repo.listStockSourceResolutions = async () => [{ operationId: "mapping", sourceId: 7, idempotencyKey: "raw-key", rawPayloadJson: "bad", action: "map", itemId: 1, reason: "verified item", confirmed: true, actor: 1, createdAt: "2026-11-15T00:00:00Z" }];
-    repo.getAppSetting = async () => null;
-    repo.setAppSetting = vi.fn(async () => {});
-    connector.stockSnapshot = vi.fn(async () => ({ epoch: "e", watermark: 5, items: [state] }));
-    repo.beginStockReconciliation = vi.fn(async (input) => ({ ...input, capturedStockMilli: 0, sourceBoundary: 7, status: "pending" }));
-    repo.settleStockReconciliation = vi.fn(async () => ({ ...parent, status: "done" as const }));
-    await reconcileMappedSource(repo, connector, { itemId: 1, expectedLocalStockMilli: 0, reason: "counted empty", confirmed: true });
-    expect(repo.beginStockReconciliation).toHaveBeenCalledWith(expect.objectContaining({ itemId: 1, choice: "local", stockUnits: 0, expectedLocalStockMilli: 0 }));
-    expect(connector.stockSnapshot).toHaveBeenCalledWith(["itm_1"]);
-    expect(repo.setAppSetting).toHaveBeenCalledWith("sync.stock_bootstrap_required", "true");
-    repo.listStockSourceResolutions = async () => [];
-    await expect(reconcileMappedSource(repo, connector, { itemId: 1, expectedLocalStockMilli: 0, reason: "counted empty", confirmed: true })).rejects.toThrow("already resolved");
   });
   it("rejects stale local consent and missing reason before child creation", async () => {
     const { repo, connector } = setup();

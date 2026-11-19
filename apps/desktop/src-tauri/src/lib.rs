@@ -240,6 +240,22 @@ fn upsert_item(state: tauri::State<'_, AppState>, item: repo::ItemPayload,
 }
 
 #[tauri::command]
+fn set_item_active(
+    state: tauri::State<'_, AppState>,
+    item_id: i64,
+    is_active: bool,
+    now: String,
+    session: Option<String>,
+) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let actor = state.auth.authorize(&conn, "set_item_active", session.as_deref())?;
+    repo::set_item_active(&conn, item_id, is_active, &now)?;
+    let action = if is_active { "restore_item" } else { "archive_item" };
+    auth::audit(&conn, actor, action, format!("item {item_id}"));
+    Ok(())
+}
+
+#[tauri::command]
 fn import_items(
     state: tauri::State<'_, AppState>,
     items: Vec<repo::ItemPayload>,
@@ -694,17 +710,6 @@ fn begin_stock_recovery(state: tauri::State<'_, AppState>, input: stock_protocol
     let conn=state.conn.lock().map_err(|e|e.to_string())?;
     let actor=state.auth.authorize(&conn,"adjust_stock",session.as_deref())?;
     stock_protocol::begin_recovery(&conn,input,actor)
-}
-#[tauri::command]
-fn resolve_stock_source(state: tauri::State<'_, AppState>, input: stock_protocol::SourceResolutionInput, session: Option<String>) -> Result<stock_protocol::SourceResolution,String> {
-    let conn=state.conn.lock().map_err(|e|e.to_string())?;
-    let actor=state.auth.authorize(&conn,"adjust_stock",session.as_deref())?;
-    stock_protocol::resolve_source(&conn,input,actor)
-}
-#[tauri::command]
-fn list_stock_source_resolutions(state: tauri::State<'_, AppState>) -> Result<Vec<stock_protocol::SourceResolution>,String> {
-    let conn=state.conn.lock().map_err(|e|e.to_string())?;
-    stock_protocol::list_source_resolutions(&conn)
 }
 #[tauri::command]
 fn apply_stock_pull(
@@ -1187,6 +1192,7 @@ pub fn run(driver_script: Option<String>) {
             list_customer_payments,
             get_bills_report_data,
             upsert_item,
+            set_item_active,
             import_items,
             adjust_stock,
             create_bill,
@@ -1232,8 +1238,6 @@ pub fn run(driver_script: Option<String>) {
             activate_stock_epoch,
             begin_stock_reconciliation,
             begin_stock_recovery,
-            resolve_stock_source,
-            list_stock_source_resolutions,
             list_stock_reconciliations,
             settle_stock_reconciliation,
             reject_stock_reconciliation,

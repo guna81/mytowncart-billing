@@ -255,24 +255,6 @@ describe("exceptional stock recovery", () => {
     expect((await repo.listStockReconciliations())[0]?.result).toEqual(committed);
     expect(await repo.listOutbox("pending")).toHaveLength(0);
   });
-  it("maps only unusable quarantined evidence, fences feed and retires only captured associations", async () => {
-    const id = await makeItem({ openingStockMilli: 5000 });
-    await repo.recordPublish([{ itemId: id, state: "live", remoteProductId: "marketplace-uuid", remoteVariantId: "variant", contentHash: "hash" }], new Map());
-    const rows: import("../src/types").OutboxRow[] = [1, 2, 3].map((n) => ({ id: n, externalId: "", idempotencyKey: `legacy-${n}`, deltaUnits: 0, reason: "sale", attempts: 0, nextAttemptAt: null, status: "quarantined", rawPayloadJson: "not-json" }));
-    (repo as unknown as { outbox: typeof rows }).outbox = rows;
-    const mapping = { operationId: "map", sourceId: 1, idempotencyKey: "legacy-1", rawPayloadJson: "not-json", action: "map" as const, itemId: id, reason: "Verified source ownership", confirmed: true };
-    const evidence = await repo.resolveStockSource(mapping); expect(evidence.externalId).toBe(`itm_${id}`); expect(evidence.createdAt).toBeTruthy();
-    await expect(repo.resolveStockSource({ ...mapping, reason: "changed" })).rejects.toThrow("changed payload");
-    await expect(repo.resolveStockSource({ ...mapping, operationId: "duplicate" })).rejects.toThrow("already");
-    await expect(repo.applyStockPull(null, "11", [{ externalId: `itm_${id}`, deltaUnits: -1, reason: "online_order", createdAt: "now", epoch: "epoch", sequence: 11 }])).rejects.toThrow("pending");
-    await repo.beginStockReconciliation({ ...state(id, 5), operationId: "settle-map", itemId: id, choice: "local", expectedLocalStockMilli: 5000 });
-    await repo.resolveStockSource({ ...mapping, operationId: "late-map", sourceId: 2, idempotencyKey: "legacy-2" });
-    await repo.resolveStockSource({ ...mapping, operationId: "unknown", sourceId: 3, idempotencyKey: "legacy-3", action: "historical_unknown", itemId: undefined });
-    await repo.settleStockReconciliation("settle-map", { ...state(id, 5), revision: 4, generation: 3 });
-    const history = await repo.listStockSourceResolutions(); expect(history[0]?.retiredBy).toBe("settle-map"); expect(history[1]?.retiredBy).toBeUndefined(); expect(history[2]?.retiredBy).toBeUndefined();
-    expect((await repo.listOutbox("quarantined")).map((r) => r.id)).toEqual([2, 3]);
-    expect((await repo.getItem(id))?.stockMilli).toBe(5000);
-  });
   it("rejects settlement of conflicted intents", async () => {
     const id = await makeItem({ openingStockMilli: 5000 });
     await repo.beginStockReconciliation({ ...state(id, 5), operationId: "conflict", itemId: id, choice: "local", expectedLocalStockMilli: 5000 });
@@ -383,6 +365,21 @@ describe("items", () => {
     const all = await repo.listItems();
     expect(all).toHaveLength(1);
     expect(all[0]!.name).toBe("Updated");
+  });
+
+  it("archives and restores an item and filters by archivedOnly", async () => {
+    const id = await makeItem({ name: "Soap" });
+    expect((await repo.listItems({ activeOnly: true })).map((i) => i.id)).toContain(id);
+    expect((await repo.listItems({ archivedOnly: true })).map((i) => i.id)).not.toContain(id);
+
+    await repo.setItemActive(id, false);
+    expect((await repo.listItems({ activeOnly: true })).map((i) => i.id)).not.toContain(id);
+    expect((await repo.listItems({ archivedOnly: true })).map((i) => i.id)).toContain(id);
+    expect((await repo.listItems({ activeOnly: false })).map((i) => i.id)).toContain(id);
+
+    await repo.setItemActive(id, true);
+    expect((await repo.listItems({ activeOnly: true })).map((i) => i.id)).toContain(id);
+    expect((await repo.listItems({ archivedOnly: true })).map((i) => i.id)).not.toContain(id);
   });
 });
 

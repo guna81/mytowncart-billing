@@ -292,7 +292,11 @@ export class TauriRepository implements BillingRepository {
     let sql = ITEM_SELECT;
     const params: unknown[] = [];
     const where: string[] = [];
-    if (filter?.activeOnly !== false) where.push("i.is_active = 1");
+    if (filter?.archivedOnly) {
+      where.push("i.is_active = 0");
+    } else if (filter?.activeOnly !== false) {
+      where.push("i.is_active = 1");
+    }
     if (filter?.search) {
       where.push(
         `(i.name LIKE ?${params.length + 1} OR i.barcode LIKE ?${params.length + 2} OR i.brand LIKE ?${params.length + 3} OR i.description LIKE ?${params.length + 4})`,
@@ -320,6 +324,15 @@ export class TauriRepository implements BillingRepository {
   async upsertItem(input: ItemInput): Promise<number> {
     const invoke = await this.getInvoke();
     return invoke<number>("upsert_item", { item: itemToPayload(input, new Date().toISOString()) });
+  }
+
+  async setItemActive(id: number, isActive: boolean): Promise<void> {
+    const invoke = await this.getInvoke();
+    await invoke<void>("set_item_active", {
+      itemId: id,
+      isActive,
+      now: new Date().toISOString(),
+    });
   }
 
   async importItems(items: ItemInput[]): Promise<ImportRowOutcome[]> {
@@ -676,12 +689,6 @@ export class TauriRepository implements BillingRepository {
   }
   async beginStockRecovery(input: import("./types").StockRecoveryInput): Promise<import("./types").StockReconciliationIntent> {
     return (await this.getInvoke())("begin_stock_recovery", { input, session: getSessionToken() });
-  }
-  async resolveStockSource(input: import("./types").StockSourceResolutionInput): Promise<import("./types").StockSourceResolution> {
-    return (await this.getInvoke())("resolve_stock_source", { input, session: getSessionToken() });
-  }
-  async listStockSourceResolutions(): Promise<import("./types").StockSourceResolution[]> {
-    return (await this.getInvoke())("list_stock_source_resolutions", {});
   }
   async listOutbox(status?: "pending" | "done" | "quarantined"): Promise<OutboxRow[]> {
     const rows = await this.query(

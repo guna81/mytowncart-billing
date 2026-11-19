@@ -18,10 +18,10 @@ import {
   type ReconcileRow,
 } from "@mytowncart-billing/core";
 import type { PlatformProduct } from "@mytowncart-billing/connector-mytowncart";
-import type { Item, StockReconciliationIntent, StockSourceResolution, OutboxRow } from "@mytowncart-billing/storage";
+import type { Item, StockReconciliationIntent, OutboxRow } from "@mytowncart-billing/storage";
 import { t, type I18nKey } from "../i18n";
 import { runAutoSync, SYNC_LAST_KEY, withReconciliationLock } from "../lib/autoSync";
-import { applyReconciliation, bootstrapStock, exceptionalStockSourceEligible, stockRecoveryConsentMatches, recoverStockShortage, reconcileMappedSource, reconcileFixes, validateReconcileTargets } from "../lib/reconcileFixes";
+import { applyReconciliation, bootstrapStock, stockRecoveryConsentMatches, recoverStockShortage, reconcileFixes, validateReconcileTargets } from "../lib/reconcileFixes";
 import { getConnector } from "../lib/marketplace";
 import {
   loadPlatformOnly,
@@ -121,7 +121,6 @@ export function SyncPanel({
   const [bootstrapRequired, setBootstrapRequired] = useState(false);
   const [uncertainCount, setUncertainCount] = useState(0);
   const [intents, setIntents] = useState<StockReconciliationIntent[]>([]);
-  const [history, setHistory] = useState<StockSourceResolution[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [last, setLast] = useState<LastSync | null>(null);
   const [busy, setBusy] = useState(false);
@@ -136,11 +135,9 @@ export function SyncPanel({
   const refresh = useCallback(async () => {
     const repo = getRepository();
     setPending(await repo.listOutbox("pending"));
-    const resolutions = await repo.listStockSourceResolutions();
-    setHistory(resolutions);
     setItems(await repo.listItems({ activeOnly: false }));
     setIntents(await repo.listStockReconciliations());
-    setQuarantined((await repo.listOutbox("quarantined")).filter((source) => !resolutions.some((entry) => entry.sourceId === source.id && (entry.action === "historical_unknown" || !!entry.retiredBy))));
+    setQuarantined(await repo.listOutbox("quarantined"));
     setUncertainCount((await repo.listStockReconciliations()).filter((intent) => intent.status === "pending").length);
     setBootstrapRequired(await repo.getAppSetting("sync.stock_bootstrap_required") === "true" || !(await repo.getAppSetting("sync.stock_epoch")));
     setLast(await loadLastSync());
@@ -273,7 +270,7 @@ export function SyncPanel({
 
   return (
     <div className="space-y-4" data-testid="sync-panel">
-      <StockRecoverySection sources={quarantined} intents={intents} history={history} showHistory={part === "sync"} items={items} disabled={busy || isSyncing || settling} onRefresh={async () => { bumpDataVersion(); await refresh(); }} />
+      <StockRecoverySection intents={intents} showHistory={part === "sync"} items={items} disabled={busy || isSyncing || settling} onRefresh={async () => { bumpDataVersion(); await refresh(); }} />
       {(quarantined.length > 0 || uncertainCount > 0) && (
         <section className="rounded border border-amber-400 bg-amber-50 p-4 text-amber-950" role="status" data-testid="sync-quarantined">
           <p>{t("sync.quarantined", { count: quarantined.length })}</p>
@@ -517,14 +514,13 @@ export function SyncPanel({
   );
 }
 
-function StockRecoverySection({ sources, intents, history, showHistory, items, disabled, onRefresh }: {
-  sources: OutboxRow[]; intents: StockReconciliationIntent[]; history: StockSourceResolution[]; showHistory: boolean;
+function StockRecoverySection({ intents, showHistory, items, disabled, onRefresh }: {
+  intents: StockReconciliationIntent[]; showHistory: boolean;
   items: Item[]; disabled: boolean; onRefresh: () => Promise<void>;
 }) {
   const [reason, setReason] = useState("");
   const [confirmedSnapshot, setConfirmedSnapshot] = useState<string | null>(null);
-  const [itemId, setItemId] = useState("");
-  const reviewedSnapshot = JSON.stringify({ sources, intents, history, items, itemId, reason });
+  const reviewedSnapshot = JSON.stringify({ intents, items, reason });
   const confirmed = stockRecoveryConsentMatches(confirmedSnapshot, reviewedSnapshot);
   useEffect(() => { if (confirmedSnapshot !== reviewedSnapshot) setConfirmedSnapshot(null); }, [confirmedSnapshot, reviewedSnapshot]);
   const [busy, setBusy] = useState(false);
@@ -536,11 +532,9 @@ function StockRecoverySection({ sources, intents, history, showHistory, items, d
     finally { setBusy(false); await onRefresh(); }
   };
   const reviews = intents.filter((entry) => entry.status === "needs_review" && !intents.some((child) => child.parentOperationId === entry.operationId && child.status !== "conflict"));
-  if (!sources.length && !reviews.length && !history.length && !intents.length) return null;
+  if (!reviews.length && !intents.length) return null;
   const blocked = disabled || busy || !confirmed || !reason.trim();
-  // Only history (e.g. completed setup baselines) and nothing to decide: no form, no warning.
-  const actionable = sources.length > 0 || reviews.length > 0;
-  // Retained history is shown in Settings only; elsewhere render just the actionable form.
+  const actionable = reviews.length > 0;
   if (!actionable && !showHistory) return null;
   return <section className={actionable ? "space-y-3 rounded border border-amber-400 bg-amber-50 p-4" : "space-y-3 rounded border border-gray-200 bg-white p-4"} data-testid="stock-recovery">
     {actionable && <>
@@ -549,17 +543,6 @@ function StockRecoverySection({ sources, intents, history, showHistory, items, d
     <label className="block">{t("sync.recovery_reason")}<textarea className="block w-full rounded border p-2" value={reason} onChange={(event) => setReason(event.target.value)} /></label>
     <label className="flex items-center gap-2"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmedSnapshot(event.target.checked ? reviewedSnapshot : null)} />{t("sync.recovery_confirm")}</label>
     {error && <p role="alert" className="text-red-700">{error}</p>}</>}
-    {sources.some(exceptionalStockSourceEligible) && <label className="block">{t("sync.recovery_item")}<select className="ml-2 max-w-full rounded border p-2" value={itemId} onChange={(event) => setItemId(event.target.value)}><option value="">—</option>{items.filter((item) => item.remoteProductId !== null).map((item) => <option key={item.id} value={item.id}>{item.name} (itm_{item.id})</option>)}</select></label>}
-    {sources.map((source) => {
-      const mapped = history.find((entry) => entry.sourceId === source.id && entry.action === "map" && !entry.retiredBy);
-      const mappedItem = items.find((item) => item.id === mapped?.itemId);
-      const resolve = (action: "map" | "historical_unknown") => run(() => getRepository().resolveStockSource({ operationId: crypto.randomUUID(), sourceId: source.id, idempotencyKey: source.idempotencyKey, rawPayloadJson: source.rawPayloadJson!, action, ...(action === "map" ? { itemId: Number(itemId) } : {}), reason, confirmed }));
-      return <div key={source.id} className="space-y-2 rounded border p-3">
-        <p className="break-all">{source.idempotencyKey}</p>
-        <details><summary>{t("sync.recovery_evidence")}</summary><pre className="whitespace-pre-wrap break-all text-xs">{source.rawPayloadJson}</pre></details>
-        {mapped ? <><p>{t("sync.recovery_mapped", { id: mapped.itemId ?? "" })}</p><p>{mappedItem?.name}: {(mappedItem?.stockMilli ?? 0) / 1000}</p><button className={btnSecondary} disabled={blocked || !mappedItem} onClick={() => void run(() => reconcileMappedSource(getRepository(), getConnector(), { itemId: mappedItem!.id, expectedLocalStockMilli: mappedItem!.stockMilli, reason, confirmed }))}>{t("reconcile.keep_mine")}</button></> : !exceptionalStockSourceEligible(source) ? <p>{t("sync.review_required")}</p> : <div className="flex flex-wrap gap-2"><button className={btnSecondary} disabled={blocked || !itemId || source.rawPayloadJson === undefined} onClick={() => void resolve("map")}>{t("sync.recovery_map")}</button><button className={btnSecondary} disabled={blocked || source.rawPayloadJson === undefined} onClick={() => void resolve("historical_unknown")}>{t("sync.recovery_unknown")}</button></div>}
-      </div>;
-    })}
     {reviews.map((intent) => {
       const item = items.find((entry) => entry.id === intent.itemId);
       const deltaMilli = (intent.review?.subsequentDeltaMilli ?? 0) + (item ? item.stockMilli - (intent.review?.currentStockMilli ?? item.stockMilli) : 0);
@@ -573,7 +556,6 @@ function StockRecoverySection({ sources, intents, history, showHistory, items, d
       </div>;
     })}
     {showHistory && intents.length > 0 && <details><summary>{t("sync.recovery_history")}</summary><ul className="space-y-2">{intents.map((intent) => <li className="break-all text-sm" key={intent.operationId}>{intent.operationId} · {intent.parentOperationId ?? "—"} · {intent.status} · {intent.reason ?? "—"}<pre className="whitespace-pre-wrap break-all">{JSON.stringify({ request: { quantity: intent.stockUnits, revision: intent.revision, generation: intent.generation }, capturedStockMilli: intent.capturedStockMilli, sourceBoundary: intent.sourceBoundary, result: intent.result, review: intent.review }, null, 2)}</pre></li>)}</ul></details>}
-    {showHistory && history.length > 0 && <details><summary>{t("sync.recovery_history")}</summary><ul className="space-y-2">{history.map((entry) => <li key={entry.operationId} className="break-all text-sm">{entry.operationId} · {entry.action === "historical_unknown" ? t("sync.recovery_unknown") : t("sync.recovery_map")} · {entry.externalId ?? entry.itemId} · {entry.reason} · {entry.retiredBy ?? "—"}<pre className="whitespace-pre-wrap break-all">{entry.rawPayloadJson}</pre></li>)}</ul></details>}
   </section>;
 }
 

@@ -24,6 +24,7 @@ import { triggerImmediateSync } from "../lib/autoSync";
 import { loadConnection } from "../lib/connection";
 import { getConnector } from "../lib/marketplace";
 import { getRepository } from "../lib/repository";
+import { confirmAction } from "../lib/shell";
 import { useAppStore } from "../store/appStore";
 import type { SharedCatalogEntry } from "@mytowncart-billing/connector-mytowncart";
 import { SharedCatalogPicker } from "./itemForm/SharedCatalogPicker";
@@ -404,6 +405,22 @@ export function ItemFormScreen() {
       setError(t("common.error", { message: err instanceof Error ? err.message : String(err) }));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const onToggleArchiveFromForm = async () => {
+    if (editId === null) return;
+    const confirmMsg = isActive
+      ? t("items.archive_confirm", { name: name.trim() || t("items.this_item") })
+      : t("items.restore_confirm", { name: name.trim() || t("items.this_item") });
+    if (!(await confirmAction(confirmMsg))) return;
+    try {
+      await getRepository().setItemActive(editId, !isActive);
+      bumpDataVersion();
+      triggerImmediateSync();
+      navigate("/items");
+    } catch (err) {
+      setError(t("common.error", { message: err instanceof Error ? err.message : String(err) }));
     }
   };
 
@@ -1102,22 +1119,40 @@ export function ItemFormScreen() {
         ) : null}
 
         {/* Real Sticky Footer: same width, border-top, matches card, no overlapping */}
-        <div className="sticky bottom-0 z-20 rounded-xl border border-gray-200 bg-white/95 px-6 py-4 backdrop-blur-xs flex items-center justify-end gap-3 shadow-sm">
-          <button
-            type="button"
-            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs"
-            onClick={() => navigate("/items")}
-          >
-            {t("common.cancel")}
-          </button>
-          <button
-            type="submit"
-            data-testid="item-save"
-            disabled={busy}
-            className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-xs"
-          >
-            {t("common.save")}
-          </button>
+        <div className="sticky bottom-0 z-20 rounded-xl border border-gray-200 bg-white/95 px-6 py-4 backdrop-blur-xs flex items-center justify-between gap-3 shadow-sm">
+          <div>
+            {editId !== null ? (
+              <button
+                type="button"
+                className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors shadow-2xs border ${
+                  isActive
+                    ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                    : "border-green-300 bg-green-50 text-green-800 hover:bg-green-100"
+                }`}
+                onClick={() => void onToggleArchiveFromForm()}
+                data-testid="item-form-toggle-archive"
+              >
+                {isActive ? t("items.action_archive") : t("items.action_restore")}
+              </button>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs"
+              onClick={() => navigate("/items")}
+            >
+              {t("common.cancel")}
+            </button>
+            <button
+              type="submit"
+              data-testid="item-save"
+              disabled={busy}
+              className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-xs"
+            >
+              {t("common.save")}
+            </button>
+          </div>
         </div>
       </form>
     </div>

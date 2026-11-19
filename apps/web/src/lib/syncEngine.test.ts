@@ -46,10 +46,13 @@ function fakeConnector(overrides: ConnectorOverrides = {}): MarketplaceConnector
         })),
       );
     },
-    pullStock: () => Promise.resolve({ moves: [], nextCursor: 0, epoch: "e1" }),
+    pullStock: () => Promise.resolve({ moves: [], nextCursor: 0, epoch: "e1", watermark: 0 }),
     listRemoteItems: (): Promise<RemoteItem[]> => Promise.resolve([]),
     listPlatformProducts: () => Promise.resolve([]),
     adoptProducts: () => Promise.resolve([]),
+    stockSnapshot: () => Promise.resolve({ epoch: "e1", watermark: 0, items: [] }),
+    reconcileStock: () => Promise.reject(new Error("unused")),
+    stockReconciliation: () => Promise.resolve(null),
   };
   return { ...base, ...rest };
 }
@@ -157,7 +160,7 @@ describe("runSync", () => {
     const connector = fakeConnector({
       listCategories: () => { calls.push("categories"); return Promise.resolve([]); },
       listRemoteItems: () => { calls.push("catalog"); return Promise.resolve([]); },
-      pullStock: () => { calls.push("stock pull"); return Promise.resolve({ moves: [], nextCursor: 0, epoch: "e1" }); },
+      pullStock: () => { calls.push("stock pull"); return Promise.resolve({ moves: [], nextCursor: 0, epoch: "e1", watermark: 0 }); },
     });
     await runSync({ repo, connector, now, isApproved: () => true }, { stockOnly: true, pullStock: false });
     expect(calls).toEqual([]);
@@ -168,7 +171,7 @@ describe("runSync", () => {
     let pulled = false;
     const connector = fakeConnector({
       listCategories: () => Promise.reject(new Error("offline")),
-      pullStock: () => { pulled = true; return Promise.resolve({ moves: [], nextCursor: 0, epoch: "e1" }); },
+      pullStock: () => { pulled = true; return Promise.resolve({ moves: [], nextCursor: 0, epoch: "e1", watermark: 0 }); },
     });
     const result = await runSync({ repo, connector, now, isApproved: () => true });
     expect(pulled).toBe(true);
@@ -184,8 +187,8 @@ describe("runSync", () => {
       pullStock: (cursor, options) => {
         calls.push({ cursor, continuation: options?.continuation });
         return Promise.resolve(cursor === 0
-          ? { moves: [{ id: 1, sequence: 1, revision: 1, externalId: `itm_${itemId}`, deltaUnits: -1, reason: "online_order", createdAt: now().toISOString() }], nextCursor: 1, epoch: "e1", hasMore: true, continuation: "next" }
-          : { moves: [{ id: 2, sequence: 2, revision: 1, externalId: `itm_${itemId}`, deltaUnits: -1, reason: "online_order", createdAt: now().toISOString() }], nextCursor: 2, epoch: "e1", hasMore: false });
+          ? { moves: [{ id: 1, sequence: 1, revision: 1, epoch: "e1", externalId: `itm_${itemId}`, deltaUnits: -1, reason: "online_order", createdAt: now().toISOString() }], nextCursor: 1, epoch: "e1", watermark: 1, hasMore: true, continuation: "next" }
+          : { moves: [{ id: 2, sequence: 2, revision: 1, epoch: "e1", externalId: `itm_${itemId}`, deltaUnits: -1, reason: "online_order", createdAt: now().toISOString() }], nextCursor: 2, epoch: "e1", watermark: 2, hasMore: false });
       },
     });
     const result = await runSync({ repo, connector, now, isApproved: () => true }, { stockOnly: true });
@@ -200,6 +203,16 @@ describe("runSync", () => {
     const result = await runSync({ repo, connector, now, isApproved: () => true }, { stockOnly: true });
     expect(result.retryAfterSeconds).toBe(37);
     expect(result.problems).toEqual([]);
+  });
+
+  it("marks stock bootstrap required when stock pull encounters a 409 conflict or epoch mismatch", async () => {
+    const { repo } = await fixture();
+    const connector = fakeConnector({
+      pullStock: () => Promise.reject(new MarketplaceError("bootstrap_required", "A coherent snapshot is required for this feed epoch.", 409)),
+    });
+    const result = await runSync({ repo, connector, now, isApproved: () => true }, { stockOnly: true });
+    expect(result.problems[0]).toContain("A coherent snapshot is required for this feed epoch");
+    expect(await repo.getAppSetting("sync.stock_bootstrap_required")).toBe("true");
   });
 
   it("surfaces a marketplace clamp even when the movement is accepted", async () => {
@@ -358,7 +371,7 @@ describe("runSync", () => {
       },
       pullStock: () => {
         pulls += 1;
-        return Promise.resolve({ moves: [], nextCursor: 0, epoch: "e1" });
+        return Promise.resolve({ moves: [], nextCursor: 0, epoch: "e1", watermark: 0 });
       },
     });
     await runSync({ repo, connector, now, isApproved: () => true }, { details: false });
@@ -537,7 +550,7 @@ describe("runSync", () => {
         connector: fakeConnector({
           pullStock: (_c, opts) => {
             pullStockOpts = opts;
-            return Promise.resolve({ moves: [], nextCursor: 0, epoch: "e1" });
+            return Promise.resolve({ moves: [], nextCursor: 0, epoch: "e1", watermark: 0 });
           },
         }),
         now,

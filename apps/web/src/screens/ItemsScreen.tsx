@@ -13,10 +13,11 @@ import {
 import type { Category, Item } from "@mytowncart-billing/storage";
 import { EmptyState, PageHeader } from "../components/ui";
 import { t, type I18nKey } from "../i18n";
-import { setAutoSyncSetting } from "../lib/autoSync";
+import { setAutoSyncSetting, triggerImmediateSync } from "../lib/autoSync";
 import { currentToken } from "../lib/connection";
 import { getItemPublishStatus } from "../lib/publishService";
 import { getRepository } from "../lib/repository";
+import { confirmAction } from "../lib/shell";
 import { effectiveLowStockThreshold } from "../lib/stockAlerts";
 import { useAppStore } from "../store/appStore";
 
@@ -74,6 +75,7 @@ export function ItemsScreen() {
 
   const [items, setItems] = useState<Item[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [statusFilter, setStatusFilter] = useState<"active" | "archived" | "all">("active");
 
   const [search, setSearch] = useState("");
   const [scan, setScan] = useState("");
@@ -86,13 +88,45 @@ export function ItemsScreen() {
 
   const refresh = useCallback(async () => {
     const repo = getRepository();
+    const filter = {
+      search: search || undefined,
+      activeOnly: statusFilter === "active" ? true : undefined,
+      archivedOnly: statusFilter === "archived" ? true : undefined,
+    };
+    if (statusFilter === "all") {
+      filter.activeOnly = false;
+    }
     const [fetchedItems, fetchedCats] = await Promise.all([
-      repo.listItems({ search: search || undefined }),
+      repo.listItems(filter),
       repo.listCategories(),
     ]);
     setItems(fetchedItems);
     setCategories(fetchedCats);
-  }, [search]);
+  }, [search, statusFilter]);
+
+  const onToggleArchive = async (item: Item) => {
+    const isArchiving = item.isActive;
+    const confirmMsg = isArchiving
+      ? t("items.archive_confirm", { name: item.name })
+      : t("items.restore_confirm", { name: item.name });
+
+    if (!(await confirmAction(confirmMsg))) return;
+
+    try {
+      await getRepository().setItemActive(item.id, !isArchiving);
+      bumpDataVersion();
+      triggerImmediateSync();
+      setScanNotice(null);
+      setImportMsg(
+        isArchiving
+          ? t("items.archive_success", { name: item.name })
+          : t("items.restore_success", { name: item.name }),
+      );
+      void refresh();
+    } catch (err) {
+      setImportErrors([{ row: 0, message: err instanceof Error ? err.message : String(err) }]);
+    }
+  };
 
   useEffect(() => {
     void refresh();
@@ -267,32 +301,73 @@ export function ItemsScreen() {
         }
       />
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <input
-          className="w-full max-w-sm rounded border border-gray-300 px-3 py-2 text-sm"
-          placeholder={t("items.search_ph")}
-          data-testid="items-search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <input
-          className="w-full max-w-xs rounded border border-gray-300 px-3 py-2 font-mono text-sm"
-          placeholder={t("items.scan_ph")}
-          data-testid="items-scan"
-          value={scan}
-          onChange={(e) => setScan(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              void onScanLookup(scan);
-            }
-          }}
-        />
-        {scanNotice ? (
-          <span className="text-sm text-amber-800" data-testid="items-scan-notice">
-            {scanNotice}
-          </span>
-        ) : null}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            className="w-full max-w-sm rounded border border-gray-300 px-3 py-2 text-sm"
+            placeholder={t("items.search_ph")}
+            data-testid="items-search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <input
+            className="w-full max-w-xs rounded border border-gray-300 px-3 py-2 font-mono text-sm"
+            placeholder={t("items.scan_ph")}
+            data-testid="items-scan"
+            value={scan}
+            onChange={(e) => setScan(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void onScanLookup(scan);
+              }
+            }}
+          />
+          {scanNotice ? (
+            <span className="text-sm text-amber-800" data-testid="items-scan-notice">
+              {scanNotice}
+            </span>
+          ) : null}
+        </div>
+
+        <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-xs font-medium" data-testid="items-status-tabs">
+          <button
+            type="button"
+            className={`rounded-md px-3 py-1.5 transition-colors ${
+              statusFilter === "active"
+                ? "bg-white text-gray-900 shadow-xs font-semibold"
+                : "text-gray-600 hover:text-gray-900"
+            }`}
+            onClick={() => setStatusFilter("active")}
+            data-testid="items-filter-active"
+          >
+            {t("items.filter_active")}
+          </button>
+          <button
+            type="button"
+            className={`rounded-md px-3 py-1.5 transition-colors ${
+              statusFilter === "archived"
+                ? "bg-white text-gray-900 shadow-xs font-semibold"
+                : "text-gray-600 hover:text-gray-900"
+            }`}
+            onClick={() => setStatusFilter("archived")}
+            data-testid="items-filter-archived"
+          >
+            {t("items.filter_archived")}
+          </button>
+          <button
+            type="button"
+            className={`rounded-md px-3 py-1.5 transition-colors ${
+              statusFilter === "all"
+                ? "bg-white text-gray-900 shadow-xs font-semibold"
+                : "text-gray-600 hover:text-gray-900"
+            }`}
+            onClick={() => setStatusFilter("all")}
+            data-testid="items-filter-all"
+          >
+            {t("items.filter_all")}
+          </button>
+        </div>
       </div>
 
       {importMsg ? <p className="mb-2 text-sm text-green-700">{importMsg}</p> : null}
@@ -309,24 +384,26 @@ export function ItemsScreen() {
 
       {items.length === 0 ? (
         <EmptyState
-          title={t("items.empty")}
-          hint={t("items.empty_hint")}
+          title={statusFilter === "archived" ? t("items.empty_archived") : t("items.empty")}
+          hint={statusFilter === "archived" ? "" : t("items.empty_hint")}
           action={
-            <div className="flex flex-wrap gap-3">
-              <Link
-                to="/items/new"
-                className="rounded-md bg-blue-600 px-3.5 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
-              >
-                {t("items.add_first")}
-              </Link>
-              <button
-                type="button"
-                className="rounded-md border border-gray-300 bg-white px-3.5 py-1.5 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50"
-                onClick={() => fileRef.current?.click()}
-              >
-                {t("items.import_csv")}
-              </button>
-            </div>
+            statusFilter === "archived" ? null : (
+              <div className="flex flex-wrap gap-3">
+                <Link
+                  to="/items/new"
+                  className="rounded-md bg-blue-600 px-3.5 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+                >
+                  {t("items.add_first")}
+                </Link>
+                <button
+                  type="button"
+                  className="rounded-md border border-gray-300 bg-white px-3.5 py-1.5 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50"
+                  onClick={() => fileRef.current?.click()}
+                >
+                  {t("items.import_csv")}
+                </button>
+              </div>
+            )
           }
         />
       ) : (
@@ -354,7 +431,7 @@ export function ItemsScreen() {
               return (
                 <tr
                   key={item.id}
-                  className="border-b border-gray-100 last:border-0"
+                  className={`border-b border-gray-100 last:border-0 ${item.isActive ? "" : "bg-gray-50/60"}`}
                   data-testid={`item-row-${item.id}`}
                 >
                   <td className="px-3 py-2">
@@ -366,8 +443,16 @@ export function ItemsScreen() {
                   </td>
                   <td className="px-3 py-2 font-medium">
                     <div className="flex items-center gap-1.5">
-                      <span>{item.name}</span>
-                      {threshold > 0 && isLowStock(item.stockMilli, threshold) ? (
+                      <span className={item.isActive ? "" : "text-gray-500"}>{item.name}</span>
+                      {!item.isActive ? (
+                        <span
+                          className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600 font-normal border border-gray-200"
+                          data-testid={`item-archived-badge-${item.id}`}
+                        >
+                          {t("items.status_archived")}
+                        </span>
+                      ) : null}
+                      {item.isActive && threshold > 0 && isLowStock(item.stockMilli, threshold) ? (
                         <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
                           {t("items.low_stock")}
                         </span>
@@ -428,6 +513,16 @@ export function ItemsScreen() {
                       >
                         {t("common.edit")}
                       </Link>
+                      <button
+                        type="button"
+                        onClick={() => void onToggleArchive(item)}
+                        className={`text-sm font-medium hover:underline ${
+                          item.isActive ? "text-amber-700" : "text-green-700"
+                        }`}
+                        data-testid={`item-toggle-archive-${item.id}`}
+                      >
+                        {item.isActive ? t("items.action_archive") : t("items.action_restore")}
+                      </button>
                     </div>
                   </td>
                 </tr>

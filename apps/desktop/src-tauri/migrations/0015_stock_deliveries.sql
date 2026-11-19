@@ -1,7 +1,4 @@
--- Pre-upgrade requests may already have committed under an unknown retry key.
-UPDATE outbox SET status = 'quarantined' WHERE status = 'pending';
 ALTER TABLE outbox ADD COLUMN quarantine_reason TEXT;
-UPDATE outbox SET quarantine_reason = 'Pre-upgrade stock outcome unknown; explicit reconciliation required' WHERE status = 'quarantined';
 CREATE TABLE stock_deliveries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   outbox_id INTEGER NOT NULL UNIQUE REFERENCES outbox(id),

@@ -96,6 +96,7 @@ export interface CreatedBill {
 export interface ItemFilter {
   search?: string;
   activeOnly?: boolean;
+  archivedOnly?: boolean;
 }
 
 export interface BillFilter {
@@ -120,6 +121,7 @@ export interface BillingRepository {
   getItem(id: number): Promise<Item | null>;
   findItemByBarcode(barcode: string): Promise<Item | null>;
   upsertItem(input: ItemInput): Promise<number>;
+  setItemActive(id: number, isActive: boolean): Promise<void>;
   /** CSV bulk import with per-row isolation: one bad row never fails the batch. */
   importItems(items: ItemInput[]): Promise<ImportRowOutcome[]>;
   /**
@@ -184,8 +186,6 @@ export interface BillingRepository {
   listStockReconciliations(): Promise<import("./types").StockReconciliationIntent[]>;
   settleStockReconciliation(operationId: string, result: import("./types").StockProtocolState): Promise<import("./types").StockReconciliationIntent>;
   beginStockRecovery(input: import("./types").StockRecoveryInput): Promise<import("./types").StockReconciliationIntent>;
-  resolveStockSource(input: import("./types").StockSourceResolutionInput): Promise<import("./types").StockSourceResolution>;
-  listStockSourceResolutions(): Promise<import("./types").StockSourceResolution[]>;
   rejectStockReconciliation(operationId: string, detail: string): Promise<void>;
   /** Record push results: `done` is terminal, `retry` schedules the next try. */
   recordOutboxResults(

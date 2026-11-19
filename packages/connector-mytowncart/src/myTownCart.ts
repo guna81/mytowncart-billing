@@ -625,15 +625,15 @@ export class MyTownCartConnector implements MarketplaceConnector {
         deltaUnits: m.delta,
         reason: m.reason,
         createdAt: m.created_at,
-        ...(body.epoch === undefined ? {} : { epoch: body.epoch }),
-        ...(m.sequence === undefined ? {} : { sequence: m.sequence }),
-        ...(m.revision === undefined ? {} : { revision: m.revision }),
+        epoch: body.epoch!,
+        sequence: m.sequence!,
+        revision: m.revision!,
       })),
       nextCursor: body.next_cursor,
       ...(body.has_more === undefined ? {} : { hasMore: body.has_more }),
       ...(body.continuation === undefined ? {} : { continuation: body.continuation }),
-      ...(body.epoch === undefined ? {} : { epoch: body.epoch }),
-      ...(body.watermark === undefined ? {} : { watermark: body.watermark }),
+      epoch: body.epoch!,
+      watermark: body.watermark!,
     };
   }
 

@@ -474,6 +474,19 @@ pub fn upsert_item(conn: &mut Connection, p: &ItemPayload) -> RepoResult<i64> {
     Ok(id)
 }
 
+pub fn set_item_active(conn: &Connection, item_id: i64, is_active: bool, now: &str) -> RepoResult<()> {
+    let affected = conn
+        .execute(
+            "UPDATE items SET is_active = ?2, updated_at = ?3 WHERE id = ?1",
+            rusqlite::params![item_id, is_active as i64, now],
+        )
+        .map_err(err)?;
+    if affected == 0 {
+        return Err(format!("no item with id {item_id}"));
+    }
+    Ok(())
+}
+
 /// Persist one item's photo file name + its hash (B2/D9). The bytes were
 /// already written by `media::store_photo`; the file is removed again if the
 /// row update fails so no orphan is left behind.
@@ -3893,6 +3906,40 @@ mod tests {
         assert_eq!(desc2, "Updated description");
         assert_eq!(brand2, "ChocoDelight Reserve");
         assert_eq!(attrs2, r#"{"Weight":"100g","Cocoa":"85%"}"#);
+    }
+
+    #[test]
+    fn set_item_active_archives_and_restores() {
+        let (_dir, mut conn) = setup();
+        let payload = ItemPayload {
+            id: None,
+            name: "Test Soap".to_string(),
+            barcode: "123456".to_string(),
+            category_id: None,
+            unit_kind: "count".to_string(),
+            price_paise: 5000,
+            mrp_paise: 5000,
+            tax_rate_bp: 0,
+            opening_stock_milli: 10_000,
+            is_active: true,
+            hsn_code: "".to_string(),
+            cost_price_paise: 3000,
+            description: "".to_string(),
+            brand: "".to_string(),
+            custom_attributes: "".to_string(),
+            variant_group: "".to_string(),
+            catalog_entry_id: None,
+            variant_options: "".to_string(),
+            now: "2026-11-04T10:00:00Z".to_string(),
+        };
+        let id = upsert_item(&mut conn, &payload).unwrap();
+        set_item_active(&conn, id, false, "2026-11-04T11:00:00Z").unwrap();
+        let active: i64 = conn.query_row("SELECT is_active FROM items WHERE id = ?1", [id], |r| r.get(0)).unwrap();
+        assert_eq!(active, 0);
+
+        set_item_active(&conn, id, true, "2026-11-04T12:00:00Z").unwrap();
+        let active: i64 = conn.query_row("SELECT is_active FROM items WHERE id = ?1", [id], |r| r.get(0)).unwrap();
+        assert_eq!(active, 1);
     }
 
     #[test]

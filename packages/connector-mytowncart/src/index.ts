@@ -148,8 +148,8 @@ export interface StockFeed {
   nextCursor: number;
   hasMore?: boolean;
   continuation?: string | null;
-  epoch?: string;
-  watermark?: number;
+  epoch: string;
+  watermark: number;
 }
 
 export interface StockPushResult {
@@ -165,9 +165,9 @@ export interface StockPushResult {
 
 export interface StockPull {
   id: number;
-  epoch?: string;
-  sequence?: number;
-  revision?: number;
+  epoch: string;
+  sequence: number;
+  revision: number;
   externalId: string;
   deltaUnits: number;
   reason: "online_order" | "order_cancel" | "adjustment" | "import";
@@ -260,9 +260,9 @@ export interface MarketplaceConnector {
     opts?: StockPullOptions,
   ): Promise<StockFeed>;
   /** Links the items (creating their generation fence) and returns their epoch/fence. */
-  stockSnapshot?(externalIds: string[]): Promise<StockSnapshot>;
-  reconcileStock?(request: StockReconcileRequest): Promise<StockReconcileResult>;
-  stockReconciliation?(operationId: string): Promise<StockReconcileResult | null>;
+  stockSnapshot(externalIds: string[]): Promise<StockSnapshot>;
+  reconcileStock(request: StockReconcileRequest): Promise<StockReconcileResult>;
+  stockReconciliation(operationId: string): Promise<StockReconcileResult | null>;
   listRemoteItems(): Promise<RemoteItem[]>;
   /** The seller's products created on MyTownCart itself, for a read-only list. */
   listPlatformProducts(): Promise<PlatformProduct[]>;

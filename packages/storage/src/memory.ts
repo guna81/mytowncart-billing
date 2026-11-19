@@ -104,10 +104,8 @@ export class MemoryRepository implements BillingRepository {
   private stockStates = new Map<string, import("./types").StockProtocolState>();
   private stockIntents = new Map<string, import("./types").StockReconciliationIntent>();
   private stockRequests = new Map<string, import("./types").StockReconciliationInput>();
-  private sourceResolutions = new Map<string, import("./types").StockSourceResolution>();
-  private capturedSources = new Map<string, string[]>();
   private unresolvedStock(externalId?: string): boolean {
-    return [...this.stockIntents.values()].some((i) => (!externalId || i.externalId === externalId) && (i.status === "pending" || i.status === "needs_review")) || [...this.sourceResolutions.values()].some((r) => r.externalId && (!externalId || r.externalId === externalId) && !r.retiredBy);
+    return [...this.stockIntents.values()].some((i) => (!externalId || i.externalId === externalId) && (i.status === "pending" || i.status === "needs_review"));
   }
   private stockResults = new Map<string, import("./types").StockProtocolState>();
   private deliveries = new Map<number, import("./types").StockDeliveryClaim & { sourceId: number; externalId: string; status: "pending" | "done" | "quarantined"; claimUntil: string | null; nextAttemptAt: string | null }>();
@@ -176,7 +174,11 @@ export class MemoryRepository implements BillingRepository {
 
   async listItems(filter?: ItemFilter): Promise<Item[]> {
     let rows = [...this.items.values()];
-    if (filter?.activeOnly !== false) rows = rows.filter((i) => i.isActive);
+    if (filter?.archivedOnly) {
+      rows = rows.filter((i) => !i.isActive);
+    } else if (filter?.activeOnly !== false) {
+      rows = rows.filter((i) => i.isActive);
+    }
     if (filter?.search) {
       const q = filter.search.toLowerCase();
       rows = rows.filter(
@@ -282,6 +284,13 @@ export class MemoryRepository implements BillingRepository {
 
   async upsertItem(input: ItemInput): Promise<number> {
     return this.insertOrUpdateItem(input);
+  }
+
+  async setItemActive(id: number, isActive: boolean): Promise<void> {
+    const item = this.items.get(id);
+    if (!item) throw new Error(`no item with id ${id}`);
+    item.isActive = isActive;
+    item.updatedAt = localIsoTimestamp(new Date());
   }
 
   async importItems(items: ItemInput[]): Promise<ImportRowOutcome[]> {
@@ -797,7 +806,7 @@ export class MemoryRepository implements BillingRepository {
     if (!Number.isFinite(Date.parse(now)) || !Number.isFinite(Date.parse(claimUntil)) || claimUntil <= now) throw new Error("invalid claim expiry");
     for (const source of this.outbox) {
       if (source.status !== "pending") continue;
-      if (this.unresolvedStock(source.externalId) || [...this.sourceResolutions.values()].some((r) => r.externalId === source.externalId && !r.retiredBy)) continue;
+      if (this.unresolvedStock(source.externalId)) continue;
       if (this.outbox.some((r) => r.id < source.id && r.externalId === source.externalId && r.status !== "done")) continue;
       if (source.nextAttemptAt && source.nextAttemptAt > now) continue;
       let delivery = [...this.deliveries.values()].find((d) => d.sourceId === source.id);
@@ -864,11 +873,7 @@ export class MemoryRepository implements BillingRepository {
     const intent: import("./types").StockReconciliationIntent = { ...input, capturedStockMilli: item.stockMilli, sourceBoundary: Math.max(0, ...this.outbox.map((r) => r.id)), status: "pending" };
     this.stockIntents.set(input.operationId, intent);
     this.stockRequests.set(input.operationId, { ...input });
-    this.captureStockSources(intent);
     return structuredClone(intent);
-  }
-  private captureStockSources(intent: import("./types").StockReconciliationIntent): void {
-    this.capturedSources.set(intent.operationId, [...this.sourceResolutions.values()].filter((r) => r.externalId === intent.externalId && !r.retiredBy && r.sourceId <= intent.sourceBoundary).map((r) => r.operationId));
   }
   async beginStockRecovery(input: import("./types").StockRecoveryInput): Promise<import("./types").StockReconciliationIntent> {
     this.validateStockState(input);
@@ -889,30 +894,9 @@ export class MemoryRepository implements BillingRepository {
     const parentTarget = committed.stockUnits * 1000 + item.stockMilli - parent.capturedStockMilli;
     if (!Number.isSafeInteger(parentTarget)) throw new Error("stock rebase overflow");
     const intent: import("./types").StockReconciliationIntent = { ...request, parentOperationId, reason, actor: null, createdAt: new Date().toISOString(), approvedShortageMilli: Math.max(0, -parentTarget), capturedStockMilli: item.stockMilli, sourceBoundary: Math.max(0, ...this.outbox.map((r) => r.id)), status: "pending" };
-    this.stockRequests.set(input.operationId, { ...request }); this.stockIntents.set(input.operationId, intent); this.captureStockSources(intent);
+    this.stockRequests.set(input.operationId, { ...request }); this.stockIntents.set(input.operationId, intent);
     return structuredClone(intent);
   }
-  async resolveStockSource(input: import("./types").StockSourceResolutionInput): Promise<import("./types").StockSourceResolution> {
-    if (!input.operationId.trim() || !input.reason.trim() || !input.confirmed || !["map", "historical_unknown"].includes(input.action)) throw new Error("explicit reason and confirmation required");
-    const prior = this.sourceResolutions.get(input.operationId);
-    if (prior) {
-      const { actor: _actor, createdAt: _created, externalId: _external, retiredBy: _retired, ...original } = prior;
-      if (Object.keys(original).length !== Object.keys(input).length || Object.keys(input).some((k) => input[k as keyof typeof input] !== original[k as keyof typeof original])) throw new Error("source resolution operation key reused with changed payload");
-      return structuredClone(prior);
-    }
-    const source = this.outbox.find((r) => r.id === input.sourceId);
-    if (!source || source.status !== "quarantined" || source.idempotencyKey !== input.idempotencyKey || source.rawPayloadJson !== input.rawPayloadJson) throw new Error("source evidence changed or is not quarantined");
-    if ([...this.deliveries.values()].some((d) => d.sourceId === input.sourceId)) throw new Error("delivery evidence requires ordinary stock reconciliation");
-    let identified = false; try { const raw = JSON.parse(input.rawPayloadJson); identified = typeof raw?.externalId === "string" && raw.externalId !== ""; } catch { /* retain malformed evidence */ }
-    if (identified) throw new Error("identified sources require ordinary stock reconciliation");
-    if ([...this.sourceResolutions.values()].some((r) => r.sourceId === input.sourceId)) throw new Error("source already resolved or mapped");
-    let externalId: string | undefined;
-    if (input.action === "map") { const item = this.items.get(input.itemId ?? -1); if (!item?.remoteProductId) throw new Error("mapping requires a verified linked item"); externalId = `itm_${item.id}`; }
-    else if (input.itemId !== undefined) throw new Error("historical unknown disposition cannot select an item");
-    const resolution: import("./types").StockSourceResolution = { ...input, actor: null, createdAt: new Date().toISOString(), ...(externalId ? { externalId } : {}) };
-    this.sourceResolutions.set(input.operationId, resolution); return { ...resolution };
-  }
-  async listStockSourceResolutions(): Promise<import("./types").StockSourceResolution[]> { return [...this.sourceResolutions.values()].map((r) => ({ ...r })); }
   async listStockReconciliations(): Promise<import("./types").StockReconciliationIntent[]> { return structuredClone([...this.stockIntents.values()]); }
   async rejectStockReconciliation(operationId: string, detail: string): Promise<void> {
     const intent = this.stockIntents.get(operationId);
@@ -946,10 +930,6 @@ export class MemoryRepository implements BillingRepository {
     if (shortage) this.recordMovement(item.id, shortage, "adjustment", "sync", `${operationId}:shortage`);
     for (const source of this.outbox) if (source.id <= intent.sourceBoundary && source.externalId === result.externalId && source.status !== "done") { source.status = "done"; source.nextAttemptAt = null; source.quarantineReason = null; }
     for (const delivery of this.deliveries.values()) if (delivery.sourceId <= intent.sourceBoundary && delivery.externalId === result.externalId) { delivery.status = "done"; delivery.claimToken = ""; delivery.claimUntil = null; delivery.nextAttemptAt = null; }
-    for (const id of this.capturedSources.get(operationId) ?? []) {
-      const resolution = this.sourceResolutions.get(id)!;
-      if (!resolution.retiredBy) { resolution.retiredBy = operationId; const source = this.outbox.find((r) => r.id === resolution.sourceId)!; source.status = "done"; source.nextAttemptAt = null; }
-    }
     this.stockStates.set(result.externalId, { ...result }); intent.status = "done";
     let parentId = intent.parentOperationId;
     while (parentId) { const parent = this.stockIntents.get(parentId)!; parent.status = "done"; parentId = parent.parentOperationId; }

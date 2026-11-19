@@ -1,28 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { reconcile, type ReconcileRow } from "@mytowncart-billing/core";
 import { MarketplaceError, type MarketplaceConnector } from "@mytowncart-billing/connector-mytowncart";
-import type { BillingRepository, ReconcileFix, StockProtocolState, StockReconciliationIntent, OutboxRow, StockSourceResolution } from "@mytowncart-billing/storage";
+import type { BillingRepository, ReconcileFix, StockProtocolState, StockReconciliationIntent } from "@mytowncart-billing/storage";
 import { loadRemoteSeen } from "./remoteSeen";
 
 /** Render-time equality prevents refreshed evidence from inheriting older consent. */
 export function stockRecoveryConsentMatches(confirmedSnapshot: string | null, reviewedSnapshot: string): boolean {
   return confirmedSnapshot !== null && confirmedSnapshot === reviewedSnapshot;
-}
-
-export function exceptionalStockSourceEligible(source: OutboxRow): boolean {
-  if (source.status !== "quarantined" || source.rawPayloadJson === undefined) return false;
-  try {
-    const payload: unknown = JSON.parse(source.rawPayloadJson);
-    const id = payload !== null && typeof payload === "object" ? (payload as Record<string, unknown>).externalId : undefined;
-    return typeof id !== "string" || id.length === 0;
-  } catch { return true; }
-}
-
-export function activeStockSources(sources: readonly OutboxRow[], history: readonly StockSourceResolution[]): OutboxRow[] {
-  return sources.filter((source) => !history.some((entry) => entry.sourceId === source.id && (entry.action === "historical_unknown" || !!entry.retiredBy))).map((source) => {
-    const mapping = history.find((entry) => entry.sourceId === source.id && entry.action === "map" && !entry.retiredBy);
-    return mapping ? { ...source, externalId: mapping.externalId ?? `itm_${mapping.itemId}` } : source;
-  });
 }
 
 /** Re-read both sides immediately before applying a decision. This is a guard,
@@ -69,19 +53,12 @@ export async function validateReconcileTargets(
       targets.some((row) => !before.some((candidate) => same(row, candidate)))) throw stale();
 }
 
-function requireStockProtocol(connector: MarketplaceConnector): void {
-  if (!connector.stockSnapshot || !connector.reconcileStock || !connector.stockReconciliation) {
-    throw new Error("Marketplace does not support safe stock reconciliation");
-  }
-}
-
 function protocolState(item: { externalId: string; variantId: string; stockUnits: number; revision: number; generation: number }, epoch: string, sequence: number): StockProtocolState {
   if (!item.variantId) throw new Error("Invalid marketplace stock identity");
   return { ...item, epoch, sequence };
 }
 
 async function recoverIntent(repo: BillingRepository, connector: MarketplaceConnector, intent: StockReconciliationIntent): Promise<StockReconciliationIntent> {
-  if (!connector.stockReconciliation || !connector.reconcileStock) throw new Error("Marketplace does not support safe stock reconciliation");
   // Query before retrying: an accepted operation with a lost response must use
   // its original result, not a new snapshot or a fresh operation key.
   let result;
@@ -113,29 +90,6 @@ export async function recoverStockReconciliations(repo: BillingRepository, conne
   }
 }
 
-/** A mapped malformed source is never retried: resolve via a captured conditional baseline. */
-export async function reconcileMappedSource(
-  repo: BillingRepository, connector: MarketplaceConnector,
-  decision: { itemId: number; expectedLocalStockMilli: number; confirmed: boolean; reason: string },
-): Promise<StockReconciliationIntent> {
-  if (!decision.confirmed || !decision.reason.trim()) throw new Error("Confirmation and reason are required");
-  requireStockProtocol(connector);
-  await recoverStockReconciliations(repo, connector);
-  const unresolved = (await repo.listStockSourceResolutions()).some((entry) => entry.action === "map" && !entry.retiredBy && entry.itemId === decision.itemId);
-  if (!unresolved) throw new Error("Mapped source is already resolved");
-  const externalId = `itm_${decision.itemId}`;
-  const activeEpoch = await repo.getAppSetting("sync.stock_epoch");
-  if (!activeEpoch) await repo.setAppSetting("sync.stock_bootstrap_required", "true");
-  const snapshot = await connector.stockSnapshot!([externalId]);
-  if (activeEpoch !== snapshot.epoch) await repo.setAppSetting("sync.stock_bootstrap_required", "true");
-  if (snapshot.items.length !== 1 || snapshot.items[0]?.externalId !== externalId) throw new Error("Marketplace stock identity changed");
-  const intent = await repo.beginStockReconciliation({
-    ...protocolState(snapshot.items[0], snapshot.epoch, snapshot.watermark), operationId: crypto.randomUUID(),
-    itemId: decision.itemId, choice: "local", stockUnits: decision.expectedLocalStockMilli / 1000, expectedLocalStockMilli: decision.expectedLocalStockMilli,
-  });
-  return recoverIntent(repo, connector, intent);
-}
-
 /** Recover durable work before creating a fresh, explicitly confirmed zero baseline.
  * The displayed local stock is a CAS token, never silently refreshed for consent. */
 export async function recoverStockShortage(
@@ -143,7 +97,6 @@ export async function recoverStockShortage(
   decision: { parentOperationId: string; expectedLocalStockMilli: number; reason: string; confirmed: boolean },
 ): Promise<StockReconciliationIntent> {
   if (!decision.confirmed || !decision.reason.trim()) throw new Error("Confirmation and reason are required");
-  requireStockProtocol(connector);
   await recoverStockReconciliations(repo, connector);
   const intents = await repo.listStockReconciliations();
   const parent = intents.find((entry) => entry.operationId === decision.parentOperationId);
@@ -171,7 +124,6 @@ export async function recoverStockShortage(
 export async function bootstrapStock(
   repo: BillingRepository, connector: MarketplaceConnector, pull: boolean,
 ): Promise<void> {
-  requireStockProtocol(connector);
   await repo.setAppSetting("sync.stock_bootstrap_required", "true");
   await recoverStockReconciliations(repo, connector);
   // Linked = has a marketplace id. A bare content hash (local_only items) is not a link;
@@ -182,7 +134,7 @@ export async function bootstrapStock(
   for (let index = 0; index < items.length; index += 200) {
     const batch = items.slice(index, index + 200);
     const ids = batch.map((item) => `itm_${item.id}`);
-    const snapshot = await connector.stockSnapshot!(ids);
+    const snapshot = await connector.stockSnapshot(ids);
     if (epoch && snapshot.epoch !== epoch) throw new Error("Marketplace stock epoch changed during bootstrap; retry");
     epoch = snapshot.epoch;
     const remote = new Map(snapshot.items.map((item) => [item.externalId, item]));
@@ -214,13 +166,12 @@ export async function applyReconciliation(
 ): Promise<void> {
   const stock = targets.filter((row) => row.kind === "stock");
   if (stock.length) {
-    requireStockProtocol(connector);
     await recoverStockReconciliations(repo, connector);
     const ids = [...new Set(stock.map((row) => row.externalId))];
     if (ids.length > 200) throw new Error("Select at most 200 stock items per reconciliation");
     const activeEpoch = await repo.getAppSetting("sync.stock_epoch");
     if (!activeEpoch) await repo.setAppSetting("sync.stock_bootstrap_required", "true");
-    const snapshot = await connector.stockSnapshot!(ids);
+    const snapshot = await connector.stockSnapshot(ids);
     if (activeEpoch !== snapshot.epoch) await repo.setAppSetting("sync.stock_bootstrap_required", "true");
     const byId = new Map(snapshot.items.map((item) => [item.externalId, item]));
     if (byId.size !== snapshot.items.length) throw new Error("Ambiguous marketplace stock snapshot");

@@ -616,7 +616,7 @@ pub fn dispatch_invoke(
 ) -> Result<serde_json::Value, String> {
     // Sync protocol writes and reconciliation are desktop-host-only even for a
     // LAN administrator. LAN sale commands remain supported below.
-    if matches!(cmd, "claim_stock_delivery" | "settle_stock_delivery" | "save_stock_protocol_states" | "list_stock_protocol_states" | "activate_stock_epoch" | "begin_stock_recovery" | "resolve_stock_source" | "list_stock_source_resolutions" | "begin_stock_reconciliation" | "list_stock_reconciliations" | "settle_stock_reconciliation" | "reject_stock_reconciliation" | "enqueue_stock_outbox" | "record_outbox_results" | "drop_outbox" | "apply_stock_pull" | "apply_reconcile_fixes" | "record_remote_catalog" | "set_sync_cursor") {
+    if matches!(cmd, "claim_stock_delivery" | "settle_stock_delivery" | "save_stock_protocol_states" | "list_stock_protocol_states" | "activate_stock_epoch" | "begin_stock_recovery" | "begin_stock_reconciliation" | "list_stock_reconciliations" | "settle_stock_reconciliation" | "reject_stock_reconciliation" | "enqueue_stock_outbox" | "record_outbox_results" | "drop_outbox" | "apply_stock_pull" | "apply_reconcile_fixes" | "record_remote_catalog" | "set_sync_cursor") {
         return Err("Stock sync and reconciliation are host-only".into());
     }
     // Role check first: nothing below runs for a caller who is not allowed to run it.
@@ -688,6 +688,16 @@ pub fn dispatch_invoke(
             let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
             let id = repo::upsert_item(&mut conn, &item)?;
             serde_json::to_value(id).map_err(|e| e.to_string())
+        }
+        "set_item_active" => {
+            let item_id: i64 = get_arg(&args, "itemId", "item_id")?;
+            let is_active: bool = get_arg(&args, "isActive", "is_active")?;
+            let now: String = get_arg(&args, "now", "now")?;
+            let conn = state.conn.lock().map_err(|e| e.to_string())?;
+            repo::set_item_active(&conn, item_id, is_active, &now)?;
+            let action = if is_active { "restore_item" } else { "archive_item" };
+            crate::auth::audit(&conn, actor, action, format!("item {item_id}"));
+            Ok(serde_json::Value::Null)
         }
         "import_items" => {
             let items: Vec<repo::ItemPayload> = get_arg(&args, "items", "items")?;
@@ -1059,7 +1069,7 @@ mod tests {
         assert!(dispatch_invoke(&state, "record_audit_log", audit, None).is_ok());
         let exp = serde_json::json!({"daysThreshold": 30, "nowIso": "2026-11-08"});
         assert!(dispatch_invoke(&state, "list_expiring_batches", exp, None).is_ok());
-        for cmd in ["begin_stock_recovery", "resolve_stock_source", "list_stock_source_resolutions"] {
+        for cmd in ["begin_stock_recovery"] {
             assert!(dispatch_invoke(&state,cmd,serde_json::json!({}),None).unwrap_err().contains("host-only"));
             assert!(dispatch_invoke(&state,cmd,serde_json::json!({}),Some("even-an-owner-token")).unwrap_err().contains("host-only"));
         }

@@ -16,21 +16,6 @@ fn enqueue(conn:&Connection,id:i64,delta:i64,key:&str) {
     sync::enqueue_stock_outbox(conn,&[(serde_json::json!({"externalId":format!("itm_{id}"),"deltaUnits":delta,"reason":if delta<0 {"sale"} else {"order_cancel"},"createdAt":"2026-01-01T00:00:00Z"}).to_string(),key.into())]).unwrap();
 }
 #[test]
-fn real_14_upgrade_preserves_raw_ambiguous_sources() {
-    let dir=tempfile::tempdir().unwrap(); let path=dir.path().join("old.db");
-    db::migrate_with(&path,&db::MIGRATIONS[..14]).unwrap();
-    let conn=db::open(&path).unwrap();
-    conn.execute("INSERT INTO outbox(kind,payload_json,idempotency_key,status) VALUES('stock','not-json','legacy','pending')",[]).unwrap();
-    drop(conn);
-    db::migrate_with(&path,db::MIGRATIONS).unwrap();
-    let conn=db::open(&path).unwrap();
-    let rows=sync::list_outbox(&conn,None).unwrap();
-    assert_eq!(rows[0].payload_json,"not-json"); assert_eq!(rows[0].status,"quarantined");
-    // Unknown identity must remain visible, but cannot block an independent item.
-    enqueue(&conn,2,-1,"new");
-    assert!(sync::claim_stock_delivery(&conn,"2026-01-01T00:00:00Z","2026-01-01T00:01:00Z").unwrap().unwrap().payload_json.contains("itm_2"));
-}
-#[test]
 fn reconciliation_restarts_rebases_lan_sale_and_suppresses_only_selected_item() {
     let (dir,conn)=setup(); enqueue(&conn,1,-1,"old");
     let request=input(1,7); let intent=begin(&conn,request.clone()).unwrap();
@@ -120,26 +105,6 @@ fn linked_zero_recovery_restarts_repeats_shortage_and_finalizes_chain_without_ou
     assert_eq!(conn.query_row("SELECT stock_milli FROM items WHERE id=1",[],|r|r.get::<_,i64>(0)).unwrap(),1000);
     let pending=sync::list_outbox(&conn,Some("pending")).unwrap();assert_eq!(pending.len(),1);assert_eq!(pending[0].idempotency_key,"post-grandchild-return");
     assert_eq!(conn.query_row("SELECT COUNT(*) FROM stock_movements WHERE ref_id='grandchild:shortage'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
-}
-#[test]
-fn real_15_upgrade_mapping_disposition_capture_and_immutable_evidence() {
-    let dir=tempfile::tempdir().unwrap();let path=dir.path().join("v15.db");db::migrate_with(&path,&db::MIGRATIONS[..15]).unwrap();
-    let conn=db::open(&path).unwrap();conn.execute_batch("INSERT INTO items(id,name,stock_milli,remote_product_id,updated_at) VALUES(1,'First',5000,'marketplace-product-uuid','now'),(2,'Other',5000,'other-uuid','now'); INSERT INTO outbox(kind,payload_json,idempotency_key,status) VALUES('stock','not-json','legacy','quarantined'),('stock','{}','unknown','quarantined');").unwrap();drop(conn);
-    db::migrate_with(&path,db::MIGRATIONS).unwrap();let mut conn=db::open(&path).unwrap();
-    let mapping=SourceResolutionInput {operation_id:"map-1".into(),source_id:1,idempotency_key:"legacy".into(),raw_payload_json:"not-json".into(),action:"map".into(),item_id:Some(1),reason:"Verified source belongs to selected item".into(),confirmed:true};
-    let evidence=resolve_source(&conn,mapping.clone(),Some(7)).unwrap();assert_eq!(evidence.external_id.as_deref(),Some("itm_1"));assert!(!evidence.created_at.is_empty());
-    resolve_source(&conn,mapping.clone(),Some(8)).unwrap();let mut changed=mapping.clone();changed.item_id=Some(2);assert!(resolve_source(&conn,changed,None).is_err());
-    let mut conflict=mapping;conflict.operation_id="other-map".into();assert!(resolve_source(&conn,conflict,None).is_err());
-    assert!(sync::apply_stock_pull(&mut conn,None,"11",&[sync::RemoteStockMovePayload {external_id:"itm_1".into(),delta_units:-1,reason:"online_order".into(),created_at:"now".into(),epoch:Some("epoch-a".into()),sequence:Some(11)}]).is_err());
-    assert!(activate(&conn,"epoch-a").is_err());
-    enqueue(&conn,1,-1,"blocked");enqueue(&conn,2,-1,"allowed");let claim=sync::claim_stock_delivery(&conn,"2026-01-01T00:00:00Z","2026-01-01T00:01:00Z").unwrap().unwrap();assert!(claim.payload_json.contains("itm_2"));
-    begin(&conn,input(1,5)).unwrap();
-    let unknown=SourceResolutionInput {operation_id:"unknown".into(),source_id:2,idempotency_key:"unknown".into(),raw_payload_json:"{}".into(),action:"historical_unknown".into(),item_id:None,reason:"Historical outcome cannot be established, not delivered".into(),confirmed:true};
-    resolve_source(&conn,unknown,None).unwrap();settle(&conn,"op-1",&result(1,5)).unwrap();
-    let history=list_source_resolutions(&conn).unwrap();assert_eq!(history[0].retired_by.as_deref(),Some("op-1"));assert!(history[1].retired_by.is_none());
-    assert_eq!(conn.query_row("SELECT payload_json FROM outbox WHERE id=1",[],|r|r.get::<_,String>(0)).unwrap(),"not-json");
-    assert_eq!(conn.query_row("SELECT status FROM outbox WHERE id=2",[],|r|r.get::<_,String>(0)).unwrap(),"quarantined");
-    assert!(conn.execute("UPDATE stock_source_resolutions SET evidence_json='{}'",[]).is_err());
 }
 #[test]
 fn failed_child_settlement_rolls_back_chain_baseline_sources_and_ledger() {

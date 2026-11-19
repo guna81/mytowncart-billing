@@ -24,6 +24,7 @@ export const SESSION_GATED_COMMANDS: ReadonlySet<string> = new Set([
   "upsert_user",
   "create_purchase",
   "upsert_item",
+  "set_item_active",
   "import_items",
   "delete_customer",
   "upsert_supplier",

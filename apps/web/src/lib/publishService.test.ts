@@ -27,10 +27,13 @@ function mockConnector(overrides: Partial<MarketplaceConnector> = {}): Marketpla
     upsertItems: (items) => Promise.resolve(ok(items)),
     uploadImage: () => Promise.resolve(),
     pushStock: () => Promise.resolve([]),
-    pullStock: () => Promise.resolve({ moves: [], nextCursor: 0 }),
+    pullStock: () => Promise.resolve({ moves: [], nextCursor: 0, epoch: "epoch", watermark: 0 }),
     listRemoteItems: () => Promise.resolve([]),
     listPlatformProducts: () => Promise.resolve([]),
     adoptProducts: () => Promise.resolve([]),
+    stockSnapshot: () => Promise.resolve({ epoch: "epoch", watermark: 0, items: [] }),
+    reconcileStock: () => Promise.reject(new Error("unused")),
+    stockReconciliation: () => Promise.resolve(null),
   };
   return { ...base, ...overrides };
 }

@@ -71,23 +71,10 @@ of truth for "what the marketplace still needs to hear".
   Attempts use exponential backoff, capped at 30 minutes; later sales cannot be
   folded into an uncertain delivery. Each run is bounded.
 - **Settlement.** A matching claim atomically acknowledges the delivery and exact
-  source. Permanent errors, unknown/clamped outcomes and ambiguous legacy rows
-  remain visible for review rather than being blindly replayed or discarded.
-- **Upgrade quarantine.** Migration 0015 quarantines all pre-upgrade pending rows,
-  even those with zero recorded attempts: an older merged push may have committed
-  under an unknown key. The seller must explicitly resolve the stock baseline.
-  Upgrade host/frontend together; older binaries refuse the newer schema.
-  Malformed legacy rows retain their exact original payload and key. Host-only
-  recovery requires an explicit reason: map the source to a verified linked item
-  and resolve its baseline through conditional reconciliation, or record a
-  historical-unknown disposition. Mapping never repairs or resends the payload.
-  An unresolved mapping blocks its item, not other items. Historical-unknown is
-  an administrative record, **not delivery success or proof of correct stock**;
-  the quarantined source and its evidence remain in history. This exceptional
-  path accepts invalid JSON or a missing, non-string or empty `externalId`, with
-  no durable delivery. A nonempty string ID—even whitespace or a stale ID that
-  is absent locally—is not silently reclassified as unidentified: it requires
-  identity investigation/ordinary stock reconciliation, not administrative discard.
+  source. Permanent errors and unknown/clamped outcomes remain visible for review
+  rather than being blindly replayed or discarded.
+- **Quarantine.** Clamped deliveries or unrecoverable delivery errors quarantine
+  the outbox row (`status = 'quarantined'`) with `quarantine_reason` recorded for review.
 
 ## Stock pull
 
@@ -107,14 +94,12 @@ cancel sales, order cancellations restock, remote adjustments) plus
 
 The pull loop stops at the final page or its page cap. When immediate
 continuation is unavailable, it persists the cursor and resumes after pacing.
-Legacy backend IDs are not commit-order safe. Protocol 2 uses a transactional
-sequence, epoch and bounded committed watermark; every backend stock writer
-must participate in the same lock order. A new epoch requires an explicit
-baseline/bootstrap, not reuse of a legacy numeric cursor. A reconciled item's
+Stock synchronization uses a transactional sequence, epoch and bounded
+committed watermark; every backend stock writer participates in the same lock order.
+A new epoch requires an explicit baseline/bootstrap. A reconciled item's
 movements through its snapshot watermark are suppressed locally, while other
 items' movements still apply. Baseline suppression and cursor advancement are
-transactional. PostgreSQL concurrency tests are required to verify this protocol;
-local SQLite atomicity alone cannot prove backend commit ordering.
+transactional.
 
 ## Catalog push
 
@@ -186,7 +171,6 @@ original operation or retry its request with a new key.
 Before the first stock feed pull, explicitly bootstrap all linked items using the
 chosen local or marketplace stock baseline. Partial bootstrap remains visible and
 resumable; the global cursor changes epoch only after all linked items are covered.
-Ambiguous legacy outbox rows require this explicit decision, not blind replay.
 Only items with a marketplace link (a remote product or variant id) are
 bootstrapped; a `local_only` item that merely carries a content hash is skipped,
 because the marketplace answers `unknown_item` (404) for the whole snapshot batch
@@ -194,8 +178,8 @@ if any requested id is not linked. The setup buttons ask for confirmation throug
 the native Tauri dialog (`confirmAction` in `lib/shell.ts`; `window.confirm` is
 replaced by an async stub in the desktop shell and cannot be used for this), and
 setup progress and errors are shown on the Settings tab under the buttons. The
-Audited stock recovery form appears only when a quarantined source or an item
-needing review exists; completed baselines show as history only.
+Audited stock recovery form appears only when an item needing review exists;
+completed baselines show as history only.
 
 Every stock push carries the item's epoch, variant and generation from its last snapshot; a push without a current fence is rejected by the marketplace.
 
@@ -237,16 +221,10 @@ claims, immutable keys, local transactions and backend generation fences provide
 the operation-level protections; a mutex alone cannot fence another process or an
 already dispatched request.
 
-**Rollout and verification:** backend support must precede upgrading Billing host
-and frontend together. Migration 0016 adds durable recovery evidence and linked
-recovery decisions; older binaries must not open that schema. Do not downgrade a
-database after migration 0015. Existing
-legacy ambiguities and potentially skipped feed history need explicit bootstrap;
-new retry keys/ordering cannot retroactively repair them. PostgreSQL concurrency
-and migration tests must pass before claiming production readiness. Passing
-mocked, memory or SQLite tests is not proof of the remote transaction guarantees.
-No production deployment, database migration or capacity measurement is performed
-as part of the local verification.
+**Rollout and verification:** Migration 0016 adds shortage recovery schema and linked
+recovery decisions. PostgreSQL concurrency and migration tests must pass before
+claiming production readiness. Passing mocked, memory or SQLite tests is not
+proof of the remote transaction guarantees.
 
 ## Failure rules
 
