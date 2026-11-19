@@ -973,7 +973,7 @@ export function ItemFormScreen() {
           {/* Quick Presets */}
           <div className="flex flex-wrap items-center gap-1.5 text-xs">
             <span className="text-gray-500 font-medium">{t("item_form.attribute_presets")}</span>
-            {["Size", "Color", "Material", "Flavor", "Weight", "Volume", "Warranty"].map((preset) => (
+            {["Material", "Flavor", "Shelf Life", "Country of Origin", "Ingredients", "Warranty"].map((preset) => (
               <button
                 key={preset}
                 type="button"

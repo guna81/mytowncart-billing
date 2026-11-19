@@ -10,7 +10,11 @@ const inputCls =
 const MAX_COMBOS = 100;
 const CLOTHING = ["S", "M", "L", "XL", "XXL"];
 const SHOES = ["6", "7", "8", "9", "10", "11"];
+const WEIGHTS = ["250g", "500g", "1kg", "2kg", "5kg"];
+const VOLUMES = ["200ml", "500ml", "1L", "2L", "5L"];
 const COLOURS = ["Black", "White", "Red", "Blue", "Green", "Grey"];
+
+type SizePreset = "clothing" | "shoes" | "weight" | "volume";
 
 const isName = (a: OptionAxis, n: string) => a.name.trim().toLowerCase() === n.toLowerCase() || (n === "Colour" && a.name.trim().toLowerCase() === "color");
 
@@ -42,7 +46,7 @@ function Chip({ label, on, onClick }: { label: string; on?: boolean; onClick: ()
 
 /** Order values the way a shop expects: S, M, L, XL… then 6, 7, 8…; anything typed keeps its order at the end. */
 function sortValues(values: string[]): string[] {
-  const known = [...CLOTHING, ...SHOES, ...COLOURS];
+  const known = [...CLOTHING, ...SHOES, ...WEIGHTS, ...VOLUMES, ...COLOURS];
   const rank = (v: string) => {
     const i = known.findIndex((k) => k.toLowerCase() === v.toLowerCase());
     return i === -1 ? known.length : i;
@@ -73,7 +77,13 @@ function Builder({
       ...others,
     ];
   });
-  const [shoes, setShoes] = useState(() => (initial.find((a) => isName(a, "Size"))?.values ?? []).some((v) => SHOES.includes(v)));
+  const [sizePreset, setSizePreset] = useState<SizePreset>(() => {
+    const sizeVals = initial.find((a) => isName(a, "Size"))?.values ?? [];
+    if (sizeVals.some((v) => SHOES.includes(v))) return "shoes";
+    if (sizeVals.some((v) => WEIGHTS.includes(v))) return "weight";
+    if (sizeVals.some((v) => VOLUMES.includes(v))) return "volume";
+    return "clothing";
+  });
   const [drafts, setDrafts] = useState<string[]>(() => axes.map(() => ""));
   const patch = (i: number, p: Partial<OptionAxis>) => setAxes((a) => a.map((x, j) => (j === i ? { ...x, ...p } : x)));
   const has = (a: OptionAxis, v: string) => a.values.some((x) => x.toLowerCase() === v.toLowerCase());
@@ -88,11 +98,20 @@ function Builder({
     patch(i, { values: dedupeValues([...axis.values, ...(drafts[i] ?? "").split(",")]) });
     setDrafts((d) => d.map((x, j) => (j === i ? "" : x)));
   };
-  const switchSizeSet = (toShoes: boolean) => {
-    // Clothing sizes and shoe sizes never mix: switching clears the other set.
-    setShoes(toShoes);
+  const switchSizeSet = (preset: SizePreset) => {
+    setSizePreset(preset);
+    const allPresets = [...CLOTHING, ...SHOES, ...WEIGHTS, ...VOLUMES];
+    const targetPresets =
+      preset === "clothing" ? CLOTHING : preset === "shoes" ? SHOES : preset === "weight" ? WEIGHTS : VOLUMES;
     setAxes((a) =>
-      a.map((x) => (isName(x, "Size") ? { ...x, values: x.values.filter((v) => !(toShoes ? CLOTHING : SHOES).includes(v)) } : x)),
+      a.map((x) =>
+        isName(x, "Size")
+          ? {
+              ...x,
+              values: x.values.filter((v) => !allPresets.includes(v) || targetPresets.includes(v)),
+            }
+          : x,
+      ),
     );
   };
   const usable = axes.filter((a) => a.name.trim() && a.values.length);
@@ -108,7 +127,17 @@ function Builder({
       {axes.map((a, i) => {
         const size = isName(a, "Size");
         const colour = isName(a, "Colour");
-        const quick = size ? (shoes ? SHOES : CLOTHING) : colour ? COLOURS : [];
+        const quick = size
+          ? sizePreset === "shoes"
+            ? SHOES
+            : sizePreset === "weight"
+            ? WEIGHTS
+            : sizePreset === "volume"
+            ? VOLUMES
+            : CLOTHING
+          : colour
+          ? COLOURS
+          : [];
         const custom = a.values.filter((v) => !quick.some((q) => q.toLowerCase() === v.toLowerCase()));
         return (
           <div key={i} className="space-y-2 rounded-lg border border-gray-200 p-3">
@@ -125,9 +154,11 @@ function Builder({
                 />
               )}
               {size ? (
-                <div className="flex gap-1" role="group" aria-label={t("item_form.variants.size_type")}>
-                  <Chip label={t("item_form.variants.size_clothing")} on={!shoes} onClick={() => switchSizeSet(false)} />
-                  <Chip label={t("item_form.variants.size_shoes")} on={shoes} onClick={() => switchSizeSet(true)} />
+                <div className="flex flex-wrap gap-1" role="group" aria-label={t("item_form.variants.size_type")}>
+                  <Chip label={t("item_form.variants.size_clothing")} on={sizePreset === "clothing"} onClick={() => switchSizeSet("clothing")} />
+                  <Chip label={t("item_form.variants.size_shoes")} on={sizePreset === "shoes"} onClick={() => switchSizeSet("shoes")} />
+                  <Chip label={t("item_form.variants.size_weight")} on={sizePreset === "weight"} onClick={() => switchSizeSet("weight")} />
+                  <Chip label={t("item_form.variants.size_volume")} on={sizePreset === "volume"} onClick={() => switchSizeSet("volume")} />
                 </div>
               ) : null}
               {!size && !colour ? (
