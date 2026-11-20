@@ -4,7 +4,15 @@ Reviewed against the working source on November 6, 2026.
 
 ## Release status
 
-The latest published installer is [v0.1.5](https://github.com/guna81/mytowncart-billing/releases/tag/v0.1.5).
+The latest published installer is [v0.1.6](https://github.com/guna81/mytowncart-billing/releases/tag/v0.1.6).
+
+### New in v0.1.6
+
+- **Shared catalog lookup:** search MyTownCart's shared catalog by name or barcode (with search-as-you-type) from Add Item to prefill product details and download approved local snapshots.
+- **Item archiving:** archive and restore items (Owner role) with active/archived/all filtering on the Items screen.
+- **FMCG pack presets & specifications:** added weight and volume variant presets alongside clothing and shoe sizes, and aligned specifications vs. variants in the item form.
+- **Stock sync cleanup:** removed legacy v1 upgrade scaffolding to enforce stock protocol v2 cleanly.
+- **macOS desktop polish:** Title Case app bundle and Keychain service naming (`MyTownCart Billing`) with automatic migration from legacy credentials.
 
 ### New in v0.1.5
 

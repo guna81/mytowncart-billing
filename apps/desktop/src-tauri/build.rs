@@ -8,7 +8,9 @@ fn main() {
 
         let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
         let plist_path = out_dir.join("Info.plist");
-        let plist_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+        let version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".to_string());
+        let plist_content = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -21,11 +23,12 @@ fn main() {
     <key>CFBundleIdentifier</key>
     <string>com.mytowncart.billing</string>
     <key>CFBundleVersion</key>
-    <string>0.1.5</string>
+    <string>{version}</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.5</string>
+    <string>{version}</string>
 </dict>
-</plist>"#;
+</plist>"#
+        );
         let _ = fs::write(&plist_path, plist_content);
         println!(
             "cargo:rustc-link-arg=-Wl,-sectcreate,__TEXT,__info_plist,{}",
