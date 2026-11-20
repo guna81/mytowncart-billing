@@ -3,20 +3,19 @@ import type { Page } from "@playwright/test";
 
 export async function ensureSetup(page: Page, shopName = "Guna Kirana Store", gst = true) {
   await page.goto("/#/");
-  const isSetup = await page
-    .getByTestId("setup-shop-name")
-    .isVisible({ timeout: 2500 })
-    .catch(() => false);
+  const setupInput = page.getByTestId("setup-shop-name");
+  const posScan = page.getByTestId("pos-scan");
+  await setupInput.or(posScan).waitFor({ state: "visible" });
 
-  if (isSetup) {
-    await page.getByTestId("setup-shop-name").fill(shopName);
+  if (await setupInput.isVisible()) {
+    await setupInput.fill(shopName);
     if (gst) {
       await page.getByTestId("setup-gst-yes").check();
     } else {
       await page.getByTestId("setup-gst-no").check();
     }
     await page.getByTestId("setup-start").click();
-    await page.waitForSelector("[data-testid='pos-scan']");
+    await posScan.waitFor({ state: "visible" });
   }
 }
 
