@@ -101,6 +101,53 @@ jobs:
           releaseDraft: true
           prerelease: false
 
+      # Windows code signing through SignPath Foundation (free for open source).
+      # Off until the repository variable SIGNPATH_ORGANIZATION_ID exists, so
+      # releases keep working unsigned. Setup: docs/plans/signpath-setup.md.
+      - name: Collect unsigned Windows installers
+        id: collect-unsigned
+        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        shell: bash
+        run: |
+          mkdir -p unsigned-windows
+          find apps/desktop/src-tauri/target -path '*bundle*' \( -name '*.exe' -o -name '*.msi' \) -exec cp {} unsigned-windows/ \;
+          ls -l unsigned-windows
+          [ "$(ls unsigned-windows | wc -l)" -eq 2 ] || { echo "::error::Expected one .exe and one .msi installer"; exit 1; }
+
+      - name: Upload unsigned installers for SignPath
+        id: upload-unsigned
+        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-windows-installers
+          path: unsigned-windows
+
+      - name: Sign Windows installers with SignPath
+        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          # Signing waits for the approver in SignPath, so allow up to 24 hours.
+          wait-for-completion-timeout-in-seconds: 86400
+          output-artifact-directory: signed-windows
+
+      - name: Replace unsigned installers with signed ones
+        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        shell: bash
+        run: |
+          ls -l signed-windows
+          for f in signed-windows/*; do
+            name=$(basename "$f")
+            dest=$(find apps/desktop/src-tauri/target -path '*bundle*' -name "$name")
+            [ -n "$dest" ] && [ "$(printf '%s\n' "$dest" | wc -l)" -eq 1 ] || { echo "::error::Cannot match signed file $name to one built installer"; exit 1; }
+            cp "$f" "$dest"
+          done
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
@@ -111,6 +158,20 @@ jobs:
           DOWNLOAD_PLATFORM: ${{ matrix.platform }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: python tooling/release-downloads.py
+
+      # tauri-action attached the unsigned originals under their Tauri names;
+      # remove them so the release only offers signed installers.
+      - name: Remove unsigned originals from the release
+        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name | select((endswith(".exe") or endswith(".msi")) and (startswith("MyTownCart-Billing-") | not))' | tr -d '\r' | while IFS= read -r name; do
+            echo "Deleting unsigned original: $name"
+            gh release delete-asset "$RELEASE_TAG" "$name" --yes
+          done
 
   publish:
     name: Publish release
