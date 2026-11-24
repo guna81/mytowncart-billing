@@ -160,3 +160,30 @@ close the till. Other lists a cashier needs to sell (items, customers, bills)
 are readable. The sync/backup commands are not reachable from the LAN server.
 A forgotten owner
 PIN is reset offline by clearing `user_pins` (see PILOT.md).
+
+## B0-7 — Windows signing via SignPath Foundation (application pending)
+**Date:** 2026-11-24 · **Builds on:** B0-6
+
+Unsigned installers stop non-technical shop owners at the SmartScreen prompt, and
+a commercial certificate is out of budget. The project is Apache-2.0 and built in
+GitHub Actions, so it applied to the free SignPath Foundation programme.
+
+- **Applied:** 2026-11-24, as an individual maintainer. The application is
+  pending; nothing is approved yet.
+- **Evidence given:** real figures only. The repo is three weeks old, with 7
+  releases, about 120 downloads, no stars and one maintainer. A rejection for
+  being too new is a realistic outcome.
+- **Download URL given:** the GitHub Releases page, which does not mention
+  SignPath, although the form asks that it should. If asked, add a code-signing
+  note to the site and README.
+- **Code in the repo:** `release.yml` has Windows signing steps that stay off
+  until the repository variable `SIGNPATH_ORGANIZATION_ID` is set. The public
+  policy page is [docs/CODE_SIGNING_POLICY.md](docs/CODE_SIGNING_POLICY.md).
+  Setup and the fallback plan are in
+  [docs/plans/signpath-setup.md](docs/plans/signpath-setup.md).
+- **Until approval:** keep saying "unsigned" in the README, site, release notes
+  and `RELEASING.md`. Change them only after a signed release candidate is
+  verified.
+- **Fallbacks:** the Certum open-source certificate (check the live price), or
+  reapply to SignPath once usage grows. macOS notarization stays out of scope
+  (needs the paid Apple Developer Program).

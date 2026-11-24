@@ -5,6 +5,35 @@ Zero-spend signing for the Windows installers. Applies to
 signing step that stays off until the repository variable
 `SIGNPATH_ORGANIZATION_ID` exists.
 
+## Status
+
+| Date | Step | State |
+| --- | --- | --- |
+| 2026-11-23 | Policy page, workflow change and this guide committed to `dev` (`7c25774`) | Done, not yet on `main` |
+| 2026-11-24 | Application submitted at signpath.org/apply | Done; waiting for SignPath's email |
+| | Approval | Pending |
+| | SignPath project, GitHub secret and variables | Not started |
+| | Release-candidate tag to test signing | Not started |
+| | Update README, site, `RELEASING.md`, release notes from "unsigned" | Not started |
+
+What the application said:
+
+- Project, repository and homepage as in section 1 below, category Productivity,
+  maintainer type individual, build system GitHub Actions.
+- Download URL: the GitHub Releases page. It does not mention SignPath, which the
+  form says it should. Add a code-signing note to the site and README (and merge
+  `dev` to `main`) if SignPath asks.
+- Privacy URL: the README's privacy section on `main`.
+- Reputation, stated honestly: repo created 2026-11-05, 7 releases, about 120
+  downloads, 0 stars, one maintainer. Early-stage, so a rejection is possible.
+
+If SignPath rejects the application or asks for more:
+
+- Asked to mention SignPath on the download page: add it, merge to `main`, reply.
+- Too new: reapply when usage has grown, or use the Certum open-source
+  certificate (check the live price first).
+- While waiting, nothing changes: releases keep working unsigned.
+
 ## Order of work
 
 1. Commit `docs/CODE_SIGNING_POLICY.md` and the `release.yml` change on `main`
