@@ -9,9 +9,10 @@ Windows installers: **Free code signing provided by
 [SignPath.io](https://signpath.io), certificate by
 [SignPath Foundation](https://signpath.org).**
 
-> Status: application to SignPath Foundation pending. Until it is approved,
-> releases are unsigned and this page describes the intended process. See
-> [RELEASING.md](RELEASING.md) for the current state.
+> Status: the SignPath Foundation application was declined on 2026-11-24
+> because the project is too new to show enough public adoption. Releases are
+> unsigned for now and this page describes the intended process if signing is
+> set up later. See [RELEASING.md](RELEASING.md) for the current state.
 
 ## What is signed
 

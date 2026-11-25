@@ -161,15 +161,19 @@ are readable. The sync/backup commands are not reachable from the LAN server.
 A forgotten owner
 PIN is reset offline by clearing `user_pins` (see PILOT.md).
 
-## B0-7 — Windows signing via SignPath Foundation (application pending)
+## B0-7 — Windows signing via SignPath Foundation (application declined)
 **Date:** 2026-11-24 · **Builds on:** B0-6
 
 Unsigned installers stop non-technical shop owners at the SmartScreen prompt, and
 a commercial certificate is out of budget. The project is Apache-2.0 and built in
 GitHub Actions, so it applied to the free SignPath Foundation programme.
 
-- **Applied:** 2026-11-24, as an individual maintainer. The application is
-  pending; nothing is approved yet.
+- **Applied:** 2026-11-24, as an individual maintainer.
+- **Outcome:** declined the same day. SignPath looks for external signals
+  (stars, forks, contributors, articles, discussions, backing) and the project
+  does not have them yet. They invite a reapplication once it has broader
+  recognition, or a paid SignPath subscription. Releases stay unsigned. Next
+  options are in [docs/plans/signpath-setup.md](docs/plans/signpath-setup.md).
 - **Evidence given:** real figures only. The repo is three weeks old, with 7
   releases, about 120 downloads, no stars and one maintainer. A rejection for
   being too new is a realistic outcome.

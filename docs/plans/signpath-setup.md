@@ -10,11 +10,14 @@ signing step that stays off until the repository variable
 | Date | Step | State |
 | --- | --- | --- |
 | 2026-11-23 | Policy page, workflow change and this guide committed to `dev` (`7c25774`) | Done, not yet on `main` |
-| 2026-11-24 | Application submitted at signpath.org/apply | Done; waiting for SignPath's email |
-| | Approval | Pending |
-| | SignPath project, GitHub secret and variables | Not started |
+| 2026-11-24 | Application submitted at signpath.org/apply | Done |
+| 2026-11-24 | Decision | **Declined**: not enough public visibility yet (stars, forks, contributors, articles, discussions). Reapply later, or use a paid SignPath subscription |
+| | SignPath project, GitHub secret and variables | Not started; only relevant if a SignPath route is used |
 | | Release-candidate tag to test signing | Not started |
-| | Update README, site, `RELEASING.md`, release notes from "unsigned" | Not started |
+| | Update README, site, `RELEASING.md`, release notes from "unsigned" | Not needed; releases stay unsigned |
+
+The signing steps in `release.yml` stay in place and stay off. They only work
+with SignPath, so they would need changing if another certificate is chosen.
 
 What the application said:
 
