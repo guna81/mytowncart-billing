@@ -117,9 +117,10 @@ export class Http {
       return { response, usedToken };
     };
 
-    let { response, usedToken } = await send();
+    const first = await send();
+    let { response } = first;
     if (auth && response.status === 401 && this.opts.onUnauthorized) {
-      if (await this.opts.onUnauthorized(usedToken)) {
+      if (await this.opts.onUnauthorized(first.usedToken)) {
         ({ response } = await send());
       }
     }
@@ -198,9 +199,10 @@ export class Http {
       }
       return { response, usedToken };
     };
-    let { response, usedToken } = await send();
+    const first = await send();
+    let { response } = first;
     if (response.status === 401 && this.opts.onUnauthorized) {
-      if (await this.opts.onUnauthorized(usedToken)) {
+      if (await this.opts.onUnauthorized(first.usedToken)) {
         ({ response } = await send());
       }
     }
@@ -255,9 +257,10 @@ export class Http {
       }
       return { response, usedToken };
     };
-    let { response, usedToken } = await send();
+    const first = await send();
+    let { response } = first;
     if (response.status === 401 && this.opts.onUnauthorized) {
-      if (await this.opts.onUnauthorized(usedToken)) {
+      if (await this.opts.onUnauthorized(first.usedToken)) {
         ({ response } = await send());
       }
     }
