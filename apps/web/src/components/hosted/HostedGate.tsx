@@ -28,7 +28,7 @@ import {
   useCloudBackupStatus,
 } from "../../lib/hosted/cloudBackup";
 import { ensureBackupKey, rememberRestoredKey, serverKeySetting, type KeyMode } from "../../lib/hosted/backupKey";
-import { DESKTOP_DOWNLOAD_URL } from "../../lib/hosted/mode";
+import { BILLING_LANDING_URL, DESKTOP_DOWNLOAD_URL } from "../../lib/hosted/mode";
 import {
   finishHostedOAuthCallback,
   hasOAuthCallback,
@@ -90,15 +90,26 @@ function DownloadLink() {
   return (
     <div className="border-t border-gray-200 pt-4 text-sm text-gray-600">
       <p>{t("hosted.download_hint")}</p>
-      <a
-        href={DESKTOP_DOWNLOAD_URL}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="mt-1 inline-block font-medium text-blue-700 underline"
-        data-testid="hosted-download-desktop"
-      >
-        {t("hosted.download_desktop")}
-      </a>
+      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+        <a
+          href={DESKTOP_DOWNLOAD_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-block font-medium text-blue-700 underline"
+          data-testid="hosted-download-desktop"
+        >
+          {t("hosted.download_desktop")}
+        </a>
+        <a
+          href={BILLING_LANDING_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-block font-medium text-blue-700 underline"
+          data-testid="hosted-see-features"
+        >
+          {t("hosted.see_features")}
+        </a>
+      </div>
     </div>
   );
 }

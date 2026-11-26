@@ -37,8 +37,23 @@ export default defineConfig(({ command, mode }) => {
           "<title>",
           "<script>if (/^#(download|features|improvements|start|privacy|faq)$/.test(location.hash)) " +
             'location.replace("download/" + location.hash);</script>\n    ' +
+            '<link rel="canonical" href="https://billing.mytowncart.com/" />\n    ' +
             '<meta name="description" content="Free GST billing and POS for local shops, in your browser. ' +
-            'Sign in with your MyTownCart seller account; bills are backed up, encrypted, automatically." />\n    <title>',
+            'Sign in with your MyTownCart seller account; bills are backed up, encrypted, automatically." />\n    ' +
+            '<meta property="og:site_name" content="MyTownCart Billing" />\n    ' +
+            '<meta property="og:type" content="website" />\n    ' +
+            '<meta property="og:title" content="MyTownCart Billing — Free GST billing &amp; POS in your browser" />\n    ' +
+            '<meta property="og:description" content="Free GST billing and POS for local shops, in your browser. ' +
+            'Sign in with your MyTownCart seller account; bills are backed up, encrypted, automatically." />\n    ' +
+            '<meta property="og:url" content="https://billing.mytowncart.com/" />\n    ' +
+            '<meta property="og:locale" content="en_IN" />\n    ' +
+            '<meta property="og:image" content="https://billing.mytowncart.com/screenshots/og.png" />\n    ' +
+            '<meta property="og:image:width" content="1200" />\n    ' +
+            '<meta property="og:image:height" content="630" />\n    ' +
+            '<meta name="twitter:card" content="summary_large_image" />\n    ' +
+            '<meta name="twitter:title" content="MyTownCart Billing — Free GST billing &amp; POS in your browser" />\n    ' +
+            '<meta name="twitter:description" content="Free GST billing and POS for local shops, in your browser." />\n    ' +
+            '<meta name="twitter:image" content="https://billing.mytowncart.com/screenshots/og.png" />\n    <title>',
         )
         .replace(
           "</head>",

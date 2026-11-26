@@ -859,6 +859,7 @@ export const hi: Record<I18nKey, string> = {
   "hosted.signin_missing_scope": "इस साइन इन में बैकअप की अनुमति नहीं मिली। फिर से साइन इन करें और सभी अनुमतियाँ दें।",
   "hosted.demo_button": "डेमो आज़माएँ (कुछ भी सेव नहीं होगा)",
   "hosted.download_desktop": "डेस्कटॉप ऐप डाउनलोड करें",
+  "hosted.see_features": "फ़ीचर्स और स्क्रीनशॉट देखें",
   "hosted.download_hint": "रोज़ एक ही दुकान के कंप्यूटर पर बिलिंग? डेस्कटॉप ऐप पूरी तरह ऑफ़लाइन चलता है।",
   "hosted.legal_note": "साइन इन करके आप MyTownCart की सेवा की शर्तें और गोपनीयता नीति स्वीकार करते हैं, जो इस बिलिंग ऐप पर भी लागू होती हैं।",
   "hosted.legal_privacy": "गोपनीयता नीति",

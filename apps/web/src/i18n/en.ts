@@ -890,6 +890,7 @@ export const en = {
   "hosted.signin_missing_scope": "This sign-in did not allow backups. Sign in again and approve all permissions.",
   "hosted.demo_button": "Try a demo (nothing is saved)",
   "hosted.download_desktop": "Download the desktop app",
+  "hosted.see_features": "See features & screenshots",
   "hosted.download_hint": "Billing on one shop PC every day? The desktop app works fully offline.",
   "hosted.legal_note": "By signing in, you agree to MyTownCart's Terms of Service and Privacy Policy, which cover this billing app.",
   "hosted.legal_privacy": "Privacy Policy",

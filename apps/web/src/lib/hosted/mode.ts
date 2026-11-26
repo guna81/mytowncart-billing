@@ -20,6 +20,9 @@ export function isHosted(): boolean {
 /** Client name the seller sees in MyTownCart's connected-apps list. */
 export const HOSTED_CLIENT_NAME = "MyTownCart Billing (web)";
 
+/** Marketing and product overview page on the main MyTownCart domain. */
+export const BILLING_LANDING_URL = "https://www.mytowncart.com/billing";
+
 /** Where the "Download desktop app" button points. */
 export const DESKTOP_DOWNLOAD_URL = "https://billing.mytowncart.com/download/#download";
 
