@@ -39,6 +39,7 @@ import {
   setHostedRepository,
 } from "../../lib/hosted/session";
 import { acquireAppLock } from "../../lib/hosted/singleTab";
+import { LegalLinks } from "./LegalLinks";
 import { RecoveryKeyConfirm } from "./RecoveryKeyConfirm";
 
 const card = "bg-white rounded-lg shadow p-8 w-full max-w-md space-y-4";
@@ -374,6 +375,7 @@ function SignIn(props: {
         {t("hosted.demo_button")}
       </button>
       <DownloadLink />
+      <LegalLinks note />
     </Screen>
   );
 }

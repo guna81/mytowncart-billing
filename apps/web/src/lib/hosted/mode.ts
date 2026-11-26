@@ -21,4 +21,11 @@ export function isHosted(): boolean {
 export const HOSTED_CLIENT_NAME = "MyTownCart Billing (web)";
 
 /** Where the "Download desktop app" button points. */
-export const DESKTOP_DOWNLOAD_URL = "https://billing.mytowncart.com/#download";
+export const DESKTOP_DOWNLOAD_URL = "https://billing.mytowncart.com/download/#download";
+
+/** MyTownCart's legal pages; they cover the billing app too. */
+export const LEGAL_LINKS = {
+  privacy: "https://www.mytowncart.com/privacy-policy",
+  terms: "https://www.mytowncart.com/terms-of-service",
+  grievance: "https://www.mytowncart.com/grievance-officer",
+} as const;

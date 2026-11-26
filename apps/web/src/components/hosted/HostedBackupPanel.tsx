@@ -14,6 +14,7 @@ import {
 import { backupNow, useCloudBackupStatus } from "../../lib/hosted/cloudBackup";
 import { DESKTOP_DOWNLOAD_URL } from "../../lib/hosted/mode";
 import { getHostedRepository, signOutAndWipe } from "../../lib/hosted/session";
+import { LegalLinks } from "./LegalLinks";
 import { RecoveryKeyConfirm } from "./RecoveryKeyConfirm";
 
 const btnPrimary =
@@ -141,6 +142,7 @@ export function HostedBackupPanel() {
           {t("hosted.download_desktop")}
         </a>
       </p>
+      <LegalLinks />
     </section>
   );
 }

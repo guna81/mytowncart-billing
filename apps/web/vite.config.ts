@@ -22,7 +22,10 @@ export default defineConfig(({ command, mode }) => {
     }
   }
   // Hosted web app (D2/D13): relative asset paths so it can live under any
-  // sub-path (e.g. GitHub Pages /mytowncart-billing/app/), plus the PWA manifest.
+  // path (it is served at the root of billing.mytowncart.com), plus the PWA manifest.
+  // Old links to the landing page's sections (e.g. /#download, opened by
+  // released desktop builds) now land on the app, so send those to /download/.
+  // App routes use "#/…", so these plain anchors never clash with them.
   const hosted = process.env.VITE_HOSTED === "1";
   const hostedHtml = {
     name: "mtc-hosted-html",
@@ -30,6 +33,13 @@ export default defineConfig(({ command, mode }) => {
       if (!hosted) return html;
       return html
         .replace('href="/brand/logo-mark.svg"', 'href="./brand/logo-mark.svg"')
+        .replace(
+          "<title>",
+          "<script>if (/^#(download|features|improvements|start|privacy|faq)$/.test(location.hash)) " +
+            'location.replace("download/" + location.hash);</script>\n    ' +
+            '<meta name="description" content="Free GST billing and POS for local shops, in your browser. ' +
+            'Sign in with your MyTownCart seller account; bills are backed up, encrypted, automatically." />\n    <title>',
+        )
         .replace(
           "</head>",
           '    <link rel="manifest" href="./manifest.webmanifest" />\n' +

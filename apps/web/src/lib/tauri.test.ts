@@ -14,7 +14,7 @@ describe("tauri - openReleasePage / openDownloadPage", () => {
   });
 
   it("has the expected download page URL", () => {
-    expect(DOWNLOAD_PAGE_URL).toBe("https://billing.mytowncart.com/#download");
+    expect(DOWNLOAD_PAGE_URL).toBe("https://billing.mytowncart.com/download/#download");
   });
 
   it("opens DOWNLOAD_PAGE_URL in a new browser tab when not in Tauri", async () => {
@@ -23,7 +23,7 @@ describe("tauri - openReleasePage / openDownloadPage", () => {
 
     await openReleasePage();
     expect(openMock).toHaveBeenCalledWith(
-      "https://billing.mytowncart.com/#download",
+      "https://billing.mytowncart.com/download/#download",
       "_blank",
       "noopener,noreferrer",
     );
@@ -47,7 +47,7 @@ describe("tauri - openReleasePage / openDownloadPage", () => {
 
     await openDownloadPage();
     expect(openMock).toHaveBeenCalledWith(
-      "https://billing.mytowncart.com/#download",
+      "https://billing.mytowncart.com/download/#download",
       "_blank",
       "noopener,noreferrer",
     );

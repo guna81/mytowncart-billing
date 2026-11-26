@@ -5,8 +5,10 @@ name: Deploy site to GitHub Pages
 # site/release.json from the latest published release so the download section
 # always shows the current version and only the installers that exist.
 #
-# It also builds the hosted web app (VITE_HOSTED=1, roadmap D2/D13) into
-# site/app/, so "Use in browser" always matches main.
+# Layout of the published site (assembled in _site/):
+#   /            the hosted web app (VITE_HOSTED=1, roadmap D2/D13), built from main
+#   /download/   the landing and download page (site/download/)
+#   /app/        a redirect stub for the old web app address (site/app/)
 on:
   push:
     branches: [main]
@@ -42,23 +44,30 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build the hosted web app into site/app
+      - name: Build the hosted web app and assemble the site
         run: |
           pnpm --filter @mytowncart-billing/web build:hosted
-          rm -rf site/app
-          cp -R apps/web/dist-hosted site/app
+          rm -rf _site
+          cp -R site _site
+          # The app owns the root; refuse to silently overwrite a site file.
+          for f in $(cd apps/web/dist-hosted && find . -type f); do
+            if [ -e "_site/$f" ] && ! cmp -s "apps/web/dist-hosted/$f" "_site/$f"; then
+              echo "::error::web app file $f clashes with site/$f"; exit 1
+            fi
+          done
+          cp -R apps/web/dist-hosted/. _site/
       - name: Write release.json from the latest published release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if gh api "repos/${{ github.repository }}/releases/latest" > latest.json 2>/dev/null; then
-            jq '{tag: .tag_name, published: .published_at, assets: [.assets[].name]}' latest.json > site/release.json
+            jq '{tag: .tag_name, published: .published_at, assets: [.assets[].name]}' latest.json > _site/release.json
           else
-            echo '{}' > site/release.json
+            echo '{}' > _site/release.json
           fi
-          cat site/release.json
+          cat _site/release.json
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: _site
       - id: deployment
         uses: actions/deploy-pages@v4

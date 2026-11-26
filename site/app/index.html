@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>MyTownCart Billing has moved</title>
+<link rel="canonical" href="https://billing.mytowncart.com/">
+<meta http-equiv="refresh" content="3;url=/">
+<script>
+// The web app moved from /app/ to the site root. Browser data is kept per
+// origin, so shops lose nothing. Remove the old /app/ service worker so it
+// stops serving the old copy, then go to the new address.
+(function () {
+  var go = function () { location.replace('/' + location.hash); };
+  try {
+    if (!('serviceWorker' in navigator)) return go();
+    navigator.serviceWorker.getRegistrations()
+      .then(function (regs) {
+        return Promise.all(regs.filter(function (r) {
+          return new URL(r.scope).pathname.indexOf('/app/') === 0;
+        }).map(function (r) { return r.unregister(); }));
+      })
+      .then(go, go);
+  } catch (e) { go(); }
+})();
+</script>
+</head>
+<body style="font-family:system-ui,sans-serif;padding:32px">
+<p>MyTownCart Billing has moved to <a href="/">billing.mytowncart.com</a>. Taking you there…</p>
+</body>
+</html>

@@ -14,7 +14,8 @@ Everyday billing uses a local SQLite database on the shop's computer. Connect a
 MyTownCart account to publish your product catalog and synchronize marketplace
 orders and stock when online. Visit the [MyTownCart platform](https://mytowncart.com).
 
-[Website](https://billing.mytowncart.com/) ·
+[Web app](https://billing.mytowncart.com/) ·
+[Download](https://billing.mytowncart.com/download/) ·
 [MyTownCart platform](https://mytowncart.com) ·
 [Installation](#installing-a-release-build) ·
 [Features](#billing-and-inventory-features) ·
@@ -44,7 +45,7 @@ orders and stock when online. Visit the [MyTownCart platform](https://mytowncart
 **Version 0.1.6 is available:** [v0.1.6 release notes](https://github.com/guna81/mytowncart-billing/releases/tag/v0.1.6).
 macOS and Linux are community builds; a failed platform build may have no download.
 Releases are published automatically when a version tag is pushed; the
-[website download section](https://billing.mytowncart.com/#download)
+[website download section](https://billing.mytowncart.com/download/#download)
 follows the latest release and has install notes for each device
 ([how releases work](docs/RELEASING.md)).
 

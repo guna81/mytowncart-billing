@@ -2,7 +2,11 @@
 // Offline app shell for the hosted web app (registered only when VITE_HOSTED=1).
 // Shop data lives in IndexedDB, not here; this only caches the app's own files.
 // Cross-origin requests (the MyTownCart API) are never touched or cached.
-const CACHE = "mtc-billing-shell-v1";
+// The app lives at the site root, next to other pages (/download/, /app/
+// redirect, robots.txt…), so only the app's own files are handled here.
+const CACHE = "mtc-billing-shell-v2";
+const APP_DIRS = ["assets/", "brand/", "pwa/"];
+const APP_FILES = ["manifest.webmanifest"];
 
 self.addEventListener("install", () => self.skipWaiting());
 
@@ -43,14 +47,17 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
   const scope = new URL(self.registration.scope);
   if (!url.pathname.startsWith(scope.pathname)) return;
+  const path = url.pathname.slice(scope.pathname.length);
 
   if (request.mode === "navigate") {
+    // Only the app's own page; /download/ and the rest go straight to the network.
+    if (path !== "" && path !== "index.html") return;
     // Always try for the newest app; offline, open the last one we saw.
     event.respondWith(networkFirst(request, new URL("./", scope).toString()));
-  } else if (url.pathname.includes("/assets/")) {
+  } else if (path.startsWith("assets/")) {
     // Vite's hashed bundles never change under the same name.
     event.respondWith(cacheFirst(request));
-  } else {
+  } else if (APP_DIRS.some((d) => path.startsWith(d)) || APP_FILES.includes(path)) {
     event.respondWith(networkFirst(request));
   }
 });

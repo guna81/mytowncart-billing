@@ -27,6 +27,14 @@ createRoot(rootEl).render(
 // Hosted web app: offline app shell (public/sw.js). Desktop and dev never register it.
 if (isHosted() && "serviceWorker" in navigator && window.isSecureContext) {
   window.addEventListener("load", () => {
-    void navigator.serviceWorker.register("./sw.js").catch((err) => console.warn("service worker:", err));
+    void navigator.serviceWorker
+      .register("./sw.js")
+      .then(async (own) => {
+        // The app used to live at /app/; drop that old worker so it stops serving a stale copy.
+        for (const reg of await navigator.serviceWorker.getRegistrations()) {
+          if (reg.scope !== own.scope) await reg.unregister();
+        }
+      })
+      .catch((err) => console.warn("service worker:", err));
   });
 }
