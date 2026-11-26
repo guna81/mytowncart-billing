@@ -590,3 +590,104 @@ it("publishes shared identity separately from the seller external ID", async () 
   }]);
   expect((bodyOf(calls[0]!).items as Record<string, unknown>[])[0]).toMatchObject({ external_id: "itm_1", catalog_entry_id: "catalog-1" });
 });
+
+describe("OAuth 2.1 + PKCE and 401 refresh", () => {
+  it("registers a public client, builds authorize URL, exchanges code, and refreshes", async () => {
+    const { fetch, calls } = fakeFetch([
+      [/oauth\/register\/$/, () => jsonResponse({ client_id: "cid-1" }, 201)],
+      [
+        /oauth\/token\/$/,
+        () => {
+          const req = bodyOf(calls[calls.length - 1]!) as { grant_type: string };
+          if (req.grant_type === "authorization_code") {
+            return jsonResponse({
+              access_token: "mtc_access_1",
+              refresh_token: "mtr_refresh_1",
+              expires_in: 3600,
+              scope: "products:write backups:write",
+            });
+          }
+          return jsonResponse({
+            access_token: "mtc_access_2",
+            refresh_token: "mtr_refresh_2",
+            expires_in: 3600,
+            scope: "products:write backups:write",
+          });
+        },
+      ],
+    ]);
+    const c = connector(fetch);
+    const reg = await c.registerOAuthClient("MyTownCart Billing (Web)", "https://billing.mytowncart.com/");
+    expect(reg.clientId).toBe("cid-1");
+    expect(headersOf(calls[0]!).Authorization).toBeUndefined();
+
+    const authUrl = new URL(
+      c.buildOAuthAuthorizeUrl({
+        clientId: "cid-1",
+        redirectUri: "https://billing.mytowncart.com/",
+        scopes: ["catalog", "backups"],
+        state: "st-1",
+        codeChallenge: "a".repeat(43),
+      }),
+    );
+    expect(authUrl.pathname).toBe("/api/v1/integrations/oauth/authorize/");
+    expect(authUrl.searchParams.get("response_type")).toBe("code");
+    expect(authUrl.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(authUrl.searchParams.get("scope")).toBe("products:write backups:write");
+
+    const exchanged = await c.exchangeOAuthCode({
+      clientId: "cid-1",
+      code: "code-1",
+      redirectUri: "https://billing.mytowncart.com/",
+      codeVerifier: "verifier-1",
+    });
+    expect(exchanged).toEqual({
+      accessToken: "mtc_access_1",
+      refreshToken: "mtr_refresh_1",
+      expiresIn: 3600,
+      scopes: ["products:write", "backups:write"],
+    });
+
+    const refreshed = await c.refreshOAuthToken({ clientId: "cid-1", refreshToken: "mtr_refresh_1" });
+    expect(refreshed.accessToken).toBe("mtc_access_2");
+    expect(refreshed.refreshToken).toBe("mtr_refresh_2");
+  });
+
+  it("retries once on 401 when onUnauthorized refreshes the token", async () => {
+    let token = "expired-tok";
+    let attempts = 0;
+    const { fetch, calls } = fakeFetch([
+      [
+        /\/me\/$/,
+        () => {
+          attempts++;
+          const auth = headersOf(calls[calls.length - 1]!).Authorization;
+          if (auth === "Bearer expired-tok") {
+            return jsonResponse({ detail: "expired" }, 401);
+          }
+          return jsonResponse({
+            seller: { id: "s1", name: "Refreshed Store", is_approved: true },
+            scopes: ["backups:write"],
+            min_billing_app_version: "0.1.0",
+            limits: { bulk_max_items: 100, image_max_bytes: 5242880, min_poll_interval: 120 },
+          });
+        },
+      ],
+    ]);
+    const c = new MyTownCartConnector({
+      apiBaseUrl: "https://api.example/api/v1/integrations",
+      webBaseUrl: "https://api.example",
+      appVersion: "0.1.0",
+      getToken: () => token,
+      onUnauthorized: async (failed) => {
+        expect(failed).toBe("expired-tok");
+        token = "fresh-tok";
+        return true;
+      },
+      fetch,
+    });
+    const me = await c.me();
+    expect(attempts).toBe(2);
+    expect(me.sellerName).toBe("Refreshed Store");
+  });
+});

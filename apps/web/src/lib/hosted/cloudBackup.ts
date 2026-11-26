@@ -27,6 +27,9 @@ import { getConnector } from "../marketplace";
 import { keyForBackup } from "./backupKey";
 import { idbGet, idbSet } from "./idb";
 import type { PersistedRepository } from "./persistedRepository";
+import { broadcastTabEvent, subscribeTabEvents } from "./tabSync";
+
+const BACKUP_LOCK_NAME = "mytowncart-billing-backup";
 
 export const WEB_BACKUP_FORMAT = "web-state-v1";
 export const WEB_BACKUP_SCHEMA = 1;
@@ -125,17 +128,21 @@ let onSignedOut: (() => void) | null = null;
 /** Back up now. Resolves true on success; never throws. */
 export function backupNow(persisted: PersistedRepository): Promise<boolean> {
   if (running) return running;
-  running = (async () => {
+  const runBody = async (): Promise<boolean> => {
     lastAttemptAt = Date.now();
     setStatus({ running: true });
     try {
       const key = await keyForBackup();
       await persisted.flush();
+      await persisted.sync();
       // Taken before the async seal/upload: a change made meanwhile keeps
       // `pending` set and is picked up by the next run.
       const changedDuringRun = { value: false };
-      const stop = persisted.onMutation(() => {
+      const stopLocal = persisted.onMutation(() => {
         changedDuringRun.value = true;
+      });
+      const stopRemote = subscribeTabEvents((msg) => {
+        if (msg.type === "mutated") changedDuringRun.value = true;
       });
       try {
         const now = new Date();
@@ -145,11 +152,14 @@ export function backupNow(persisted: PersistedRepository): Promise<boolean> {
           schemaVersion: WEB_BACKUP_SCHEMA,
           cryptoParams: { format: WEB_BACKUP_FORMAT, cipher: "aes-256-gcm", kdf: "hkdf-sha-256", compression: "gzip" },
         });
-        await idbSet(LAST_SUCCESS_KEY, now.toISOString());
+        const iso = now.toISOString();
+        await idbSet(LAST_SUCCESS_KEY, iso);
         if (!changedDuringRun.value) await idbSet(PENDING_KEY, false);
-        setStatus({ lastSuccessAt: now.toISOString(), lastError: null, pending: changedDuringRun.value });
+        setStatus({ lastSuccessAt: iso, lastError: null, pending: changedDuringRun.value });
+        broadcastTabEvent({ type: "backup_status", lastSuccessAt: iso, pending: changedDuringRun.value });
       } finally {
-        stop();
+        stopLocal();
+        stopRemote();
       }
       return true;
     } catch (err) {
@@ -163,6 +173,19 @@ export function backupNow(persisted: PersistedRepository): Promise<boolean> {
       setStatus({ running: false });
       running = null;
     }
+  };
+
+  running = (async () => {
+    const locks = (typeof navigator !== "undefined" ? navigator.locks : undefined) as LockManager | undefined;
+    if (!locks) return runBody();
+    return locks.request(BACKUP_LOCK_NAME, { ifAvailable: true }, async (lock) => {
+      if (!lock) {
+        // Another tab is already uploading a backup right now.
+        running = null;
+        return true;
+      }
+      return runBody();
+    });
   })();
   return running;
 }
@@ -204,11 +227,20 @@ export async function startCloudBackupScheduler(
       void backupNow(persisted);
     }
   });
+  const stopTabSync = subscribeTabEvents((msg) => {
+    if (msg.type === "mutated") {
+      if (!status.pending) firstChangeAt = Date.now();
+      setStatus({ pending: true });
+    } else if (msg.type === "backup_status") {
+      setStatus({ lastSuccessAt: msg.lastSuccessAt, pending: msg.pending, lastError: null });
+    }
+  });
   const timer = setInterval(tick, TICK_MS);
   window.addEventListener("online", tick);
 
   return () => {
     stopListening();
+    stopTabSync();
     clearInterval(timer);
     window.removeEventListener("online", tick);
     onSignedOut = null;

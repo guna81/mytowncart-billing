@@ -37,6 +37,9 @@ function parse(json: string | null): ConnectionToken | null {
       sellerName: typeof parsed.sellerName === "string" ? parsed.sellerName : "",
       sellerIsApproved: parsed.sellerIsApproved === true,
       scopes: Array.isArray(parsed.scopes) ? parsed.scopes.filter((s) => typeof s === "string") : [],
+      ...(typeof parsed.refreshToken === "string" && parsed.refreshToken !== "" ? { refreshToken: parsed.refreshToken } : {}),
+      ...(typeof parsed.expiresAt === "number" && Number.isFinite(parsed.expiresAt) ? { expiresAt: parsed.expiresAt } : {}),
+      ...(typeof parsed.clientId === "string" && parsed.clientId !== "" ? { clientId: parsed.clientId } : {}),
     };
   } catch {
     return null;

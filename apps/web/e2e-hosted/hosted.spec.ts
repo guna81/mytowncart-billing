@@ -5,6 +5,7 @@
  * restores the shop on sign-in (managed key) or with the seller's own
  * recovery key (private mode).
  */
+import { createHash } from "node:crypto";
 import { expect, test, type BrowserContext, type Page, type Route } from "@playwright/test";
 
 const API = "http://localhost:9000";
@@ -34,13 +35,17 @@ function wire(b: Stored) {
   };
 }
 
-/** A fake MyTownCart: device flow + backups, shared across browser contexts. */
+/** A fake MyTownCart: OAuth 2.1 + PKCE flow + backups, shared across browser contexts. */
 function fakeServer() {
   const backups: Stored[] = [];
   const pending = new Map<string, Record<string, unknown>>();
   const uploads: Buffer[] = [];
   const keySetting: { mode: string | null; key: string | null } = { mode: null, key: null };
+  const oauthClients = new Map<string, { redirectUris: string[] }>();
+  const oauthCodes = new Map<string, { clientId: string; redirectUri: string; challenge: string; scope: string }>();
   let n = 0;
+  let clientSeq = 0;
+  let codeSeq = 0;
 
   async function install(context: BrowserContext) {
     await context.route(`${API}/**`, async (route) => {
@@ -49,14 +54,60 @@ function fakeServer() {
       const path = url.pathname.replace("/api/v1/integrations", "");
       const method = req.method();
       if (method === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
-      if (path === "/connect/start/") {
-        return json(route, {
-          device_code: "dev", user_code: "ABCD-EFGH", verification_url: `${API}/seller/connect?code=ABCD-EFGH`,
-          expires_in: 600, interval: 1,
-        }, 201);
+      if (path === "/oauth/register/" && method === "POST") {
+        const body = req.postDataJSON() as { redirect_uris: string[] };
+        const clientId = `client-${++clientSeq}`;
+        oauthClients.set(clientId, { redirectUris: body.redirect_uris });
+        return json(route, { client_id: clientId, redirect_uris: body.redirect_uris }, 201);
       }
-      if (path === "/connect/poll/") {
-        return json(route, { token: "mtc_test", seller: { id: "s1", name: "Test Kirana", is_approved: true }, scopes: SCOPES });
+      if (path === "/oauth/authorize/" && method === "GET") {
+        const clientId = url.searchParams.get("client_id") ?? "";
+        const redirectUri = url.searchParams.get("redirect_uri") ?? "";
+        const state = url.searchParams.get("state") ?? "";
+        const challenge = url.searchParams.get("code_challenge") ?? "";
+        const methodParam = url.searchParams.get("code_challenge_method") ?? "";
+        const scope = url.searchParams.get("scope") ?? "";
+        const client = oauthClients.get(clientId);
+        expect(client?.redirectUris).toContain(redirectUri);
+        expect(methodParam).toBe("S256");
+        expect(challenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
+        const code = `auth-code-${++codeSeq}`;
+        oauthCodes.set(code, { clientId, redirectUri, challenge, scope });
+        const back = new URL(redirectUri);
+        back.searchParams.set("code", code);
+        if (state) back.searchParams.set("state", state);
+        return route.fulfill({ status: 302, headers: { Location: back.toString() } });
+      }
+      if (path === "/oauth/token/" && method === "POST") {
+        const body = req.postDataJSON() as {
+          grant_type: string;
+          client_id: string;
+          code?: string;
+          redirect_uri?: string;
+          code_verifier?: string;
+        };
+        if (body.grant_type === "authorization_code") {
+          const auth = oauthCodes.get(body.code ?? "");
+          expect(auth).toBeTruthy();
+          expect(auth!.clientId).toBe(body.client_id);
+          expect(auth!.redirectUri).toBe(body.redirect_uri);
+          const expectedChallenge = createHash("sha256")
+            .update(body.code_verifier ?? "")
+            .digest("base64url");
+          expect(expectedChallenge).toBe(auth!.challenge);
+          oauthCodes.delete(body.code ?? "");
+          return json(route, {
+            access_token: "mtc_test",
+            token_type: "Bearer",
+            expires_in: 3600,
+            refresh_token: "mtr_test",
+            scope: SCOPES.join(" "),
+          });
+        }
+        return json(route, { error: "unsupported_grant_type" }, 400);
+      }
+      if (path === "/oauth/revoke/" && method === "POST") {
+        return json(route, {}, 200);
       }
       if (path === "/me/") {
         return json(route, {
@@ -114,6 +165,7 @@ function fakeServer() {
 
 async function signIn(page: Page) {
   await page.goto("/");
+  await expect(page.getByTestId("hosted-brand-logo")).toBeVisible();
   await page.getByTestId("hosted-signin").click();
   // The approval page opens in a new tab; the poll then returns the token.
 }
@@ -154,10 +206,18 @@ test("sign in, bill, back up encrypted, reload, and restore automatically in a f
   expect(server.uploads[0]!.includes(Buffer.from("Hosted Test Store"))).toBe(false);
   expect(server.uploads[0]!.subarray(0, 5).toString()).toBe("MTCB1");
 
-  // A second tab of the same browser is refused (it would overwrite data).
+  // A second tab in the same browser works concurrently without overwriting data.
   const second = await first.newPage();
   await second.goto("/");
-  await expect(second.getByText(/Already open in another tab/)).toBeVisible();
+  await expect(second.getByTestId("pos-scan")).toBeVisible();
+  await second.goto("/#/categories");
+  await second.getByTestId("category-add-btn").click();
+  await second.getByTestId("category-modal-name").fill("Tab Two Category");
+  await second.getByTestId("category-modal-save").click();
+  await expect(second.locator("body")).toContainText("Tab Two Category");
+  // Tab 1 sees Tab 2's write without losing existing shop data.
+  await page.goto("/#/categories");
+  await expect(page.locator("body")).toContainText("Tab Two Category");
   await first.close();
 
   // --- Fresh browser: signing in brings the shop back ----------------------

@@ -42,17 +42,24 @@ export interface HttpOptions {
   fetch: FetchLike;
   /** Bearer token for authenticated calls; may be a getter (token can change). */
   token?: () => string | null;
+  /**
+   * Called on HTTP 401 for authenticated requests. Return `true` after refreshing
+   * the token to retry the request once with the updated token.
+   */
+  onUnauthorized?: (failedToken: string | null) => Promise<boolean>;
 }
 
 interface ErrorBody {
   message?: unknown;
   detail?: unknown;
   error?: unknown;
+  error_description?: unknown;
   code?: unknown;
 }
 
 function errorCode(status: number, body: ErrorBody): string {
   if (typeof body.code === "string" && body.code !== "") return body.code;
+  if (typeof body.error === "string" && body.error !== "") return body.error;
   if (status === 401) return "unauthorized";
   if (status === 403) return "forbidden";
   if (status === 429) return "rate_limited";
@@ -63,6 +70,7 @@ function errorCode(status: number, body: ErrorBody): string {
 function errorMessage(status: number, body: ErrorBody): string {
   if (typeof body.message === "string" && body.message !== "") return body.message;
   if (typeof body.detail === "string" && body.detail !== "") return body.detail;
+  if (typeof body.error_description === "string" && body.error_description !== "") return body.error_description;
   if (typeof body.error === "string" && body.error !== "") return body.error;
   return `Request failed (HTTP ${status}).`;
 }
@@ -74,31 +82,46 @@ export class Http {
     return `${this.opts.baseUrl.replace(/\/+$/, "")}${path}`;
   }
 
-  private headers(extra?: Record<string, string>): Record<string, string> {
+  private headers(extra?: Record<string, string>, auth = true): { headers: Record<string, string>; usedToken: string | null } {
     const headers: Record<string, string> = {
       Accept: "application/json",
       "X-App-Version": this.opts.appVersion,
       ...extra,
     };
-    const token = this.opts.token?.() ?? null;
-    if (token) headers.Authorization = `Bearer ${token}`;
-    return headers;
+    const usedToken = auth ? (this.opts.token?.() ?? null) : null;
+    if (usedToken) headers.Authorization = `Bearer ${usedToken}`;
+    return { headers, usedToken };
   }
 
-  async json<T>(method: string, path: string, body?: unknown): Promise<T> {
-    let response: Response;
-    try {
-      response = await this.opts.fetch(this.url(path), {
-        method,
-        headers: this.headers(body === undefined ? undefined : { "Content-Type": "application/json" }),
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-    } catch (err) {
-      throw new MarketplaceError(
-        "network_error",
-        err instanceof Error ? err.message : "Network request failed.",
-        0,
+  async json<T>(method: string, path: string, body?: unknown, reqOpts?: { auth?: boolean }): Promise<T> {
+    const auth = reqOpts?.auth ?? true;
+    const send = async () => {
+      const { headers, usedToken } = this.headers(
+        body === undefined ? undefined : { "Content-Type": "application/json" },
+        auth,
       );
+      let response: Response;
+      try {
+        response = await this.opts.fetch(this.url(path), {
+          method,
+          headers,
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+      } catch (err) {
+        throw new MarketplaceError(
+          "network_error",
+          err instanceof Error ? err.message : "Network request failed.",
+          0,
+        );
+      }
+      return { response, usedToken };
+    };
+
+    let { response, usedToken } = await send();
+    if (auth && response.status === 401 && this.opts.onUnauthorized) {
+      if (await this.opts.onUnauthorized(usedToken)) {
+        ({ response } = await send());
+      }
     }
     const payload = (await readJson(response)) as ErrorBody;
     if (!response.ok) {
@@ -155,19 +178,31 @@ export class Http {
     extraHeaders?: Record<string, string>,
   ): Promise<{ bytes: Uint8Array; json: unknown }> {
     const url = this.sameOriginUrl(target);
-    let response: Response;
-    try {
-      response = await this.opts.fetch(url, {
-        method,
-        headers: this.headers(body === undefined ? extraHeaders : { "Content-Type": "application/octet-stream", ...extraHeaders }),
-        body: body === undefined ? undefined : (body as BodyInit),
-      });
-    } catch (err) {
-      throw new MarketplaceError(
-        "network_error",
-        err instanceof Error ? err.message : "Network request failed.",
-        0,
+    const send = async () => {
+      const { headers, usedToken } = this.headers(
+        body === undefined ? extraHeaders : { "Content-Type": "application/octet-stream", ...extraHeaders },
       );
+      let response: Response;
+      try {
+        response = await this.opts.fetch(url, {
+          method,
+          headers,
+          body: body === undefined ? undefined : (body as BodyInit),
+        });
+      } catch (err) {
+        throw new MarketplaceError(
+          "network_error",
+          err instanceof Error ? err.message : "Network request failed.",
+          0,
+        );
+      }
+      return { response, usedToken };
+    };
+    let { response, usedToken } = await send();
+    if (response.status === 401 && this.opts.onUnauthorized) {
+      if (await this.opts.onUnauthorized(usedToken)) {
+        ({ response } = await send());
+      }
     }
     if (!response.ok) {
       const payload = (await readJson(response)) as ErrorBody;
@@ -196,22 +231,35 @@ export class Http {
   }
 
   async upload<T = void>(path: string, file: Blob, filename: string, extra?: Record<string, string>): Promise<T> {
-    const form = new FormData();
-    form.append("image", file, filename);
-    for (const [k, v] of Object.entries(extra ?? {})) form.append(k, v);
-    let response: Response;
-    try {
-      response = await this.opts.fetch(this.url(path), {
-        method: "POST",
-        headers: this.headers(),
-        body: form,
-      });
-    } catch (err) {
-      throw new MarketplaceError(
-        "network_error",
-        err instanceof Error ? err.message : "Network request failed.",
-        0,
-      );
+    const buildForm = () => {
+      const form = new FormData();
+      form.append("image", file, filename);
+      for (const [k, v] of Object.entries(extra ?? {})) form.append(k, v);
+      return form;
+    };
+    const send = async () => {
+      const { headers, usedToken } = this.headers();
+      let response: Response;
+      try {
+        response = await this.opts.fetch(this.url(path), {
+          method: "POST",
+          headers,
+          body: buildForm(),
+        });
+      } catch (err) {
+        throw new MarketplaceError(
+          "network_error",
+          err instanceof Error ? err.message : "Network request failed.",
+          0,
+        );
+      }
+      return { response, usedToken };
+    };
+    let { response, usedToken } = await send();
+    if (response.status === 401 && this.opts.onUnauthorized) {
+      if (await this.opts.onUnauthorized(usedToken)) {
+        ({ response } = await send());
+      }
     }
     if (!response.ok) {
       const payload = (await readJson(response)) as ErrorBody;

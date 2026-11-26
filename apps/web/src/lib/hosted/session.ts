@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 /** Hosted-mode session state shared by the gate and the settings panel. */
 import { backupNow, getCloudBackupStatus } from "./cloudBackup";
+import { loadConnection } from "../connection";
+import { getConnector } from "../marketplace";
 import { idbClearAll, idbGet, idbSet } from "./idb";
 import type { PersistedRepository } from "./persistedRepository";
+import { broadcastTabEvent } from "./tabSync";
 
 /** The MyTownCart seller whose shop data this browser holds. */
 const OWNER_KEY = "owner.sellerId";
@@ -53,8 +56,21 @@ export async function signOutAndWipe(): Promise<boolean> {
     const ok = await backupNow(persisted);
     if (!ok) return false;
   }
+  // Best-effort RFC 7009 revocation for OAuth tokens; never block sign-out.
+  try {
+    const conn = await loadConnection();
+    if (conn?.clientId && (conn.refreshToken || conn.token)) {
+      await getConnector().revokeOAuthToken({
+        clientId: conn.clientId,
+        token: conn.refreshToken ?? conn.token,
+      });
+    }
+  } catch {
+    // Offline or already revoked — proceed with local wipe.
+  }
   await idbClearAll();
   setDemo(false);
+  broadcastTabEvent({ type: "signed_out" });
   window.location.reload();
   return true;
 }

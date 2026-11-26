@@ -16,6 +16,7 @@ import type {
   BackupKeySetting,
   ConnectSession,
   ConnectionToken,
+  OAuthTokenResult,
   MarketplaceCategory,
   MarketplaceConnector,
   MarketplaceProfile,
@@ -259,6 +260,8 @@ export interface MyTownCartOptions {
   appVersion: string;
   /** Current token, or null when disconnected. */
   getToken?: () => string | null;
+  /** Called on HTTP 401; return `true` after refreshing the token to retry once. */
+  onUnauthorized?: (failedToken: string | null) => Promise<boolean>;
   /** Injected for tests; defaults to global fetch. */
   fetch?: FetchLike;
   /** Poll pacing override (tests); otherwise the server's `interval`/limits apply. */
@@ -273,6 +276,22 @@ export interface MyTownCartOptions {
 /** Client name the seller sees in the marketplace's connected-apps list. */
 export const CLIENT_NAME = "MyTownCart Billing";
 
+interface OAuthTokenWire {
+  access_token: string;
+  refresh_token?: string;
+  expires_in?: number;
+  scope?: string;
+}
+
+function parseOAuthToken(wire: OAuthTokenWire): OAuthTokenResult {
+  return {
+    accessToken: wire.access_token,
+    refreshToken: wire.refresh_token || undefined,
+    expiresIn: typeof wire.expires_in === "number" && wire.expires_in > 0 ? wire.expires_in : 3600,
+    scopes: typeof wire.scope === "string" && wire.scope.trim() !== "" ? wire.scope.trim().split(/\s+/) : [],
+  };
+}
+
 export class MyTownCartConnector implements MarketplaceConnector {
   private readonly http: Http;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -284,9 +303,95 @@ export class MyTownCartConnector implements MarketplaceConnector {
       appVersion: opts.appVersion,
       fetch: opts.fetch ?? ((input, init) => fetch(input, init)),
       token: () => opts.getToken?.() ?? null,
+      onUnauthorized: opts.onUnauthorized,
     });
     this.sleep =
       opts.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  }
+
+  /** RFC 7591 dynamic public client registration for OAuth 2.1 + PKCE. */
+  async registerOAuthClient(clientName: string, redirectUri: string): Promise<{ clientId: string }> {
+    const res = await this.http.json<{ client_id: string }>(
+      "POST",
+      "/oauth/register/",
+      {
+        client_name: clientName,
+        redirect_uris: [redirectUri],
+        token_endpoint_auth_method: "none",
+      },
+      { auth: false },
+    );
+    return { clientId: res.client_id };
+  }
+
+  /** Build the GET /oauth/authorize/ URL for a browser redirect. */
+  buildOAuthAuthorizeUrl(params: {
+    clientId: string;
+    redirectUri: string;
+    scopes: readonly Scope[];
+    state: string;
+    codeChallenge: string;
+  }): string {
+    const query = new URLSearchParams({
+      response_type: "code",
+      client_id: params.clientId,
+      redirect_uri: params.redirectUri,
+      scope: scopeNames(params.scopes).join(" "),
+      state: params.state,
+      code_challenge: params.codeChallenge,
+      code_challenge_method: "S256",
+    });
+    return `${this.http.url("/oauth/authorize/")}?${query.toString()}`;
+  }
+
+  /** Exchange an OAuth authorization code + PKCE verifier for access/refresh tokens. */
+  async exchangeOAuthCode(params: {
+    clientId: string;
+    code: string;
+    redirectUri: string;
+    codeVerifier: string;
+  }): Promise<OAuthTokenResult> {
+    const wire = await this.http.json<OAuthTokenWire>(
+      "POST",
+      "/oauth/token/",
+      {
+        grant_type: "authorization_code",
+        client_id: params.clientId,
+        code: params.code,
+        redirect_uri: params.redirectUri,
+        code_verifier: params.codeVerifier,
+      },
+      { auth: false },
+    );
+    return parseOAuthToken(wire);
+  }
+
+  /** Rotate an OAuth refresh token for a fresh access/refresh token pair. */
+  async refreshOAuthToken(params: {
+    clientId: string;
+    refreshToken: string;
+  }): Promise<OAuthTokenResult> {
+    const wire = await this.http.json<OAuthTokenWire>(
+      "POST",
+      "/oauth/token/",
+      {
+        grant_type: "refresh_token",
+        client_id: params.clientId,
+        refresh_token: params.refreshToken,
+      },
+      { auth: false },
+    );
+    return parseOAuthToken(wire);
+  }
+
+  /** Best-effort RFC 7009 token revocation on sign-out. */
+  async revokeOAuthToken(params: { clientId: string; token: string }): Promise<void> {
+    await this.http.json(
+      "POST",
+      "/oauth/revoke/",
+      { client_id: params.clientId, token: params.token },
+      { auth: false },
+    );
   }
 
   async connect(clientName: string, scopes: Scope[]): Promise<ConnectSession> {

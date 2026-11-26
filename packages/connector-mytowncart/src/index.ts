@@ -226,6 +226,19 @@ export interface ConnectionToken {
   sellerName: string;
   sellerIsApproved: boolean;
   scopes: string[];
+  /** OAuth 2.1 fields (present for hosted web OAuth sign-in; absent for device-flow tokens). */
+  refreshToken?: string;
+  /** Epoch milliseconds when `token` expires. */
+  expiresAt?: number;
+  /** Dynamically registered OAuth client ID used for refresh/revocation. */
+  clientId?: string;
+}
+
+export interface OAuthTokenResult {
+  accessToken: string;
+  refreshToken?: string;
+  expiresIn: number;
+  scopes: string[];
 }
 
 export interface RemoteProductImage {

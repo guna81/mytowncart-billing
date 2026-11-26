@@ -13,6 +13,8 @@ import {
   MyTownCartConnector,
 } from "@mytowncart-billing/connector-mytowncart";
 import { currentToken } from "./connection";
+import { isHosted } from "./hosted/mode";
+import { refreshHostedToken } from "./hosted/oauth";
 import { isLanServer } from "./repository";
 import { lanMarketplaceFetch } from "./lanMarketplace";
 import { variantSyncEnabled } from "./variantSync";
@@ -44,6 +46,7 @@ export function getConnector(): MyTownCartConnector {
       appVersion: APP_VERSION,
       variantGroups: variantSyncEnabled(),
       getToken: currentToken,
+      ...(isHosted() ? { onUnauthorized: refreshHostedToken } : {}),
       ...(isLanServer() ? { fetch: lanMarketplaceFetch } : {}),
     });
   }

@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
  * Startup gate for the hosted web app (D13). Before the billing UI renders:
- * one tab only → MyTownCart sign-in (mandatory) → when this browser is empty
- * and the shop has backups, restore the latest automatically with the key
- * MyTownCart keeps (or ask for the recovery key in private mode) → make sure
- * a backup key exists → app, with the automatic encrypted cloud backup
- * running. A no-login demo keeps nothing.
+ * MyTownCart sign-in (mandatory) → when this browser is empty and the shop
+ * has backups, restore the latest automatically with the key MyTownCart keeps
+ * (or ask for the recovery key in private mode) → make sure a backup key
+ * exists → app, with the automatic encrypted cloud backup running. Multiple
+ * tabs are supported via record-level IndexedDB storage. A no-login demo
+ * keeps nothing.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { parseRecoveryKey } from "@mytowncart-billing/backup";
-import { MarketplaceError, scopeNames, type CloudBackup } from "@mytowncart-billing/connector-mytowncart";
+import { MarketplaceError, type CloudBackup } from "@mytowncart-billing/connector-mytowncart";
 import { MemoryRepository, seedDemoData } from "@mytowncart-billing/storage";
 
 import { t } from "../../i18n";
@@ -18,9 +19,7 @@ import {
   clearConnection,
   HOSTED_SIGNED_OUT_EVENT,
   loadConnection,
-  saveConnection,
 } from "../../lib/connection";
-import { getConnector } from "../../lib/marketplace";
 import { setRepository } from "../../lib/repository";
 import {
   downloadAndOpen,
@@ -29,16 +28,19 @@ import {
   useCloudBackupStatus,
 } from "../../lib/hosted/cloudBackup";
 import { ensureBackupKey, rememberRestoredKey, serverKeySetting, type KeyMode } from "../../lib/hosted/backupKey";
-import { DESKTOP_DOWNLOAD_URL, HOSTED_CLIENT_NAME } from "../../lib/hosted/mode";
+import { DESKTOP_DOWNLOAD_URL } from "../../lib/hosted/mode";
+import {
+  finishHostedOAuthCallback,
+  hasOAuthCallback,
+  startHostedOAuthSignIn,
+} from "../../lib/hosted/oauth";
 import { openPersistedRepository, writeRepositoryState, type PersistedRepository } from "../../lib/hosted/persistedRepository";
 import {
-  dataOwner,
   isDemo,
-  setDataOwner,
   setDemo,
   setHostedRepository,
 } from "../../lib/hosted/session";
-import { acquireAppLock } from "../../lib/hosted/singleTab";
+import { subscribeTabEvents } from "../../lib/hosted/tabSync";
 import { LegalLinks } from "./LegalLinks";
 import { RecoveryKeyConfirm } from "./RecoveryKeyConfirm";
 
@@ -52,9 +54,8 @@ const inputCls =
 
 type Phase =
   | { kind: "checking" }
-  | { kind: "other_tab" }
   | { kind: "storage_failed" }
-  | { kind: "signin" }
+  | { kind: "signin"; error?: string }
   | { kind: "other_shop" }
   | { kind: "backups_failed"; message: string }
   | { kind: "restoring" }
@@ -73,7 +74,13 @@ function errorText(err: unknown): string {
 
 function Screen({ children }: { children: ReactNode }) {
   return (
-    <main className="min-h-screen bg-gray-100 flex items-start justify-center pt-16 px-4">
+    <main className="min-h-screen bg-gray-100 flex flex-col items-center justify-start pt-12 pb-12 px-4 gap-6">
+      <img
+        src={`${import.meta.env.BASE_URL}brand/logo-full.svg`}
+        alt="MyTownCart Billing"
+        className="h-11 w-auto"
+        data-testid="hosted-brand-logo"
+      />
       <div className={card}>{children}</div>
     </main>
   );
@@ -98,8 +105,9 @@ function DownloadLink() {
 
 export function HostedGate({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>({ kind: "checking" });
+  const phaseRef = useRef<Phase>(phase);
+  phaseRef.current = phase;
   const persistedRef = useRef<PersistedRepository | null>(null);
-  const lockRef = useRef(false);
   const freshRef = useRef(false);
   const autoRestoreTriedRef = useRef(false);
   const stopSchedulerRef = useRef<(() => void) | null>(null);
@@ -113,13 +121,6 @@ export function HostedGate({ children }: { children: ReactNode }) {
       setPhase({ kind: "demo" });
       return;
     }
-    if (!lockRef.current) {
-      lockRef.current = await acquireAppLock();
-      if (!lockRef.current) {
-        setPhase({ kind: "other_tab" });
-        return;
-      }
-    }
     // Ask the browser not to evict our data under storage pressure.
     void navigator.storage?.persist?.().catch(() => false);
     try {
@@ -131,6 +132,27 @@ export function HostedGate({ children }: { children: ReactNode }) {
     const persisted = persistedRef.current;
     setRepository(persisted.repo);
     setHostedRepository(persisted);
+
+    if (hasOAuthCallback()) {
+      try {
+        const result = await finishHostedOAuthCallback(persisted);
+        if (!result.ok) {
+          if (result.otherShop) {
+            setPhase({ kind: "other_shop" });
+            return;
+          }
+          const msg =
+            result.code === "missing_scope"
+              ? t("hosted.signin_missing_scope")
+              : t("hosted.signin_failed", { message: result.message });
+          setPhase({ kind: "signin", error: msg });
+          return;
+        }
+      } catch (err) {
+        setPhase({ kind: "signin", error: t("hosted.signin_failed", { message: errorText(err) }) });
+        return;
+      }
+    }
 
     if (!(await loadConnection({ force: true }))) {
       setPhase({ kind: "signin" });
@@ -192,9 +214,19 @@ export function HostedGate({ children }: { children: ReactNode }) {
       stopSchedulerRef.current = null;
       setPhase({ kind: "signin" });
     };
+    const stopTabEvents = subscribeTabEvents((msg) => {
+      if (msg.type === "signed_out" || msg.type === "restored") {
+        window.location.reload();
+      } else if (msg.type === "signed_in" && phaseRef.current.kind === "signin") {
+        void boot();
+      } else if (msg.type === "token_refreshed") {
+        void loadConnection({ force: true });
+      }
+    });
     window.addEventListener(HOSTED_SIGNED_OUT_EVENT, onSignedOut);
     return () => {
       window.removeEventListener(HOSTED_SIGNED_OUT_EVENT, onSignedOut);
+      stopTabEvents();
       stopSchedulerRef.current?.();
     };
   }, [boot]);
@@ -208,16 +240,6 @@ export function HostedGate({ children }: { children: ReactNode }) {
           <p className="text-sm text-gray-700" data-testid="hosted-auto-restoring">{t("hosted.restoring_auto")}</p>
         </Screen>
       );
-    case "other_tab":
-      return (
-        <Screen>
-          <h1 className="text-xl font-bold">{t("hosted.other_tab_title")}</h1>
-          <p className="text-sm text-gray-600">{t("hosted.other_tab_body")}</p>
-          <button type="button" className={btnPrimary} onClick={() => window.location.reload()}>
-            {t("hosted.reload")}
-          </button>
-        </Screen>
-      );
     case "storage_failed":
       return (
         <Screen>
@@ -227,13 +249,11 @@ export function HostedGate({ children }: { children: ReactNode }) {
     case "signin":
       return (
         <SignIn
-          onSignedIn={() => void boot()}
-          onOtherShop={() => setPhase({ kind: "other_shop" })}
+          initialError={phase.error}
           onDemo={() => {
             setDemo(true);
             window.location.reload();
           }}
-          persisted={persistedRef.current}
         />
       );
     case "other_shop":
@@ -309,47 +329,24 @@ export function HostedGate({ children }: { children: ReactNode }) {
 }
 
 function SignIn(props: {
-  onSignedIn: () => void;
-  onOtherShop: () => void;
+  initialError?: string;
   onDemo: () => void;
-  persisted: PersistedRepository | null;
 }) {
-  const [code, setCode] = useState<{ userCode: string; url: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(props.initialError ?? null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (props.initialError) setError(props.initialError);
+  }, [props.initialError]);
 
   const signIn = async () => {
     setError(null);
     setBusy(true);
     try {
-      const connector = getConnector();
-      const session = await connector.connect(HOSTED_CLIENT_NAME, ["catalog", "stock", "orders", "backups"]);
-      setCode({ userCode: session.userCode, url: session.verificationUrl });
-      window.open(session.verificationUrl, "_blank", "noopener,noreferrer");
-      await session.waitForApproval();
-      const minted = connector.takeMintedToken();
-      if (!minted) throw new Error("no token");
-      if (!scopeNames(["backups"]).every((s) => minted.scopes.includes(s))) {
-        setError(t("hosted.signin_missing_scope"));
-        return;
-      }
-      await saveConnection(minted);
-      const me = await connector.me();
-      const owner = await dataOwner();
-      const hasData = props.persisted ? !(await props.persisted.isEmpty()) : false;
-      if (owner && owner !== me.sellerId && hasData) {
-        // Never back one shop's bills up into another seller's account.
-        await clearConnection();
-        props.onOtherShop();
-        return;
-      }
-      await setDataOwner(me.sellerId);
-      props.onSignedIn();
+      await startHostedOAuthSignIn();
     } catch (err) {
       setError(t("hosted.signin_failed", { message: errorText(err) }));
-    } finally {
       setBusy(false);
-      setCode(null);
     }
   };
 
@@ -357,16 +354,6 @@ function SignIn(props: {
     <Screen>
       <h1 className="text-xl font-bold">{t("hosted.signin_title")}</h1>
       <p className="text-sm text-gray-600">{t("hosted.signin_intro")}</p>
-      {code ? (
-        <div className="rounded border border-blue-200 bg-blue-50 p-4 text-center space-y-2" data-testid="hosted-signin-code">
-          <p className="text-sm text-gray-700">{t("hosted.signin_code")}</p>
-          <p className="font-mono text-2xl font-bold tracking-widest">{code.userCode}</p>
-          <a href={code.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-blue-700 underline">
-            {t("hosted.signin_open")}
-          </a>
-          <p className="text-xs text-gray-500">{t("hosted.signin_waiting")}</p>
-        </div>
-      ) : null}
       {error ? <p className="text-sm text-red-700" data-testid="hosted-signin-error">{error}</p> : null}
       <button type="button" className={btnPrimary} disabled={busy} onClick={() => void signIn()} data-testid="hosted-signin">
         {t("hosted.signin_button")}
