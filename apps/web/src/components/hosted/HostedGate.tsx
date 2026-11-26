@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
  * Startup gate for the hosted web app (D13). Before the billing UI renders:
- * one tab only → MyTownCart sign-in (mandatory) → restore from a cloud backup
- * when this browser is empty → recovery key set up → app, with the automatic
- * encrypted cloud backup running. A no-login demo keeps nothing.
+ * one tab only → MyTownCart sign-in (mandatory) → when this browser is empty
+ * and the shop has backups, restore the latest automatically with the key
+ * MyTownCart keeps (or ask for the recovery key in private mode) → make sure
+ * a backup key exists → app, with the automatic encrypted cloud backup
+ * running. A no-login demo keeps nothing.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
-import { formatRecoveryKey, parseRecoveryKey } from "@mytowncart-billing/backup";
+import { parseRecoveryKey } from "@mytowncart-billing/backup";
 import { MarketplaceError, scopeNames, type CloudBackup } from "@mytowncart-billing/connector-mytowncart";
 import { MemoryRepository, seedDemoData } from "@mytowncart-billing/storage";
 
 import { t } from "../../i18n";
-import { createRecoveryKey, hasRecoveryKey, saveRecoveryKey } from "../../lib/cryptoStore";
 import {
   clearConnection,
   HOSTED_SIGNED_OUT_EVENT,
@@ -27,7 +28,7 @@ import {
   startCloudBackupScheduler,
   useCloudBackupStatus,
 } from "../../lib/hosted/cloudBackup";
-import { hostedInvoke } from "../../lib/hosted/keystore";
+import { ensureBackupKey, rememberRestoredKey, serverKeySetting, type KeyMode } from "../../lib/hosted/backupKey";
 import { DESKTOP_DOWNLOAD_URL, HOSTED_CLIENT_NAME } from "../../lib/hosted/mode";
 import { openPersistedRepository, writeRepositoryState, type PersistedRepository } from "../../lib/hosted/persistedRepository";
 import {
@@ -38,6 +39,7 @@ import {
   setHostedRepository,
 } from "../../lib/hosted/session";
 import { acquireAppLock } from "../../lib/hosted/singleTab";
+import { RecoveryKeyConfirm } from "./RecoveryKeyConfirm";
 
 const card = "bg-white rounded-lg shadow p-8 w-full max-w-md space-y-4";
 const btnPrimary =
@@ -54,10 +56,15 @@ type Phase =
   | { kind: "signin" }
   | { kind: "other_shop" }
   | { kind: "backups_failed"; message: string }
-  | { kind: "restore"; backups: CloudBackup[] }
+  | { kind: "restoring" }
+  | { kind: "restore"; backups: CloudBackup[]; mode: KeyMode | null; serverKey: Uint8Array | null }
   | { kind: "key_setup" }
   | { kind: "ready" }
   | { kind: "demo" };
+
+function isAuthError(err: unknown): boolean {
+  return err instanceof MarketplaceError && (err.code === "unauthorized" || err.code === "expired_token");
+}
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -93,6 +100,7 @@ export function HostedGate({ children }: { children: ReactNode }) {
   const persistedRef = useRef<PersistedRepository | null>(null);
   const lockRef = useRef(false);
   const freshRef = useRef(false);
+  const autoRestoreTriedRef = useRef(false);
   const stopSchedulerRef = useRef<(() => void) | null>(null);
 
   const boot = useCallback(async () => {
@@ -131,11 +139,25 @@ export function HostedGate({ children }: { children: ReactNode }) {
       try {
         const backups = await listWebBackups();
         if (backups.length > 0) {
-          setPhase({ kind: "restore", backups });
+          const server = await serverKeySetting();
+          const newest = backups[0]!;
+          if (server?.key && !autoRestoreTriedRef.current) {
+            // Managed key: bring the shop back with nothing to type.
+            autoRestoreTriedRef.current = true;
+            setPhase({ kind: "restoring" });
+            const opened = await downloadAndOpen(newest.id, server.key);
+            if (opened.ok) {
+              await writeRepositoryState(opened.state);
+              await rememberRestoredKey(opened.key, "managed", true);
+              window.location.reload();
+              return;
+            }
+          }
+          setPhase({ kind: "restore", backups, mode: server?.mode ?? null, serverKey: server?.key ?? null });
           return;
         }
       } catch (err) {
-        if (err instanceof MarketplaceError && err.code === "unauthorized") {
+        if (isAuthError(err)) {
           await clearConnection();
           return;
         }
@@ -143,8 +165,17 @@ export function HostedGate({ children }: { children: ReactNode }) {
         return;
       }
     }
-    if (!(await hasRecoveryKey(hostedInvoke))) {
-      setPhase({ kind: "key_setup" });
+    try {
+      if ((await ensureBackupKey()) === "private_setup") {
+        setPhase({ kind: "key_setup" });
+        return;
+      }
+    } catch (err) {
+      if (isAuthError(err)) {
+        await clearConnection();
+        return;
+      }
+      setPhase({ kind: "backups_failed", message: errorText(err) });
       return;
     }
     if (!stopSchedulerRef.current) {
@@ -170,6 +201,12 @@ export function HostedGate({ children }: { children: ReactNode }) {
   switch (phase.kind) {
     case "checking":
       return <main className="p-8 text-gray-600">{t("common.loading")}</main>;
+    case "restoring":
+      return (
+        <Screen>
+          <p className="text-sm text-gray-700" data-testid="hosted-auto-restoring">{t("hosted.restoring_auto")}</p>
+        </Screen>
+      );
     case "other_tab":
       return (
         <Screen>
@@ -220,6 +257,8 @@ export function HostedGate({ children }: { children: ReactNode }) {
       return (
         <Restore
           backups={phase.backups}
+          mode={phase.mode}
+          serverKey={phase.serverKey}
           onStartFresh={() => {
             freshRef.current = true;
             void boot();
@@ -227,7 +266,18 @@ export function HostedGate({ children }: { children: ReactNode }) {
         />
       );
     case "key_setup":
-      return <KeySetup onDone={() => void boot()} />;
+      return (
+        <Screen>
+          <RecoveryKeyConfirm
+            title={t("hosted.key_title")}
+            intro={t("hosted.key_intro")}
+            onConfirmed={async (raw) => {
+              await rememberRestoredKey(raw, "private", false);
+              void boot();
+            }}
+          />
+        </Screen>
+      );
     case "demo":
       return (
         <>
@@ -328,7 +378,12 @@ function SignIn(props: {
   );
 }
 
-function Restore(props: { backups: CloudBackup[]; onStartFresh: () => void }) {
+function Restore(props: {
+  backups: CloudBackup[];
+  mode: KeyMode | null;
+  serverKey: Uint8Array | null;
+  onStartFresh: () => void;
+}) {
   const [selected, setSelected] = useState(props.backups[0]?.id ?? "");
   const [key, setKey] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -336,13 +391,16 @@ function Restore(props: { backups: CloudBackup[]; onStartFresh: () => void }) {
 
   const restore = async () => {
     setError(null);
-    if (parseRecoveryKey(key) === null) {
+    // Managed shops can restore with the key MyTownCart keeps; a typed key
+    // (an older one the seller saved) wins when given.
+    const useServerKey = key.trim() === "" && props.serverKey !== null;
+    if (!useServerKey && parseRecoveryKey(key) === null) {
       setError(t("hosted.restore_bad_key"));
       return;
     }
     setBusy(true);
     try {
-      const opened = await downloadAndOpen(selected, key);
+      const opened = await downloadAndOpen(selected, useServerKey ? props.serverKey! : key);
       if (!opened.ok) {
         setError(
           opened.error === "wrong_key" ? t("hosted.restore_wrong_key")
@@ -352,7 +410,9 @@ function Restore(props: { backups: CloudBackup[]; onStartFresh: () => void }) {
         return;
       }
       await writeRepositoryState(opened.state);
-      await saveRecoveryKey(hostedInvoke, opened.key);
+      // Managed shops hand the key to the server before the next backup; if
+      // the server already holds a different one, that one is adopted then.
+      await rememberRestoredKey(opened.key, props.mode ?? "managed", useServerKey);
       window.location.reload();
     } catch (err) {
       setError(t("hosted.backups_failed", { message: errorText(err) }));
@@ -368,7 +428,9 @@ function Restore(props: { backups: CloudBackup[]; onStartFresh: () => void }) {
   return (
     <Screen>
       <h1 className="text-xl font-bold">{t("hosted.restore_title")}</h1>
-      <p className="text-sm text-gray-600">{t("hosted.restore_intro")}</p>
+      <p className="text-sm text-gray-600">
+        {props.serverKey ? t("hosted.restore_auto_failed") : t("hosted.restore_intro")}
+      </p>
       <label className="block">
         <span className="text-sm font-medium">{t("hosted.restore_pick")}</span>
         <select
@@ -385,7 +447,9 @@ function Restore(props: { backups: CloudBackup[]; onStartFresh: () => void }) {
         </select>
       </label>
       <label className="block">
-        <span className="text-sm font-medium">{t("hosted.restore_key")}</span>
+        <span className="text-sm font-medium">
+          {props.serverKey ? t("hosted.restore_key_optional") : t("hosted.restore_key")}
+        </span>
         <input
           className={inputCls}
           value={key}
@@ -402,92 +466,6 @@ function Restore(props: { backups: CloudBackup[]; onStartFresh: () => void }) {
       </button>
       <button type="button" className={btnSecondary} disabled={busy} onClick={startFresh} data-testid="hosted-start-fresh">
         {t("hosted.start_fresh")}
-      </button>
-    </Screen>
-  );
-}
-
-function printKey(key: string): void {
-  const w = window.open("", "_blank", "width=640,height=420");
-  if (!w) return;
-  // The key is base32 + spaces only; anything else is stripped before it goes into markup.
-  w.document.write(
-    `<!doctype html><title>MyTownCart Billing recovery key</title>` +
-      `<body style="font-family:sans-serif;padding:32px">` +
-      `<h2>MyTownCart Billing — recovery key</h2>` +
-      `<p style="font:bold 22px monospace;letter-spacing:2px">${key.replace(/[^A-Z0-9 -]/gi, "")}</p>` +
-      `<p>${new Date().toLocaleString()}</p>` +
-      `<p>Keep this safe. Without it, backups of this shop cannot be opened.</p></body>`,
-  );
-  w.document.close();
-  w.focus();
-  w.print();
-}
-
-function KeySetup({ onDone }: { onDone: () => void }) {
-  const [key, setKey] = useState<string | null>(null);
-  const [typed, setTyped] = useState("");
-  const [ack, setAck] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const created = useRef(false);
-
-  useEffect(() => {
-    if (created.current) return;
-    created.current = true;
-    void createRecoveryKey(hostedInvoke).then(setKey, (err) => setError(errorText(err)));
-  }, []);
-
-  const typedRaw = parseRecoveryKey(typed);
-  const matches = key !== null && typedRaw !== null && formatRecoveryKey(typedRaw) === key;
-
-  return (
-    <Screen>
-      <h1 className="text-xl font-bold">{t("hosted.key_title")}</h1>
-      <p className="text-sm text-gray-600">{t("hosted.key_intro")}</p>
-      {key ? (
-        <p className="rounded border border-amber-300 bg-amber-50 p-3 text-center font-mono text-lg font-bold tracking-wider break-all" data-testid="hosted-key">
-          {key}
-        </p>
-      ) : null}
-      <div className="flex gap-2">
-        <button type="button" className={btnSecondary} disabled={!key} onClick={() => key && printKey(key)}>
-          {t("hosted.key_print")}
-        </button>
-        <button
-          type="button"
-          className={btnSecondary}
-          disabled={!key}
-          onClick={() => {
-            if (!key) return;
-            void navigator.clipboard.writeText(key).then(() => setCopied(true));
-          }}
-        >
-          {copied ? t("hosted.key_copied") : t("hosted.key_copy")}
-        </button>
-      </div>
-      <label className="block">
-        <span className="text-sm font-medium">{t("hosted.key_confirm_label")}</span>
-        <input
-          className={inputCls}
-          value={typed}
-          onChange={(e) => setTyped(e.target.value)}
-          autoComplete="off"
-          spellCheck={false}
-          onPaste={(e) => e.preventDefault()}
-          data-testid="hosted-key-confirm"
-        />
-      </label>
-      {typed.trim() !== "" && !matches ? (
-        <p className="text-sm text-amber-800">{t("hosted.key_confirm_mismatch")}</p>
-      ) : null}
-      <label className="flex items-start gap-2 text-sm">
-        <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} data-testid="hosted-key-ack" />
-        <span>{t("hosted.key_ack")}</span>
-      </label>
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
-      <button type="button" className={btnPrimary} disabled={!matches || !ack} onClick={onDone} data-testid="hosted-key-continue">
-        {t("hosted.key_continue")}
       </button>
     </Screen>
   );

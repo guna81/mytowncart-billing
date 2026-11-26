@@ -934,6 +934,19 @@ export const en = {
   "hosted.sign_out_confirm": "Sign out and remove this shop's data from this browser? A final backup is made first. You can restore it after signing in again, with your recovery key.",
   "hosted.sign_out_backup_failed": "The final backup failed, so nothing was removed. Check your internet connection and try again.",
   "hosted.backup_overdue": "Not backed up for {hours} hours. Check your internet connection.",
+  "hosted.restoring_auto": "Restoring your shop from your latest backup…",
+  "hosted.restore_auto_failed": "We could not restore your latest backup automatically. Choose a backup and try again. If you saved a recovery key for an older backup, you can enter it.",
+  "hosted.restore_key_optional": "Recovery key (only for backups made with your own key)",
+  "hosted.key_managed": "MyTownCart keeps your backup key safe. Sign in on any device to get your bills back.",
+  "hosted.key_private": "You keep your own recovery key. MyTownCart cannot open your backups, so keep the key safe.",
+  "hosted.use_private": "Keep my own recovery key instead",
+  "hosted.private_title": "Keep your own recovery key",
+  "hosted.private_intro": "MyTownCart will delete its copy of your backup key and will not be able to open your new backups. Save this new key. If you lose it and this browser's data is cleared, your bills cannot be recovered.",
+  "hosted.use_managed": "Let MyTownCart keep my key",
+  "hosted.mode_changed_private": "Done. You now keep your own recovery key.",
+  "hosted.mode_changed_managed": "Done. MyTownCart now keeps your backup key.",
+  "hosted.mode_change_failed": "Could not change this: {message}",
+  "hosted.sign_out_confirm_managed": "Sign out and remove this shop's data from this browser? A final backup is made first. Sign in again to get your bills back.",
 } as const;
 
 export type I18nKey = keyof typeof en;

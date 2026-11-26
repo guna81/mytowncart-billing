@@ -2,7 +2,8 @@
 /**
  * Hosted web app (D13): sign-in is mandatory, data survives a reload
  * (IndexedDB), backups are encrypted before upload, and a fresh browser
- * restores the shop from the cloud with the recovery key.
+ * restores the shop on sign-in (managed key) or with the seller's own
+ * recovery key (private mode).
  */
 import { expect, test, type BrowserContext, type Page, type Route } from "@playwright/test";
 
@@ -38,6 +39,7 @@ function fakeServer() {
   const backups: Stored[] = [];
   const pending = new Map<string, Record<string, unknown>>();
   const uploads: Buffer[] = [];
+  const keySetting: { mode: string | null; key: string | null } = { mode: null, key: null };
   let n = 0;
 
   async function install(context: BrowserContext) {
@@ -62,6 +64,20 @@ function fakeServer() {
           min_billing_app_version: "0.0.1",
           limits: { bulk_max_items: 100, image_max_bytes: 5242880, min_poll_interval: 120, backup_max_bytes: 52428800 },
         });
+      }
+      if (path === "/backups/key/" && method === "GET") {
+        if (keySetting.mode === null) return json(route, { code: "no_key", message: "No backup key yet." }, 404);
+        return json(route, keySetting.mode === "managed" ? keySetting : { mode: "private" });
+      }
+      if (path === "/backups/key/" && method === "PUT") {
+        const body = req.postDataJSON() as { mode: string; key?: string; replace?: boolean };
+        const same = keySetting.mode === body.mode && (body.mode === "private" || keySetting.key === body.key);
+        if (keySetting.mode !== null && !body.replace && !same) {
+          return json(route, { code: "key_exists", mode: keySetting.mode, message: "exists" }, 409);
+        }
+        keySetting.mode = body.mode;
+        keySetting.key = body.mode === "managed" ? body.key! : null;
+        return json(route, { mode: body.mode });
       }
       if (path === "/backups/" && method === "GET") {
         return json(route, { results: [...backups].reverse().map(wire) });
@@ -93,7 +109,7 @@ function fakeServer() {
     });
   }
 
-  return { install, backups, uploads };
+  return { install, backups, uploads, keySetting };
 }
 
 async function signIn(page: Page) {
@@ -102,42 +118,39 @@ async function signIn(page: Page) {
   // The approval page opens in a new tab; the poll then returns the token.
 }
 
-async function confirmKey(page: Page): Promise<string> {
-  const keyBox = page.getByTestId("hosted-key");
-  await expect(keyBox).toBeVisible();
-  const key = (await keyBox.textContent())!.trim();
-  await page.getByTestId("hosted-key-confirm").fill(key);
-  await page.getByTestId("hosted-key-ack").check();
-  await page.getByTestId("hosted-key-continue").click();
-  return key;
-}
-
-test("sign in, bill, back up encrypted, reload, and restore in a fresh browser", async ({ browser }) => {
-  const server = fakeServer();
-
-  // --- First browser: new shop ---------------------------------------------
-  const first = await browser.newContext();
-  await server.install(first);
-  const page = await first.newPage();
-  await signIn(page);
-  const key = await confirmKey(page);
-  expect(key).toMatch(/^([A-Z2-7]{4} ){7}[A-Z2-7]{4}$/);
-
+async function newShop(page: Page) {
   await page.getByTestId("setup-shop-name").fill("Hosted Test Store");
   await page.getByTestId("setup-gst-no").check();
   await page.getByTestId("setup-start").click();
   await expect(page.getByTestId("pos-scan")).toBeVisible();
+}
+
+async function backUpFromSettings(page: Page) {
+  await page.goto("/#/settings");
+  await page.getByTestId("hosted-backup-now").click();
+  await expect(page.getByTestId("hosted-last-backup")).not.toHaveText(/Not backed up/);
+}
+
+test("sign in, bill, back up encrypted, reload, and restore automatically in a fresh browser", async ({ browser }) => {
+  const server = fakeServer();
+
+  // --- First browser: new shop, no recovery key screen ----------------------
+  const first = await browser.newContext();
+  await server.install(first);
+  const page = await first.newPage();
+  await signIn(page);
+  await newShop(page);
+  await expect(page.getByTestId("hosted-key-setup")).toHaveCount(0);
+  // MyTownCart now keeps the shop's key.
+  expect(server.keySetting.mode).toBe("managed");
 
   // Data is in IndexedDB: a reload goes straight back to the shop.
   await page.reload();
   await expect(page.getByTestId("pos-scan")).toBeVisible();
 
-  // Back up now from Settings.
-  await page.goto("/#/settings");
-  await page.getByTestId("hosted-backup-now").click();
-  await expect(page.getByTestId("hosted-last-backup")).not.toHaveText(/Not backed up/);
+  await backUpFromSettings(page);
   expect(server.backups).toHaveLength(1);
-  // The server never sees the shop's data in clear text.
+  // The backup itself is ciphertext.
   expect(server.uploads[0]!.includes(Buffer.from("Hosted Test Store"))).toBe(false);
   expect(server.uploads[0]!.subarray(0, 5).toString()).toBe("MTCB1");
 
@@ -147,7 +160,42 @@ test("sign in, bill, back up encrypted, reload, and restore in a fresh browser",
   await expect(second.getByText(/Already open in another tab/)).toBeVisible();
   await first.close();
 
-  // --- Fresh browser: restore from the cloud -------------------------------
+  // --- Fresh browser: signing in brings the shop back ----------------------
+  const fresh = await browser.newContext();
+  await server.install(fresh);
+  const page2 = await fresh.newPage();
+  await signIn(page2);
+  await expect(page2.getByTestId("pos-scan")).toBeVisible();
+  await page2.goto("/#/settings");
+  await expect(page2.locator("body")).toContainText("Hosted Test Store");
+  await fresh.close();
+});
+
+test("private mode: the seller keeps the key and restores with it", async ({ browser }) => {
+  const server = fakeServer();
+
+  const first = await browser.newContext();
+  await server.install(first);
+  const page = await first.newPage();
+  await signIn(page);
+  await newShop(page);
+
+  await page.goto("/#/settings");
+  await page.getByTestId("hosted-use-private").click();
+  const keyBox = page.getByTestId("hosted-key");
+  await expect(keyBox).toBeVisible();
+  const key = (await keyBox.textContent())!.trim();
+  expect(key).toMatch(/^([A-Z2-7]{4} ){7}[A-Z2-7]{4}$/);
+  await page.getByTestId("hosted-key-confirm").fill(key);
+  await page.getByTestId("hosted-key-ack").check();
+  await page.getByTestId("hosted-key-continue").click();
+  await expect(page.getByTestId("hosted-use-managed")).toBeVisible();
+  // The server's copy is gone.
+  expect(server.keySetting).toEqual({ mode: "private", key: null });
+  await page.getByTestId("hosted-backup-now").click();
+  await expect.poll(() => server.backups.length).toBeGreaterThan(0);
+  await first.close();
+
   const fresh = await browser.newContext();
   await server.install(fresh);
   const page2 = await fresh.newPage();
@@ -163,6 +211,7 @@ test("sign in, bill, back up encrypted, reload, and restore in a fresh browser",
   await expect(page2.getByTestId("pos-scan")).toBeVisible();
   await page2.goto("/#/settings");
   await expect(page2.locator("body")).toContainText("Hosted Test Store");
+  await expect(page2.getByTestId("hosted-use-managed")).toBeVisible();
   await fresh.close();
 });
 

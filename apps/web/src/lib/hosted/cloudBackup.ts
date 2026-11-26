@@ -4,8 +4,9 @@
  *
  * Snapshot = gzip("MTWS1" + JSON state) sealed with the same AES-256-GCM /
  * HKDF recovery-key scheme as desktop backups (D5), then uploaded to the
- * seller's MyTownCart account. The server only ever sees ciphertext; without
- * the recovery key nobody (including MyTownCart) can open it.
+ * seller's MyTownCart account as ciphertext. Who else can open it depends on
+ * the key mode (backupKey.ts): by default MyTownCart keeps the key so a new
+ * device restores on sign-in; in private mode only the seller's key opens it.
  *
  * Schedule: soon after the first change, then at most every 30 minutes while
  * there are unsaved changes, right after a day-end closure, and when the
@@ -22,10 +23,9 @@ import {
 import { MarketplaceError, type CloudBackup } from "@mytowncart-billing/connector-mytowncart";
 import { decodeMemoryState, encodeMemoryState, type MemoryState } from "@mytowncart-billing/storage";
 
-import { revealRecoveryKey } from "../cryptoStore";
 import { getConnector } from "../marketplace";
+import { keyForBackup } from "./backupKey";
 import { idbGet, idbSet } from "./idb";
-import { hostedInvoke } from "./keystore";
 import type { PersistedRepository } from "./persistedRepository";
 
 export const WEB_BACKUP_FORMAT = "web-state-v1";
@@ -108,17 +108,12 @@ export async function openSealed(ciphertext: Uint8Array, typedKey: string | Uint
   }
 }
 
-async function recoveryKeyRaw(): Promise<Uint8Array | null> {
-  const text = await revealRecoveryKey(hostedInvoke);
-  return text === null ? null : parseRecoveryKey(text);
-}
-
 export async function listWebBackups(): Promise<CloudBackup[]> {
   const all = await getConnector().listBackups();
   return all.filter((b) => b.cryptoParams.format === WEB_BACKUP_FORMAT);
 }
 
-export async function downloadAndOpen(id: string, typedKey: string): Promise<OpenResult> {
+export async function downloadAndOpen(id: string, typedKey: string | Uint8Array): Promise<OpenResult> {
   return openSealed(await getConnector().downloadBackup(id), typedKey);
 }
 
@@ -134,8 +129,7 @@ export function backupNow(persisted: PersistedRepository): Promise<boolean> {
     lastAttemptAt = Date.now();
     setStatus({ running: true });
     try {
-      const key = await recoveryKeyRaw();
-      if (key === null) throw new Error("no_recovery_key");
+      const key = await keyForBackup();
       await persisted.flush();
       // Taken before the async seal/upload: a change made meanwhile keeps
       // `pending` set and is picked up by the next run.

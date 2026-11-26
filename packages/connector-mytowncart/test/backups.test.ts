@@ -89,3 +89,37 @@ describe("cloud backups", () => {
     ).rejects.toMatchObject({ code: "quota_exceeded", status: 409 });
   });
 });
+
+describe("backup key", () => {
+  it("returns the managed key as bytes", async () => {
+    const { connector } = make([["GET", /\/backups\/key\/$/, () => json({ mode: "managed", key: "AQID" })]]);
+    expect(await connector.getBackupKey()).toEqual({ mode: "managed", key: new Uint8Array([1, 2, 3]) });
+  });
+
+  it("returns private mode without a key", async () => {
+    const { connector } = make([["GET", /\/backups\/key\/$/, () => json({ mode: "private" })]]);
+    expect(await connector.getBackupKey()).toEqual({ mode: "private" });
+  });
+
+  it("returns null when no key is set up yet", async () => {
+    const { connector } = make([["GET", /\/backups\/key\/$/, () => json({ code: "no_key", message: "No backup key yet." }, 404)]]);
+    expect(await connector.getBackupKey()).toBeNull();
+  });
+
+  it("sends the key as base64 and surfaces key_exists", async () => {
+    const { connector, calls } = make([
+      ["PUT", /\/backups\/key\/$/, () => json({ code: "key_exists", mode: "managed", message: "x" }, 409)],
+    ]);
+    await expect(connector.putBackupKey({ mode: "managed", key: new Uint8Array([1, 2, 3]) })).rejects.toMatchObject({
+      code: "key_exists",
+    });
+    expect(JSON.parse(String(calls[0]!.init?.body))).toEqual({ mode: "managed", key: "AQID", replace: false });
+  });
+
+  it("sends private mode without key material", async () => {
+    const { connector, calls } = make([["PUT", /\/backups\/key\/$/, () => json({ mode: "private" })]]);
+    await connector.putBackupKey({ mode: "private" }, { replace: true });
+    expect(JSON.parse(String(calls[0]!.init?.body))).toEqual({ mode: "private", replace: true });
+  });
+});
+

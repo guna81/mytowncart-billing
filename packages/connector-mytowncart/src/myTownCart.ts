@@ -13,6 +13,7 @@ import { Http, MarketplaceError, retryAfterSeconds, type FetchLike } from "./htt
 import type {
   CloudBackup,
   CloudBackupMeta,
+  BackupKeySetting,
   ConnectSession,
   ConnectionToken,
   MarketplaceCategory,
@@ -774,6 +775,31 @@ export class MyTownCartConnector implements MarketplaceConnector {
     await this.http.json("DELETE", `/backups/${encodeURIComponent(id)}/`);
   }
 
+  /** The shop's backup key setting, or null when none is set up yet (404 `no_key`). */
+  async getBackupKey(): Promise<BackupKeySetting | null> {
+    try {
+      const out = await this.http.json<{ mode: string; key?: string }>("GET", "/backups/key/");
+      if (out.mode === "managed" && typeof out.key === "string") return { mode: "managed", key: base64ToBytes(out.key) };
+      if (out.mode === "private") return { mode: "private" };
+      throw new MarketplaceError("server_error", "Unexpected backup key response.", 200);
+    } catch (err) {
+      if (err instanceof MarketplaceError && err.code === "no_key") return null;
+      throw err;
+    }
+  }
+
+  /**
+   * Store the setting. Without `replace`, a different existing setting fails
+   * with MarketplaceError `key_exists` (another device got there first).
+   */
+  async putBackupKey(setting: BackupKeySetting, opts: { replace?: boolean } = {}): Promise<void> {
+    await this.http.json("PUT", "/backups/key/", {
+      mode: setting.mode,
+      ...(setting.mode === "managed" ? { key: bytesToBase64(setting.key) } : {}),
+      replace: opts.replace === true,
+    });
+  }
+
 }
 
 interface CloudBackupWire {
@@ -784,6 +810,19 @@ interface CloudBackupWire {
   schema_version: number;
   crypto_params: Record<string, string | number>;
   created_at: string;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+function base64ToBytes(text: string): Uint8Array {
+  const bin = atob(text);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }
 
 function toCloudBackup(w: CloudBackupWire): CloudBackup {

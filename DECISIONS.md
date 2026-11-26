@@ -230,3 +230,27 @@ after a day-end closure, and when the browser comes back online. A
 "pending" flag survives reloads. The server keeps the newest 10 plus the
 newest per day for 14 days.
 
+## B7-4 — MyTownCart keeps the hosted web app's backup key by default
+**Date:** 2026-11-26 (revises D13's "restore = recovery key")
+
+The mandatory recovery-key screen was onboarding friction, and a lost key
+meant lost bills, which defeats D13's purpose ("we can't let the user lose the
+data"). Now each shop's backup key is generated in the browser and also stored
+on the server (`backups/key/`), sealed with AES-256-GCM under
+`BACKUP_KEY_ENCRYPTION_KEY` with the seller id as associated data. Sign-in on
+an empty browser restores the newest backup automatically.
+
+- **Trade-off accepted:** MyTownCart (or anyone holding both the database row
+  and the master key, e.g. a full server compromise) can open managed backups.
+  The master key must be kept off the server too: losing it makes every
+  managed shop's backups unreadable.
+- **Private mode (opt-in, Settings):** the server copy is wiped, a new key the
+  server never saw is shown and must be confirmed (typed, paste blocked), and
+  new backups use it. Older backups made with the managed key age out under
+  normal retention.
+- **Conflicts:** the server stores a key only once unless `replace` is sent,
+  so two devices never overwrite each other; the loser adopts the server's
+  key before its first upload. Offline, the browser makes a local key and
+  hands it over before the next backup; billing never waits.
+- Desktop is unchanged (local-folder backups, recovery key in the OS keychain).
+

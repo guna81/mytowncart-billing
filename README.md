@@ -161,10 +161,14 @@ data in that browser (IndexedDB) and requires signing in with a MyTownCart
 seller account. It then uploads an encrypted backup of the whole shop (bills
 and customers included) to that account automatically: soon after the first
 change, then at most every 30 minutes while there are changes, and after each
-day-end. The backup is encrypted in the browser with the shop's recovery key
-before upload, so MyTownCart stores only ciphertext and cannot read or restore
-it. Losing the recovery key makes those backups unrecoverable. Signing out
-makes a final backup and then removes the shop's data from that browser.
+day-end. The backup is encrypted in the browser before upload. By default
+MyTownCart also keeps the shop's backup key (sealed with a server-side master
+key), so signing in on a new device restores the shop with nothing to type;
+this means MyTownCart can technically open those backups. A seller can switch
+to keeping their own recovery key in Settings: MyTownCart's copy is deleted,
+new backups use a key MyTownCart never saw, and losing that key makes those
+backups unrecoverable. Signing out makes a final backup and then removes the
+shop's data from that browser.
 
 ## Installing a release build
 

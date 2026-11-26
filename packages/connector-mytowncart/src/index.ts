@@ -256,6 +256,13 @@ export interface CloudBackupMeta {
   cryptoParams: Record<string, string | number>;
 }
 
+/**
+ * Who holds the shop's backup key (D13 rev). `managed`: MyTownCart keeps it,
+ * so signing in on a new device restores the shop. `private`: the seller keeps
+ * their own recovery key and the server cannot open the backups.
+ */
+export type BackupKeySetting = { mode: "managed"; key: Uint8Array } | { mode: "private" };
+
 export interface MarketplaceConnector {
   connect(clientName: string, scopes: Scope[]): Promise<ConnectSession>;
   me(): Promise<MarketplaceProfile>;
