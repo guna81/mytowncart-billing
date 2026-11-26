@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:hosted": "tsc --noEmit && VITE_HOSTED=1 vite build --outDir dist-hosted",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:hosted": "playwright test -c playwright.hosted.config.ts"
   },
   "dependencies": {
     "@mytowncart-billing/backup": "workspace:*",

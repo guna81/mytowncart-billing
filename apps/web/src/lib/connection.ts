@@ -8,6 +8,11 @@
 import type { ConnectionToken } from "@mytowncart-billing/connector-mytowncart";
 import { isInTauri, isLanServer } from "./repository";
 import { lanConnection } from "./lanMarketplace";
+import { isHosted } from "./hosted/mode";
+import { hostedInvoke } from "./hosted/keystore";
+
+/** Fired in hosted mode when the token is cleared, so the sign-in gate shows. */
+export const HOSTED_SIGNED_OUT_EVENT = "mtc:hosted-signed-out";
 
 const KEYCHAIN_KEY = "mytowncart.integration";
 
@@ -16,6 +21,8 @@ let current: ConnectionToken | null = null;
 let loaded = false;
 
 async function invokeKeychain<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
+  // Hosted web app: the browser keystore (IndexedDB, sealed), not Tauri.
+  if (isHosted()) return hostedInvoke<T>(cmd, args);
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<T>(cmd, args);
 }
@@ -42,7 +49,7 @@ export async function loadConnection(opts?: { force?: boolean }): Promise<Connec
     loaded = true;
     return current;
   }
-  if (!isInTauri()) return current;
+  if (!isInTauri() && !isHosted()) return current;
   if (loaded && !opts?.force) return current;
   const stored = await invokeKeychain<string | null>("keychain_get", { key: KEYCHAIN_KEY });
   current = parse(stored);
@@ -51,7 +58,7 @@ export async function loadConnection(opts?: { force?: boolean }): Promise<Connec
 }
 
 export async function saveConnection(next: ConnectionToken): Promise<void> {
-  if (isInTauri()) {
+  if (isInTauri() || isHosted()) {
     await invokeKeychain<void>("keychain_set", { key: KEYCHAIN_KEY, value: JSON.stringify(next) });
   }
   current = next;
@@ -60,11 +67,14 @@ export async function saveConnection(next: ConnectionToken): Promise<void> {
 
 export async function clearConnection(): Promise<void> {
   if (isLanServer()) await lanConnection("DELETE");
-  if (isInTauri()) {
+  if (isInTauri() || isHosted()) {
     await invokeKeychain<void>("keychain_delete", { key: KEYCHAIN_KEY });
   }
   current = null;
   loaded = true;
+  if (isHosted() && typeof window !== "undefined") {
+    window.dispatchEvent(new Event(HOSTED_SIGNED_OUT_EVENT));
+  }
 }
 
 /** Token getter handed to the connector; null when disconnected. */

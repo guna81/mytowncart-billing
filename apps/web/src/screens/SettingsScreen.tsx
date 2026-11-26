@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { HostedBackupPanel } from "../components/hosted/HostedBackupPanel";
+import { isHosted } from "../lib/hosted/mode";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { APP_VERSION, formatQty, parseQty } from "@mytowncart-billing/core";
@@ -248,10 +250,16 @@ export function SettingsScreen() {
           </div>
         </section>
 
-        <BackupPanel />
-        <LanServerPanel />
-        <DiagnosticsPanel />
-        <DemoDataPanel />
+        {isHosted() ? (
+          <HostedBackupPanel />
+        ) : (
+          <>
+            <BackupPanel />
+            <LanServerPanel />
+            <DiagnosticsPanel />
+            <DemoDataPanel />
+          </>
+        )}
 
         <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-xs text-sm text-gray-600">
           <h2 className="font-semibold mb-2 text-gray-800">{t("settings.printer")}</h2>

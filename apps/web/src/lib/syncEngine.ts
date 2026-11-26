@@ -11,6 +11,7 @@
  * - snapshot: the marketplace's current values are cached for the reconcile
  *   view. (Online orders are handled in the MyTownCart seller app.)
  */
+import { isHosted } from "./hosted/mode";
 import {
   MarketplaceError,
   type MarketplaceConnector,
@@ -691,9 +692,9 @@ export async function listReconcileRows(
   return (await getReconcileSnapshot(repo, now)) ?? [];
 }
 
-/** Background sync is available in Tauri desktop app or connected LAN server. */
+/** Background sync: desktop app, its LAN browsers, and the hosted web app (one tab, D13). */
 export function syncAvailable(): boolean {
-  return isInTauri() || isLanServer();
+  return isInTauri() || isLanServer() || isHosted();
 }
 
 export { remoteHashOf };

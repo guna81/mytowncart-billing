@@ -10,7 +10,8 @@
 export * from "./types";
 export * from "./repository";
 export { TauriRepository, type InvokeFn } from "./tauri";
-export { MemoryRepository } from "./memory";
+export { MemoryRepository, type MemoryState } from "./memory";
+export { decodeMemoryState, encodeMemoryState, isWebStateBackup, WEB_STATE_MAGIC } from "./memoryState";
 export { HttpRepository, createHttpInvoker, resolveAccessKey } from "./http";
 export * from "./seed";
 

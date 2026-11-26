@@ -14,7 +14,7 @@ Everyday billing uses a local SQLite database on the shop's computer. Connect a
 MyTownCart account to publish your product catalog and synchronize marketplace
 orders and stock when online. Visit the [MyTownCart platform](https://mytowncart.com).
 
-[Website](https://guna81.github.io/mytowncart-billing/) ·
+[Website](https://billing.mytowncart.com/) ·
 [MyTownCart platform](https://mytowncart.com) ·
 [Installation](#installing-a-release-build) ·
 [Features](#billing-and-inventory-features) ·
@@ -44,7 +44,7 @@ orders and stock when online. Visit the [MyTownCart platform](https://mytowncart
 **Version 0.1.6 is available:** [v0.1.6 release notes](https://github.com/guna81/mytowncart-billing/releases/tag/v0.1.6).
 macOS and Linux are community builds; a failed platform build may have no download.
 Releases are published automatically when a version tag is pushed; the
-[website download section](https://guna81.github.io/mytowncart-billing/#download)
+[website download section](https://billing.mytowncart.com/#download)
 follows the latest release and has install notes for each device
 ([how releases work](docs/RELEASING.md)).
 
@@ -155,6 +155,16 @@ shop has linked a MyTownCart account. Bills and customer data stay on the
 shop's PC. Backups are encrypted on the machine before being written to the
 chosen folder (encrypted local copies, not an upload). Diagnostics are off by
 default; when enabled they stay on the machine and redact keys and tokens.
+
+**Hosted web app ("Use in browser").** The browser version keeps the shop's
+data in that browser (IndexedDB) and requires signing in with a MyTownCart
+seller account. It then uploads an encrypted backup of the whole shop (bills
+and customers included) to that account automatically: soon after the first
+change, then at most every 30 minutes while there are changes, and after each
+day-end. The backup is encrypted in the browser with the shop's recovery key
+before upload, so MyTownCart stores only ciphertext and cannot read or restore
+it. Losing the recovery key makes those backups unrecoverable. Signing out
+makes a final backup and then removes the shop's data from that browser.
 
 ## Installing a release build
 

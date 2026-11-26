@@ -4,10 +4,13 @@ name: Deploy site to GitHub Pages
 # is called by release.yml right after it publishes a release. Each run writes
 # site/release.json from the latest published release so the download section
 # always shows the current version and only the installers that exist.
+#
+# It also builds the hosted web app (VITE_HOSTED=1, roadmap D2/D13) into
+# site/app/, so "Use in browser" always matches main.
 on:
   push:
     branches: [main]
-    paths: ['site/**', '.github/workflows/pages.yml']
+    paths: ['site/**', 'apps/web/**', 'packages/**', 'pnpm-lock.yaml', '.github/workflows/pages.yml']
   release:
     types: [published, edited, deleted]
   workflow_dispatch:
@@ -33,6 +36,17 @@ jobs:
         with:
           ref: main
       - uses: actions/configure-pages@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build the hosted web app into site/app
+        run: |
+          pnpm --filter @mytowncart-billing/web build:hosted
+          rm -rf site/app
+          cp -R apps/web/dist-hosted site/app
       - name: Write release.json from the latest published release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

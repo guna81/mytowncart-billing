@@ -142,6 +142,59 @@ export class Http {
     return bytes;
   }
 
+  /**
+   * Binary request/response on this API's own origin (encrypted backups).
+   * `target` is a path under the base URL, or an absolute URL the server
+   * returned; an absolute URL on any other origin is refused so the bearer
+   * token is never sent anywhere but the API.
+   */
+  async binary(
+    method: string,
+    target: string,
+    body?: Uint8Array,
+    extraHeaders?: Record<string, string>,
+  ): Promise<{ bytes: Uint8Array; json: unknown }> {
+    const url = this.sameOriginUrl(target);
+    let response: Response;
+    try {
+      response = await this.opts.fetch(url, {
+        method,
+        headers: this.headers(body === undefined ? extraHeaders : { "Content-Type": "application/octet-stream", ...extraHeaders }),
+        body: body === undefined ? undefined : (body as BodyInit),
+      });
+    } catch (err) {
+      throw new MarketplaceError(
+        "network_error",
+        err instanceof Error ? err.message : "Network request failed.",
+        0,
+      );
+    }
+    if (!response.ok) {
+      const payload = (await readJson(response)) as ErrorBody;
+      throw new MarketplaceError(
+        errorCode(response.status, payload),
+        errorMessage(response.status, payload),
+        response.status,
+        retryAfterSeconds(response),
+      );
+    }
+    const type = response.headers.get("Content-Type") ?? "";
+    if (type.includes("application/json")) {
+      return { bytes: new Uint8Array(), json: await readJson(response) };
+    }
+    return { bytes: new Uint8Array(await response.arrayBuffer()), json: null };
+  }
+
+  private sameOriginUrl(target: string): string {
+    if (!/^https?:\/\//i.test(target)) return this.url(target);
+    const base = new URL(this.opts.baseUrl);
+    const parsed = new URL(target);
+    if (parsed.origin !== base.origin) {
+      throw new MarketplaceError("validation_error", "Refusing to send credentials to another host.", 0);
+    }
+    return parsed.toString();
+  }
+
   async upload<T = void>(path: string, file: Blob, filename: string, extra?: Record<string, string>): Promise<T> {
     const form = new FormData();
     form.append("image", file, filename);

@@ -16,8 +16,26 @@ export default defineConfig(({ command, mode }) => {
       }
     }
   }
+  // Hosted web app (D2/D13): relative asset paths so it can live under any
+  // sub-path (e.g. GitHub Pages /mytowncart-billing/app/), plus the PWA manifest.
+  const hosted = process.env.VITE_HOSTED === "1";
+  const hostedHtml = {
+    name: "mtc-hosted-html",
+    transformIndexHtml(html: string) {
+      if (!hosted) return html;
+      return html
+        .replace('href="/brand/logo-mark.svg"', 'href="./brand/logo-mark.svg"')
+        .replace(
+          "</head>",
+          '    <link rel="manifest" href="./manifest.webmanifest" />\n' +
+            '    <meta name="theme-color" content="#2563eb" />\n' +
+            '    <link rel="apple-touch-icon" href="./pwa/icon-256.png" />\n  </head>',
+        );
+    },
+  };
   return {
-  plugins: [react(), tailwindcss()],
+  base: hosted ? "./" : "/",
+  plugins: [react(), tailwindcss(), hostedHtml],
   // Tauri expects a fixed dev port.
   server: { port: 5173 },
   clearScreen: false,

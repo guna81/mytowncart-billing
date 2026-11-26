@@ -3,6 +3,9 @@ node_modules/
 
 # Builds
 dist/
+dist-hosted/
+# Hosted web app, built into the Pages site by .github/workflows/pages.yml
+site/app/
 build/
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/

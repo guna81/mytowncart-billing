@@ -5,6 +5,7 @@
  * whole catalog. Item states are shown honestly — a hidden item or unapproved
  * store is never presented as "live".
  */
+import { isHosted } from "../lib/hosted/mode";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -529,14 +530,17 @@ export function MyTownCartScreen() {
                   {sellerIsApproved ? t("mtc.store_approved") : t("mtc.store_pending")}
                 </p>
               </div>
-              <button
-                type="button"
-                className={btnSecondary}
-                data-testid="mtc-disconnect"
-                onClick={() => void disconnect()}
-              >
-                {t("mtc.disconnect")}
-              </button>
+              {/* Hosted web app: sign-in is mandatory; sign out lives in Settings. */}
+              {isHosted() ? null : (
+                <button
+                  type="button"
+                  className={btnSecondary}
+                  data-testid="mtc-disconnect"
+                  onClick={() => void disconnect()}
+                >
+                  {t("mtc.disconnect")}
+                </button>
+              )}
             </div>
             {profileError ? (
               <p className="mt-2 text-sm text-red-600" data-testid="mtc-profile-error">

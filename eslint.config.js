@@ -7,12 +7,20 @@ export default tseslint.config(
     ignores: [
       "**/node_modules/**",
       "**/dist/**",
+      "**/dist-hosted/**",
       "**/build/**",
       "**/src-tauri/target/**",
       "**/src-tauri/gen/**",
     ],
   },
   js.configs.recommended,
+  {
+    // Hosted web app service worker (plain JS, runs in a ServiceWorker scope).
+    files: ["apps/web/public/sw.js"],
+    languageOptions: {
+      globals: { self: "readonly", caches: "readonly", fetch: "readonly", URL: "readonly" },
+    },
+  },
   ...tseslint.configs.recommended,
   {
     files: ["**/*.ts", "**/*.tsx"],

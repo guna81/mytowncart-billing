@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://guna81.github.io/mytowncart-billing/sitemap.xml
+Sitemap: https://billing.mytowncart.com/sitemap.xml

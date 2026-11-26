@@ -18,6 +18,12 @@
           "url": "https://guna81.github.io/mytowncart-billing"
         },
         {
+          "url": "https://billing.mytowncart.com/*"
+        },
+        {
+          "url": "https://billing.mytowncart.com"
+        },
+        {
           "url": "https://github.com/guna81/mytowncart-billing/releases/*"
         },
         { "url": "https://mytowncart.com/*" },

@@ -191,3 +191,42 @@ GitHub Actions, so it applied to the free SignPath Foundation programme.
 - **Fallbacks:** the Certum open-source certificate (check the live price), or
   reapply to SignPath once usage grows. macOS notarization stays out of scope
   (needs the paid Apple Developer Program).
+
+## B7-1 — Hosted web app: in-memory adapter persisted to IndexedDB
+**Date:** 2026-11-26 · **Implements:** roadmap D2 (un-deferred) and D13
+
+The hosted build (`VITE_HOSTED=1`, `build:hosted`) reuses `MemoryRepository`
+instead of a new IndexedDB adapter. `exportState()`/`importState()` capture
+every data field, and a Proxy writes the whole state to IndexedDB after each
+mutating call; the call resolves only after that write commits. This keeps one
+implementation of the repository semantics (already exercised by Vitest and
+Playwright) at the cost of rewriting the full state per change, which is fine
+for a small shop. Desktop, LAN and the dev server are unchanged.
+
+## B7-2 — Hosted web app: one tab, mandatory sign-in, owner lock
+**Date:** 2026-11-26
+
+- A Web Lock allows one open tab per browser; a second tab would hold its own
+  copy in memory and overwrite the first one's writes.
+- Sign-in uses the existing device-code flow and must grant `backups:write`.
+  The token and recovery key are sealed with a non-extractable AES-GCM key in
+  IndexedDB (never localStorage, state, backups or logs).
+- The browser records which seller's data it holds. Signing in as a different
+  seller while data is present is refused, so one shop's bills are never
+  backed up into another seller's account.
+- Sync runs in the hosted app too (`syncAvailable()`), coordinated by the
+  single-tab lock rather than the desktop's Rust coordinator.
+
+## B7-3 — Hosted cloud backup format and schedule
+**Date:** 2026-11-26
+
+Plaintext is `gzip("MTWS1" + JSON state)`; the envelope is the existing
+`MTCB1` AES-256-GCM/HKDF format with the same recovery key scheme (D5).
+`crypto_params.format = "web-state-v1"` marks these backups; desktop backups
+(`MTBD1` SQLite bundle) and web backups cannot be restored into each other.
+Schedule: about a minute after the first change, then at most every
+30 minutes while changes are pending (the server allows 48 per day), right
+after a day-end closure, and when the browser comes back online. A
+"pending" flag survives reloads. The server keeps the newest 10 plus the
+newest per day for 14 days.
+

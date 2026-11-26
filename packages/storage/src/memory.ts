@@ -69,6 +69,16 @@ interface MemoryPhoto {
   imageHash: string;
 }
 
+/**
+ * Every data field of a `MemoryRepository`, as plain structured-cloneable
+ * values (Maps, arrays, Uint8Arrays). The hosted web app persists this to
+ * IndexedDB and backs it up (D13); see `memoryState.ts` for the byte form.
+ */
+export type MemoryState = Record<string, unknown>;
+
+/** Fields that are not shop data and must never be exported or replaced. */
+const NON_STATE_FIELDS = new Set(["kind"]);
+
 export class MemoryRepository implements BillingRepository {
   readonly kind = "memory" as const;
 
@@ -111,6 +121,40 @@ export class MemoryRepository implements BillingRepository {
   private deliveries = new Map<number, import("./types").StockDeliveryClaim & { sourceId: number; externalId: string; status: "pending" | "done" | "quarantined"; claimUntil: string | null; nextAttemptAt: string | null }>();
   private cursors = new Map<string, string>();
   private appSettings = new Map<string, string>();
+
+  /**
+   * Snapshot of all data fields (live references — clone before mutating;
+   * IndexedDB `put` and `encodeMemoryState` both copy). Methods and `kind`
+   * are excluded, so new private fields are picked up automatically.
+   */
+  exportState(): MemoryState {
+    const out: MemoryState = {};
+    for (const [key, value] of Object.entries(this)) {
+      if (NON_STATE_FIELDS.has(key) || typeof value === "function") continue;
+      out[key] = value;
+    }
+    return out;
+  }
+
+  /**
+   * Replace this repository's data with a snapshot from `exportState`.
+   * Unknown keys are ignored; fields missing from an older snapshot keep
+   * their fresh defaults, so adding a field stays backward compatible.
+   */
+  importState(state: MemoryState): void {
+    const known = new Set(Object.keys(this));
+    for (const [key, value] of Object.entries(state)) {
+      if (NON_STATE_FIELDS.has(key) || !known.has(key)) continue;
+      const current = (this as unknown as Record<string, unknown>)[key];
+      if (typeof current === "function") continue;
+      if (key === "nextIds" && typeof value === "object" && value !== null) {
+        // Keep counters for id kinds added after the snapshot was taken.
+        (this as unknown as Record<string, unknown>)[key] = { ...(current as object), ...(value as object) };
+        continue;
+      }
+      (this as unknown as Record<string, unknown>)[key] = value;
+    }
+  }
 
   async getShopProfile(): Promise<ShopProfile | null> {
     return this.shopProfile;

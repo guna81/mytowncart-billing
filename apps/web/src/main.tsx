@@ -3,6 +3,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
+import { HostedGate } from "./components/hosted/HostedGate";
+import { isHosted } from "./lib/hosted/mode";
 import "./styles.css";
 
 const rootEl = document.getElementById("root");
@@ -12,6 +14,19 @@ if (!rootEl) {
 
 createRoot(rootEl).render(
   <StrictMode>
-    <App />
+    {isHosted() ? (
+      <HostedGate>
+        <App />
+      </HostedGate>
+    ) : (
+      <App />
+    )}
   </StrictMode>,
 );
+
+// Hosted web app: offline app shell (public/sw.js). Desktop and dev never register it.
+if (isHosted() && "serviceWorker" in navigator && window.isSecureContext) {
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("./sw.js").catch((err) => console.warn("service worker:", err));
+  });
+}

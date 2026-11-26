@@ -57,7 +57,7 @@ Checksums detect changed or incomplete downloads; they are not code signatures.
 ## Publish a new version
 
 Publishing is automatic once you push a tag. The download section of
-<https://guna81.github.io/mytowncart-billing/#download> updates itself.
+<https://billing.mytowncart.com/#download> updates itself.
 
 1. **Prepare on a branch, merge to `main`.** Run
    `python3 tooling/bump-version.py X.Y.Z`. It sets every `package.json`,
@@ -147,6 +147,6 @@ rebuild.
    features explicitly; publishing Pages does not change the installer.
 2. Check links, structure and desktop/mobile layout.
 3. Push `main`, watch **Deploy site to GitHub Pages**, then verify
-   <https://guna81.github.io/mytowncart-billing/#download>.
+   <https://billing.mytowncart.com/#download>.
 
 Preserve the stable download filenames.

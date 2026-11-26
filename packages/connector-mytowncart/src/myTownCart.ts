@@ -11,6 +11,8 @@ import type { SharedCatalogPage } from "./index";
 
 import { Http, MarketplaceError, retryAfterSeconds, type FetchLike } from "./http";
 import type {
+  CloudBackup,
+  CloudBackupMeta,
   ConnectSession,
   ConnectionToken,
   MarketplaceCategory,
@@ -739,4 +741,64 @@ export class MyTownCartConnector implements MarketplaceConnector {
     }
     return out;
   }
+
+  // --- Encrypted cloud backups (M5, D13) -----------------------------------
+  // The server only ever sees ciphertext; size + SHA-256 are verified on upload.
+
+  async uploadBackup(ciphertext: Uint8Array, meta: CloudBackupMeta): Promise<CloudBackup> {
+    const sha256 = await sha256Hex(ciphertext);
+    const created = await this.http.json<{ id: string; upload_url: string; upload_method?: string }>(
+      "POST", "/backups/", {
+        size_bytes: ciphertext.byteLength,
+        sha256,
+        app_version: meta.appVersion,
+        schema_version: meta.schemaVersion,
+        crypto_params: meta.cryptoParams,
+      },
+    );
+    const uploaded = await this.http.binary(created.upload_method ?? "PUT", created.upload_url, ciphertext);
+    return toCloudBackup(uploaded.json as CloudBackupWire);
+  }
+
+  async listBackups(): Promise<CloudBackup[]> {
+    const page = await this.http.json<{ results: CloudBackupWire[] }>("GET", "/backups/");
+    return page.results.map(toCloudBackup);
+  }
+
+  async downloadBackup(id: string): Promise<Uint8Array> {
+    const { bytes } = await this.http.binary("GET", `/backups/${encodeURIComponent(id)}/blob/`);
+    return bytes;
+  }
+
+  async deleteBackup(id: string): Promise<void> {
+    await this.http.json("DELETE", `/backups/${encodeURIComponent(id)}/`);
+  }
+
+}
+
+interface CloudBackupWire {
+  id: string;
+  size_bytes: number;
+  sha256: string;
+  app_version: string;
+  schema_version: number;
+  crypto_params: Record<string, string | number>;
+  created_at: string;
+}
+
+function toCloudBackup(w: CloudBackupWire): CloudBackup {
+  return {
+    id: w.id,
+    sizeBytes: w.size_bytes,
+    sha256: w.sha256,
+    appVersion: w.app_version,
+    schemaVersion: w.schema_version,
+    cryptoParams: w.crypto_params ?? {},
+    createdAt: w.created_at,
+  };
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource));
+  return [...digest].map((b) => b.toString(16).padStart(2, "0")).join("");
 }

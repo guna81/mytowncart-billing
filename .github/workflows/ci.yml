@@ -67,6 +67,9 @@ jobs:
       - name: Build web UI
         run: pnpm build
 
+      - name: Build hosted web app (VITE_HOSTED=1)
+        run: pnpm --filter @mytowncart-billing/web build:hosted
+
       - name: Rust tests (migrations runner, keychain validation)
         working-directory: apps/desktop/src-tauri
         run: cargo test --locked

@@ -239,6 +239,23 @@ export interface RemoteProductImage {
  * The marketplace-agnostic connector contract (D6). MyTownCart is the first
  * implementation; every request sends `X-App-Version` (§8.4).
  */
+/** One encrypted backup stored on the marketplace (ciphertext only, D5/D13). */
+export interface CloudBackup {
+  id: string;
+  sizeBytes: number;
+  sha256: string;
+  appVersion: string;
+  schemaVersion: number;
+  cryptoParams: Record<string, string | number>;
+  createdAt: string;
+}
+
+export interface CloudBackupMeta {
+  appVersion: string;
+  schemaVersion: number;
+  cryptoParams: Record<string, string | number>;
+}
+
 export interface MarketplaceConnector {
   connect(clientName: string, scopes: Scope[]): Promise<ConnectSession>;
   me(): Promise<MarketplaceProfile>;
