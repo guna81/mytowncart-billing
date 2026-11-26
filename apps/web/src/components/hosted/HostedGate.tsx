@@ -111,12 +111,16 @@ export function HostedGate({ children }: { children: ReactNode }) {
   const freshRef = useRef(false);
   const autoRestoreTriedRef = useRef(false);
   const stopSchedulerRef = useRef<(() => void) | null>(null);
+  const bootRunIdRef = useRef(0);
 
   const boot = useCallback(async () => {
+    const runId = ++bootRunIdRef.current;
+    const isStale = () => bootRunIdRef.current !== runId;
     setPhase({ kind: "checking" });
     if (isDemo()) {
       const demo = new MemoryRepository();
       await seedDemoData(demo);
+      if (isStale()) return;
       setRepository(demo);
       setPhase({ kind: "demo" });
       return;
@@ -126,9 +130,10 @@ export function HostedGate({ children }: { children: ReactNode }) {
     try {
       persistedRef.current ??= await openPersistedRepository();
     } catch {
-      setPhase({ kind: "storage_failed" });
+      if (!isStale()) setPhase({ kind: "storage_failed" });
       return;
     }
+    if (isStale()) return;
     const persisted = persistedRef.current;
     setRepository(persisted.repo);
     setHostedRepository(persisted);
@@ -136,6 +141,7 @@ export function HostedGate({ children }: { children: ReactNode }) {
     if (hasOAuthCallback()) {
       try {
         const result = await finishHostedOAuthCallback(persisted);
+        if (isStale()) return;
         if (!result.ok) {
           if (result.otherShop) {
             setPhase({ kind: "other_shop" });
@@ -149,26 +155,31 @@ export function HostedGate({ children }: { children: ReactNode }) {
           return;
         }
       } catch (err) {
-        setPhase({ kind: "signin", error: t("hosted.signin_failed", { message: errorText(err) }) });
+        if (!isStale()) setPhase({ kind: "signin", error: t("hosted.signin_failed", { message: errorText(err) }) });
         return;
       }
     }
 
     if (!(await loadConnection({ force: true }))) {
-      setPhase({ kind: "signin" });
+      if (!isStale()) setPhase({ kind: "signin" });
       return;
     }
+    if (isStale()) return;
     if ((await persisted.isEmpty()) && !freshRef.current) {
+      if (isStale()) return;
       try {
         const backups = await listWebBackups();
+        if (isStale()) return;
         if (backups.length > 0) {
           const server = await serverKeySetting();
+          if (isStale()) return;
           const newest = backups[0]!;
           if (server?.key && !autoRestoreTriedRef.current) {
             // Managed key: bring the shop back with nothing to type.
             autoRestoreTriedRef.current = true;
             setPhase({ kind: "restoring" });
             const opened = await downloadAndOpen(newest.id, server.key);
+            if (isStale()) return;
             if (opened.ok) {
               await writeRepositoryState(opened.state);
               await rememberRestoredKey(opened.key, "managed", true);
@@ -180,6 +191,7 @@ export function HostedGate({ children }: { children: ReactNode }) {
           return;
         }
       } catch (err) {
+        if (isStale()) return;
         if (isAuthError(err)) {
           await clearConnection();
           return;
@@ -190,10 +202,11 @@ export function HostedGate({ children }: { children: ReactNode }) {
     }
     try {
       if ((await ensureBackupKey()) === "private_setup") {
-        setPhase({ kind: "key_setup" });
+        if (!isStale()) setPhase({ kind: "key_setup" });
         return;
       }
     } catch (err) {
+      if (isStale()) return;
       if (isAuthError(err)) {
         await clearConnection();
         return;
@@ -201,9 +214,11 @@ export function HostedGate({ children }: { children: ReactNode }) {
       setPhase({ kind: "backups_failed", message: errorText(err) });
       return;
     }
+    if (isStale()) return;
     if (!stopSchedulerRef.current) {
       stopSchedulerRef.current = await startCloudBackupScheduler(persisted, () => void clearConnection());
     }
+    if (isStale()) return;
     setPhase({ kind: "ready" });
   }, []);
 
@@ -225,6 +240,7 @@ export function HostedGate({ children }: { children: ReactNode }) {
     });
     window.addEventListener(HOSTED_SIGNED_OUT_EVENT, onSignedOut);
     return () => {
+      bootRunIdRef.current++;
       window.removeEventListener(HOSTED_SIGNED_OUT_EVENT, onSignedOut);
       stopTabEvents();
       stopSchedulerRef.current?.();

@@ -25,7 +25,7 @@ import { dataOwner, setDataOwner } from "./session";
 import { broadcastTabEvent } from "./tabSync";
 
 const OAUTH_SCOPES: readonly Scope[] = ["catalog", "stock", "orders", "backups"];
-const PENDING_KEY = "mtc.hosted.oauth.pending";
+const PENDING_IDB_KEY = "oauth.pending";
 const CLIENT_CACHE_KEY = "oauth.client";
 const REFRESH_LOCK_NAME = "mytowncart-billing-token-refresh";
 const PENDING_MAX_AGE_MS = 15 * 60_000;
@@ -37,6 +37,8 @@ interface PendingOAuth {
   redirectUri: string;
   createdAt: number;
 }
+
+type PendingOAuthMap = Record<string, PendingOAuth>;
 
 interface CachedOAuthClient {
   apiBaseUrl: string;
@@ -92,6 +94,19 @@ async function getOrRegisterClientId(redirectUri: string): Promise<string> {
   return clientId;
 }
 
+async function savePendingOAuth(pending: PendingOAuth): Promise<void> {
+  const now = Date.now();
+  const existing = (await idbGet<PendingOAuthMap>(PENDING_IDB_KEY)) ?? {};
+  const next: PendingOAuthMap = {};
+  for (const [key, entry] of Object.entries(existing)) {
+    if (entry && typeof entry.createdAt === "number" && now - entry.createdAt <= PENDING_MAX_AGE_MS) {
+      next[key] = entry;
+    }
+  }
+  next[pending.state] = pending;
+  await idbSet(PENDING_IDB_KEY, next);
+}
+
 /**
  * Start the OAuth Authorization Code + PKCE sign-in by redirecting the current
  * tab to MyTownCart's `/oauth/authorize/` endpoint.
@@ -110,7 +125,7 @@ export async function startHostedOAuthSignIn(): Promise<void> {
     redirectUri,
     createdAt: Date.now(),
   };
-  sessionStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+  await savePendingOAuth(pending);
 
   const authorizeUrl = getConnector().buildOAuthAuthorizeUrl({
     clientId,
@@ -122,8 +137,11 @@ export async function startHostedOAuthSignIn(): Promise<void> {
   window.location.assign(authorizeUrl);
 }
 
-/** True when the current URL query string carries an OAuth callback response. */
+let inflightCallback: Promise<OAuthCallbackResult> | null = null;
+
+/** True when the current URL carries an OAuth callback response (or one is in flight). */
 export function hasOAuthCallback(): boolean {
+  if (inflightCallback !== null) return true;
   if (typeof window === "undefined") return false;
   const params = new URLSearchParams(window.location.search);
   return params.has("code") || params.has("error");
@@ -139,23 +157,31 @@ function stripOAuthParamsFromUrl(): void {
   window.history.replaceState({}, "", clean);
 }
 
-function takePendingOAuth(): PendingOAuth | null {
+async function takePendingOAuth(state: string | null): Promise<PendingOAuth | null> {
+  if (!state) return null;
   try {
-    const raw = sessionStorage.getItem(PENDING_KEY);
-    sessionStorage.removeItem(PENDING_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<PendingOAuth>;
+    const existing = (await idbGet<PendingOAuthMap>(PENDING_IDB_KEY)) ?? {};
+    const entry = existing[state];
+    const now = Date.now();
+    const next: PendingOAuthMap = {};
+    for (const [key, item] of Object.entries(existing)) {
+      if (key !== state && item && typeof item.createdAt === "number" && now - item.createdAt <= PENDING_MAX_AGE_MS) {
+        next[key] = item;
+      }
+    }
+    await idbSet(PENDING_IDB_KEY, next);
     if (
-      typeof parsed.state !== "string" ||
-      typeof parsed.codeVerifier !== "string" ||
-      typeof parsed.clientId !== "string" ||
-      typeof parsed.redirectUri !== "string" ||
-      typeof parsed.createdAt !== "number"
+      !entry ||
+      typeof entry.state !== "string" ||
+      typeof entry.codeVerifier !== "string" ||
+      typeof entry.clientId !== "string" ||
+      typeof entry.redirectUri !== "string" ||
+      typeof entry.createdAt !== "number"
     ) {
       return null;
     }
-    if (Date.now() - parsed.createdAt > PENDING_MAX_AGE_MS) return null;
-    return parsed as PendingOAuth;
+    if (now - entry.createdAt > PENDING_MAX_AGE_MS) return null;
+    return entry;
   } catch {
     return null;
   }
@@ -165,7 +191,18 @@ function takePendingOAuth(): PendingOAuth | null {
  * Consume the OAuth callback query parameters, exchange the code for tokens,
  * verify scopes and shop ownership, and persist the connection.
  */
-export async function finishHostedOAuthCallback(
+export function finishHostedOAuthCallback(
+  persisted: PersistedRepository | null,
+): Promise<OAuthCallbackResult> {
+  if (!inflightCallback) {
+    inflightCallback = runFinishHostedOAuthCallback(persisted).finally(() => {
+      inflightCallback = null;
+    });
+  }
+  return inflightCallback;
+}
+
+async function runFinishHostedOAuthCallback(
   persisted: PersistedRepository | null,
 ): Promise<OAuthCallbackResult> {
   const params = new URLSearchParams(window.location.search);
@@ -176,7 +213,7 @@ export async function finishHostedOAuthCallback(
 
   // Always clean the URL immediately so a reload never replays the code.
   stripOAuthParamsFromUrl();
-  const pending = takePendingOAuth();
+  const pending = await takePendingOAuth(state);
 
   if (errorParam) {
     return {
