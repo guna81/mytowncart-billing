@@ -3,7 +3,8 @@
  * Hosted web app mode (roadmap D2, D13): the same UI served as static files,
  * data in the browser's IndexedDB, MyTownCart sign-in mandatory, and an
  * automatic client-side-encrypted cloud backup. Chosen at build time with
- * `VITE_HOSTED=1` (`pnpm --filter @mytowncart-billing/web build:hosted`), so
+ * `VITE_HOSTED=1` (`pnpm --filter @mytowncart-billing/web build:hosted` builds
+ * with `--mode hosted`, which sets it in vite.config.ts), so
  * the desktop build, the LAN browser and the dev server are unchanged.
  */
 

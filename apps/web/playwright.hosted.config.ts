@@ -15,7 +15,8 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: "VITE_HOSTED=1 pnpm dev --port 5180",
+    command: "pnpm dev --port 5180",
+    env: { VITE_HOSTED: "1" },
     url: "http://localhost:5180",
     reuseExistingServer: false,
     timeout: 30000,

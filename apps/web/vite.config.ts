@@ -4,7 +4,12 @@ import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, loadEnv } from "vite";
 
 export default defineConfig(({ command, mode }) => {
-  const env = loadEnv(mode, process.cwd(), "VITE_MTC_");
+  // `--mode hosted` (build:hosted) is a production build of the hosted web app.
+  // A mode, not an inline `VITE_HOSTED=1 vite build`, so the script also runs
+  // on Windows. Vite reads VITE_* from process.env after this function runs,
+  // so the app sees import.meta.env.VITE_HOSTED === "1".
+  if (mode === "hosted") process.env.VITE_HOSTED = "1";
+  const env = loadEnv(mode === "hosted" ? "production" : mode, process.cwd(), "VITE_MTC_");
   if (command === "build") {
     const allowed: Record<string, string> = {
       VITE_MTC_API_URL: "https://api.mytowncart.com/api/v1/integrations",
